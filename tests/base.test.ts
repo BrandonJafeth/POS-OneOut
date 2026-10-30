@@ -1,92 +1,75 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { bitacora, listarBitacora, registrar } from "../src/db/bitacora";
-import { CAJA_1, obtenerCaja, tomarConsecutivo } from "../src/db/cajas";
+import { bitacora } from "../src/db/bitacora";
+import { obtenerCaja } from "../src/db/cajas";
 import { db } from "../src/db/conexion";
-import { guardarConfig, leerConfig } from "../src/db/config";
-import type { Actor } from "../src/tipos";
-import { baseDePrueba } from "./driverNode";
+import { leerConfig } from "../src/db/config";
+import type { DatabaseSync } from "node:sqlite";
+import { baseDePrueba, entradasBitacora } from "./driverNode";
 
-const TECNICO: Actor = { id: "01TECNICO00000000000000000", rol: "tecnico" };
-
-beforeEach(async () => {
-  baseDePrueba();
-  await db().execute("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES (?, 'Técnico', 'tecnico', 'x')", [TECNICO.id]);
+let sqlite: DatabaseSync;
+beforeEach(() => {
+  sqlite = baseDePrueba({ rol: "tecnico" }).sqlite;
 });
 
-describe("migración inicial", () => {
-  it("siembra sucursal, caja, 12 departamentos y config", async () => {
+describe("migraciones", () => {
+  it("siembran sucursal, caja, 12 departamentos y config", async () => {
     expect(await db().select("SELECT nombre FROM sucursales")).toEqual([{ nombre: "Principal" }]);
-    const caja = await obtenerCaja();
-    expect(caja).toMatchObject({ nombre: "Caja 1", prefijoTiquete: "", consecutivoSiguiente: 67791 });
+    expect(await obtenerCaja()).toMatchObject({ nombre: "Caja 1", prefijoTiquete: "", consecutivoSiguiente: 67791 });
     const deps = await db().select("SELECT codigo FROM departamentos ORDER BY orden");
     expect(deps.map((d) => d.codigo)).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]);
-    const c = await leerConfig();
-    expect(c).toMatchObject({
-      usa_apartados: true,
-      usa_credito: false,
-      abono_minimo_pct: 50,
-      escaner_debounce_ms: 400,
-      imprime_tiquete: true,
-      imprime_tiquetes_departamento: false,
-    });
+    expect(await leerConfig()).toMatchObject({ usa_apartados: true, imprime_tiquete: true, caja_umbral_diferencia: 1000, pin_min_dueno: 6 });
   });
 
-  it("crea las tablas de fases siguientes", async () => {
-    const tablas = (await db().select("SELECT name FROM sqlite_master WHERE type = 'table'")).map((t) => t.name);
-    for (const t of ["formas_pago", "bancos", "clientes", "ventas", "venta_lineas", "venta_pagos", "venta_pago_correcciones", "cuentas", "cuenta_lineas", "abonos", "caja_turnos", "caja_movimientos"])
-      expect(tablas).toContain(t);
+  it("crean las tablas de caja y los triggers de seguridad", () => {
+    const nombres = (tipo: string) => (sqlite.prepare("SELECT name FROM sqlite_master WHERE type = ?").all(tipo) as { name: string }[]).map((t) => t.name);
+    for (const t of ["ventas", "venta_pagos", "caja_turnos", "caja_movimientos", "caja_ajustes"]) expect(nombres("table")).toContain(t);
+    for (const t of ["bitacora_sin_update", "bitacora_sin_delete", "bitacora_con_hash", "venta_pagos_turno_cerrado_upd", "ventas_montos_turno_cerrado"])
+      expect(nombres("trigger")).toContain(t);
   });
 
-  it("aplica claves foráneas", async () => {
-    await expect(
-      db().execute("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('P', 'x', 'x', 'NO-EXISTE', 1)"),
-    ).rejects.toThrow();
+  it("aplican claves foráneas", () => {
+    expect(() => sqlite.prepare("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('P', 'x', 'x', 'NO-EXISTE', 1)").run()).toThrow();
   });
 });
 
-describe("consecutivo por caja", () => {
-  it("entrega números seguidos desde 67791 y avanza la caja", async () => {
-    expect(await tomarConsecutivo()).toEqual({ consecutivo: 67791, numero: "67791" });
-    expect(await tomarConsecutivo()).toEqual({ consecutivo: 67792, numero: "67792" });
-    expect((await obtenerCaja())?.consecutivoSiguiente).toBe(67793);
+describe("la pantalla no puede pedir SQL arbitrario", () => {
+  it("lectura: un solo SELECT y nunca usuarios, clientes ni bitácora", async () => {
+    for (const malo of [
+      "DELETE FROM productos",
+      "SELECT 1; DROP TABLE ventas",
+      "SELECT pin_hash FROM usuarios",
+      "SELECT * FROM clientes",
+      "SELECT * FROM bitacora",
+      "PRAGMA key = 'x'",
+      "UPDATE config SET valor = '100' WHERE clave = 'descuento_max_pct'",
+    ])
+      await expect(db().select(malo)).rejects.toThrow("rechazada");
   });
 
-  it("usa el prefijo de la caja y cada caja numera aparte", async () => {
-    await db().execute(
-      "INSERT INTO cajas (id, sucursal_id, nombre, prefijo_tiquete, consecutivo_siguiente) VALUES ('C2', '0000000000000000000000S001', 'Caja 2', 'B-', 1)",
-    );
-    expect((await tomarConsecutivo("C2")).numero).toBe("B-1");
-    expect((await tomarConsecutivo(CAJA_1)).numero).toBe("67791");
-    expect((await tomarConsecutivo("C2")).numero).toBe("B-2");
-  });
-
-  it("falla con una caja inexistente", async () => {
-    await expect(tomarConsecutivo("NO")).rejects.toThrow("Caja no encontrada");
+  it("escritura: solo operaciones del registro, con permiso", async () => {
+    await expect(db().lote([{ id: "DELETE FROM ventas" }])).rejects.toThrow("desconocida");
+    baseDePrueba({ rol: "cajero" });
+    await expect(db().lote([{ id: "producto.crear", params: ["P1", "Lápiz", "lapiz", "00000000000000000000000D01", 350, 1, null, 13, 0, "x", "x"] }])).rejects.toThrow("permiso");
   });
 });
 
 describe("bitácora", () => {
-  it("registrar escribe usuario, acción, entidad y detalle JSON", async () => {
-    await registrar(TECNICO.id, "login.fallido", "usuario", TECNICO.id, { intentos: 1 });
-    const [e] = await listarBitacora();
-    expect(e).toMatchObject({ usuarioId: TECNICO.id, usuario: "Técnico", accion: "login.fallido", entidad: "usuario", detalle: { intentos: 1 } });
-    expect(e.id).toHaveLength(26);
+  it("se escribe con el usuario de la sesión, encadenada", async () => {
+    await db().lote([bitacora("OTRO-USUARIO", "login.fallido", "usuario", "X", { intentos: 1 })]);
+    const [e] = await entradasBitacora();
+    expect(e).toMatchObject({ usuarioId: "U-PRUEBA", accion: "login.fallido", detalle: { intentos: 1 } });
+    expect((sqlite.prepare("SELECT hash FROM bitacora").get() as { hash: string }).hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("se escribe en el mismo lote que el cambio: si el cambio falla, no queda registro", async () => {
-    await expect(
-      db().lote([bitacora(TECNICO.id, "config.cambiar", "config", "x"), { sql: "INSERT INTO tabla_que_no_existe VALUES (1)" }]),
-    ).rejects.toThrow();
-    expect(await listarBitacora()).toHaveLength(0);
+  it("va en el mismo lote que el cambio: si el cambio falla, no queda registro", async () => {
+    await expect(db().lote([bitacora(null, "config.cambiar", "config", "x"), { id: "no.existe" }])).rejects.toThrow();
+    expect(await entradasBitacora()).toHaveLength(0);
   });
 
-  it("cambiar config deja antes y después", async () => {
-    await guardarConfig(TECNICO, "escaner_debounce_ms", 250);
-    expect((await leerConfig()).escaner_debounce_ms).toBe(250);
-    const [e] = await listarBitacora();
-    expect(e).toMatchObject({ accion: "config.cambiar", entidadId: "escaner_debounce_ms", detalle: { antes: 400, despues: 250 } });
-    // Guardar el mismo valor no ensucia la bitácora.
-    await guardarConfig(TECNICO, "escaner_debounce_ms", 250);
-    expect(await listarBitacora()).toHaveLength(1);
+  it("no se edita ni se borra, ni se inserta sin hash", () => {
+    sqlite.prepare("INSERT INTO bitacora (id, fecha, accion, entidad, detalle, hash) VALUES ('B1', 'x', 'a', 'e', '{}', 'h')").run();
+    expect(() => sqlite.prepare("UPDATE bitacora SET detalle = '{\"x\":1}'").run()).toThrow("no se puede modificar");
+    expect(() => sqlite.prepare("DELETE FROM bitacora").run()).toThrow("no se puede borrar");
+    expect(() => sqlite.prepare("INSERT INTO bitacora (id, fecha, accion, entidad, detalle) VALUES ('B2', 'x', 'a', 'e', '{}')").run()).toThrow();
   });
 });

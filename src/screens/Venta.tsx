@@ -3,7 +3,7 @@
 // Atajos: F2 nueva venta en espera · F3 buscar · F4 venta simple (precio libre) · F7 cliente ·
 // F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · ↑↓ elegir.
 // "3*código" agrega 3 unidades.
-import { Banknote, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
+import { Banknote, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
@@ -12,7 +12,7 @@ import PinDueno from "../components/PinDueno";
 import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { buscarProductos, marcarFavorito, productoPorCodigo } from "../db/productos";
-import { cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
+import { autorizarDescuento, cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
 import { leerMontoEntero } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
@@ -27,6 +27,7 @@ import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
+import { AbrirCaja } from "./caja/Dialogos";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | null;
 const FAVORITOS = "★";
@@ -43,8 +44,9 @@ function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | 
 }
 
 export default function Venta() {
-  const { actor, config, puede } = useSesion();
+  const { actor, config, puede, caja, recargarCaja, irA } = useSesion();
   const confirmar = useConfirmar();
+  const [abrirCaja, setAbrirCaja] = useState(false);
   const [esperas, setEsperas] = useState<VentaEspera[]>([]);
   const [activaId, setActivaId] = useState<string | null>(null);
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
@@ -244,7 +246,7 @@ export default function Venta() {
       }))
     )
       return;
-    await descartarEspera(actor, e.id, config.redondeo_total);
+    await descartarEspera(actor, e.id);
     const resto = esperasRef.current.filter((x) => x.id !== e.id);
     if (!resto.length) resto.push(await crearEspera(actor, estadoVacio()));
     ponerEsperas(resto);
@@ -343,6 +345,37 @@ export default function Venta() {
   }, [estado.lineas]);
   const articulos = estado.lineas.reduce((s, l) => s + l.cantidad, 0);
   const puedeFavoritos = puede("productos");
+
+  // Sin caja abierta de hoy no se vende (Rust también lo rechaza al cobrar).
+  if (caja && (!caja.turno || caja.deOtroDia))
+    return (
+      <div className="screen centro">
+        <section className="card login-card">
+          {caja.deOtroDia ? (
+            <>
+              <h1>Quedó abierta la caja del {caja.turno?.dia}</h1>
+              <p className="muted">Ciérrela con el conteo del efectivo antes de vender hoy.</p>
+              <Button variante="primario" tamano="lg" icono={Landmark} ancho onClick={() => irA("caja")}>
+                Ir a cerrar la caja
+              </Button>
+            </>
+          ) : (
+            <>
+              <h1>La caja está cerrada</h1>
+              <p className="muted">Ábrala contando el fondo para empezar a vender.</p>
+              {puede("caja") ? (
+                <Button variante="primario" tamano="lg" icono={LockOpen} ancho onClick={() => setAbrirCaja(true)}>
+                  Abrir caja
+                </Button>
+              ) : (
+                <Alert tono="aviso">Pida a un cajero o al dueño que abra la caja.</Alert>
+              )}
+            </>
+          )}
+        </section>
+        {abrirCaja && <AbrirCaja estado={caja} onCerrar={() => setAbrirCaja(false)} onAbierta={() => (setAbrirCaja(false), void recargarCaja())} />}
+      </div>
+    );
 
   return (
     <div className="venta">
@@ -539,11 +572,13 @@ export default function Venta() {
       {dialogo === "cobro" && <Cobro total={t.total} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
       {pendiente && (
         <PinDueno
-          contexto="descuento"
           motivo={`El descuento (${calcularTotales(pendiente, config.redondeo_total).pctDescuento.toFixed(1)} %) pasa su máximo de ${tope} %.`}
           onCerrar={() => setPendiente(null)}
-          onAutorizado={(d) => {
-            actualizar({ ...pendiente, autorizacion: { duenoId: d.id, pct: calcularTotales(pendiente, config.redondeo_total).pctDescuento } });
+          onPin={async (pin) => {
+            if (!activaId) return;
+            // Rust verifica el PIN y emite un permiso de un solo uso para esta venta y este %.
+            const a = await autorizarDescuento(activaId, calcularTotales(pendiente, config.redondeo_total).pctDescuento, pin);
+            actualizar({ ...pendiente, autorizacion: a });
             setPendiente(null);
           }}
         />

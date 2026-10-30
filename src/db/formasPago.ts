@@ -47,11 +47,7 @@ export async function guardarFormaPago(actor: Actor, f: Omit<FormaPago, "id"> & 
   const ahora = ahoraIso();
   await db().lote([
     {
-      sql: `INSERT INTO formas_pago (id, codigo, nombre, tipo, requiere_banco, requiere_referencia, da_vuelto, pide_ultimos4, orden, activo, creado_en, actualizado_en)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET codigo = excluded.codigo, nombre = excluded.nombre, tipo = excluded.tipo,
-              requiere_banco = excluded.requiere_banco, requiere_referencia = excluded.requiere_referencia, da_vuelto = excluded.da_vuelto,
-              pide_ultimos4 = excluded.pide_ultimos4, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en`,
+      id: "forma_pago.guardar",
       params: [id, f.codigo.toUpperCase(), f.nombre.trim(), f.tipo, f.requiereBanco, f.requiereReferencia, f.daVuelto, f.pideUltimos4, f.orden, f.activo, ahora, ahora],
     },
     bitacora(actor.id, "forma_pago.guardar", "forma_pago", id, { ...f, id }),
@@ -66,8 +62,7 @@ export async function guardarBanco(actor: Actor, b: Omit<Banco, "id"> & { id?: s
   const ahora = ahoraIso();
   await db().lote([
     {
-      sql: `INSERT INTO bancos (id, nombre, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en`,
+      id: "banco.guardar",
       params: [id, b.nombre.trim(), b.orden, b.activo, ahora, ahora],
     },
     bitacora(actor.id, "banco.guardar", "banco", id, { ...b, id }),

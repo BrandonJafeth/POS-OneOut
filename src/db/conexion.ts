@@ -1,21 +1,22 @@
-// Conexión abstracta: el resto de src/db no sabe si habla con tauri-plugin-sql (la app)
-// o con node:sqlite (las pruebas). Cambiar de almacenamiento = escribir otro Driver.
+// Conexión abstracta: el resto de src/db no sabe si habla con Rust (la app) o con node:sqlite
+// (las pruebas). La pantalla NO manda SQL de escritura: pide operaciones por nombre del registro
+// src/db/sentencias.json, y Rust pone el SQL y revisa el permiso contra la sesión.
 
 export type Valor = string | number | boolean | null | Uint8Array;
 
+/** Una operación del registro (src/db/sentencias.json) con sus parámetros. */
 export interface Sentencia {
-  sql: string;
+  id: string;
   params?: Valor[];
 }
 
 export type Fila = Record<string, unknown>;
 
 export interface Driver {
+  /** Una consulta SELECT (Rust la valida y la corre en modo solo lectura). */
   select(sql: string, params?: Valor[]): Promise<Fila[]>;
-  /** Una sentencia de escritura; devuelve filas afectadas. */
-  execute(sql: string, params?: Valor[]): Promise<number>;
-  /** Varias sentencias en UNA transacción: todas o ninguna. */
-  lote(sentencias: Sentencia[]): Promise<number[]>;
+  /** Varias operaciones en UNA transacción: todas o ninguna. Por cada una: filas afectadas, o filas devueltas. */
+  lote(sentencias: Sentencia[]): Promise<unknown[]>;
 }
 
 let actual: Driver | null = null;
@@ -42,7 +43,7 @@ export function textoONull(v: unknown): string | null {
   return v == null ? null : String(v);
 }
 
-/** BLOB: el plugin lo devuelve como arreglo de números; node:sqlite como Uint8Array. */
+/** BLOB: Rust lo devuelve como arreglo de números; node:sqlite como Uint8Array. */
 export function bytes(v: unknown): Uint8Array | null {
   if (v == null) return null;
   if (v instanceof Uint8Array) return v;

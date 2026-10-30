@@ -1,187 +1,87 @@
-// Usuarios, PIN y sesión. El hash lo calcula Rust (Argon2id); aquí se inyecta como Hasher
-// para que las pruebas puedan usar uno falso sin Tauri.
+// Usuarios, PIN y sesión: todo lo decide Rust (src-tauri/src/usuarios.rs y lib.rs).
+// El PIN nunca se guarda en la pantalla; la sesión vive en Rust y vence por inactividad.
 import type { Actor, Rol, Usuario } from "../tipos";
-import { esperaTrasFallos, esperaRestante, PIN_VALIDO } from "../lib/bloqueo";
-import { rolesAdministrables, SinPermiso } from "../lib/permisos";
-import { ahoraIso, normalizar } from "../lib/texto";
-import { ulid } from "../lib/ulid";
-import { bitacora } from "./bitacora";
-import { bool, db, textoONull } from "./conexion";
+import { invocar } from "../lib/invocar";
 
-export interface Hasher {
-  hash(pin: string): Promise<string>;
-  verificar(pin: string, hash: string): Promise<boolean>;
+export function listarUsuarios(): Promise<Usuario[]> {
+  return invocar<Usuario[]>("usuarios_listar");
 }
 
-let hasher: Hasher | null = null;
-export function usarHasher(h: Hasher): void {
-  hasher = h;
-}
-function h(): Hasher {
-  if (!hasher) throw new Error("Hasher de PIN no configurado");
-  return hasher;
+/** Para la pantalla de entrada (sin el técnico, que entra por el atajo oculto). */
+export function usuariosParaEntrar(): Promise<Pick<Usuario, "id" | "nombre" | "rol">[]> {
+  return invocar("sesion_usuarios");
 }
 
-function aUsuario(f: Record<string, unknown>): Usuario {
-  return {
-    id: String(f.id),
-    nombre: String(f.nombre),
-    rol: f.rol as Rol,
-    activo: bool(f.activo),
-    intentosFallidos: Number(f.intentos_fallidos ?? 0),
-    bloqueadoHasta: textoONull(f.bloqueado_hasta),
-  };
+export interface EstadoSistema {
+  error: string | null;
+  necesitaTecnico: boolean;
+  cifrada: boolean;
+  nombreNegocio: string;
+  tema: unknown;
+  colorAcento: unknown;
+  /** Carpeta de datos (base, clave protegida y respaldos). */
+  carpeta: string;
 }
 
-const ORDEN_ROL = "CASE rol WHEN 'tecnico' THEN 0 WHEN 'dueno' THEN 1 ELSE 2 END";
-
-export async function listarUsuarios(opc: { incluirTecnico?: boolean; soloActivos?: boolean } = {}): Promise<Usuario[]> {
-  const filas = await db().select(
-    `SELECT * FROM usuarios WHERE eliminado_en IS NULL
-     ${opc.incluirTecnico ? "" : "AND rol <> 'tecnico'"} ${opc.soloActivos ? "AND activo = 1" : ""}
-     ORDER BY ${ORDEN_ROL}, nombre`,
-  );
-  return filas.map(aUsuario);
+export function estadoSistema(): Promise<EstadoSistema> {
+  return invocar<EstadoSistema>("sistema_estado");
 }
 
-export async function obtenerUsuario(id: string): Promise<Usuario | null> {
-  const f = (await db().select("SELECT * FROM usuarios WHERE id = ? AND eliminado_en IS NULL", [id]))[0];
-  return f ? aUsuario(f) : null;
+/** El usuario técnico del primer arranque (Rust lo rechaza si ya existe). Después hay que entrar con su PIN. */
+export async function crearTecnicoInicial(pin: string): Promise<void> {
+  await invocar("sistema_crear_tecnico", { pin });
 }
 
-export async function tecnico(): Promise<Usuario | null> {
-  const f = (await db().select("SELECT * FROM usuarios WHERE rol = 'tecnico' AND eliminado_en IS NULL LIMIT 1"))[0];
-  return f ? aUsuario(f) : null;
+export function crearUsuario(_actor: Actor, datos: { nombre: string; rol: Rol; pin: string }): Promise<Usuario> {
+  return invocar<Usuario>("usuarios_crear", datos);
 }
 
-function validarPin(pin: string) {
-  if (!PIN_VALIDO.test(pin)) throw new Error("El PIN debe tener de 4 a 8 números");
+export async function editarUsuario(_actor: Actor, id: string, cambios: { nombre?: string; activo?: boolean }): Promise<void> {
+  await invocar("usuarios_editar", { id, nombre: cambios.nombre ?? null, activo: cambios.activo ?? null });
 }
 
-async function validarNombre(nombre: string, excluirId?: string) {
-  if (!nombre.trim()) throw new Error("Escriba el nombre");
-  const otros = await listarUsuarios({ incluirTecnico: true });
-  if (otros.some((u) => u.id !== excluirId && normalizar(u.nombre) === normalizar(nombre)))
-    throw new Error("Ya existe un usuario con ese nombre");
-}
-
-/** El usuario técnico del primer arranque (solo si todavía no existe). */
-export async function crearTecnicoInicial(pin: string): Promise<Usuario> {
-  if (await tecnico()) throw new Error("El usuario técnico ya existe");
-  validarPin(pin);
-  const id = ulid();
-  await db().lote([
-    {
-      sql: "INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES (?, 'Técnico', 'tecnico', ?)",
-      params: [id, await h().hash(pin)],
-    },
-    bitacora(id, "usuario.crear", "usuario", id, { rol: "tecnico", primerArranque: true }),
-  ]);
-  return (await obtenerUsuario(id))!;
-}
-
-export async function crearUsuario(actor: Actor, datos: { nombre: string; rol: Rol; pin: string }): Promise<Usuario> {
-  if (!rolesAdministrables(actor.rol).includes(datos.rol)) throw new SinPermiso("crear ese tipo de usuario");
-  await validarNombre(datos.nombre);
-  validarPin(datos.pin);
-  const id = ulid();
-  await db().lote([
-    {
-      sql: "INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES (?, ?, ?, ?)",
-      params: [id, datos.nombre.trim(), datos.rol, await h().hash(datos.pin)],
-    },
-    bitacora(actor.id, "usuario.crear", "usuario", id, { nombre: datos.nombre.trim(), rol: datos.rol }),
-  ]);
-  return (await obtenerUsuario(id))!;
-}
-
-async function objetivoAdministrable(actor: Actor, id: string): Promise<Usuario> {
-  const u = await obtenerUsuario(id);
-  if (!u) throw new Error("Usuario no encontrado");
-  if (u.id !== actor.id && !rolesAdministrables(actor.rol).includes(u.rol)) throw new SinPermiso("administrar ese usuario");
-  return u;
-}
-
-export async function editarUsuario(actor: Actor, id: string, cambios: { nombre?: string; activo?: boolean }): Promise<void> {
-  const u = await objetivoAdministrable(actor, id);
-  if (cambios.activo === false && u.id === actor.id) throw new Error("No puede desactivarse a sí mismo");
-  if (cambios.nombre !== undefined) await validarNombre(cambios.nombre, id);
-  const nombre = cambios.nombre?.trim() ?? u.nombre;
-  const activo = cambios.activo ?? u.activo;
-  await db().lote([
-    {
-      sql: "UPDATE usuarios SET nombre = ?, activo = ?, actualizado_en = ? WHERE id = ?",
-      params: [nombre, activo, ahoraIso(), id],
-    },
-    bitacora(actor.id, "usuario.editar", "usuario", id, { antes: { nombre: u.nombre, activo: u.activo }, despues: { nombre, activo } }),
-  ]);
-}
-
-export async function cambiarPin(actor: Actor, id: string, pin: string): Promise<void> {
-  await objetivoAdministrable(actor, id);
-  validarPin(pin);
-  await db().lote([
-    {
-      sql: "UPDATE usuarios SET pin_hash = ?, intentos_fallidos = 0, bloqueado_hasta = NULL, actualizado_en = ? WHERE id = ?",
-      params: [await h().hash(pin), ahoraIso(), id],
-    },
-    bitacora(actor.id, "usuario.pin", "usuario", id),
-  ]);
+export async function cambiarPin(_actor: Actor, id: string, pin: string): Promise<void> {
+  await invocar("usuarios_cambiar_pin", { id, pin });
 }
 
 /** Borrado lógico: el usuario queda en ventas y bitácora, pero ya no aparece ni puede entrar. */
-export async function eliminarUsuario(actor: Actor, id: string): Promise<void> {
-  const u = await objetivoAdministrable(actor, id);
-  if (u.id === actor.id) throw new Error("No puede eliminarse a sí mismo");
-  const ahora = ahoraIso();
-  await db().lote([
-    { sql: "UPDATE usuarios SET eliminado_en = ?, activo = 0, actualizado_en = ? WHERE id = ?", params: [ahora, ahora, id] },
-    bitacora(actor.id, "usuario.eliminar", "usuario", id, { nombre: u.nombre, rol: u.rol }),
-  ]);
+export async function eliminarUsuario(_actor: Actor, id: string): Promise<void> {
+  await invocar("usuarios_eliminar", { id });
 }
 
 export type ResultadoLogin =
-  | { ok: true; usuario: Usuario }
-  | { ok: false; motivo: "bloqueado"; esperaMs: number }
-  | { ok: false; motivo: "pin"; esperaMs: number; intentos: number }
-  | { ok: false; motivo: "inexistente" };
+  | { ok: true; usuario: Usuario; minutosInactividad: number }
+  | { ok: false; esperaMs: number; intentos: number };
 
-export async function iniciarSesion(usuarioId: string, pin: string, ahora = Date.now()): Promise<ResultadoLogin> {
-  const u = await obtenerUsuario(usuarioId);
-  if (!u || !u.activo) return { ok: false, motivo: "inexistente" };
-  const espera = esperaRestante(u.bloqueadoHasta, ahora);
-  if (espera > 0) return { ok: false, motivo: "bloqueado", esperaMs: espera };
+type Respuesta =
+  | { resultado: "ok"; usuario: Omit<Usuario, "activo">; minutosInactividad: number }
+  | { resultado: "rechazado"; esperaMs: number; intentos: number };
 
-  const hashGuardado = (await db().select("SELECT pin_hash FROM usuarios WHERE id = ?", [u.id]))[0]?.pin_hash;
-  if (await h().verificar(pin, String(hashGuardado ?? ""))) {
-    if (u.intentosFallidos > 0 || u.bloqueadoHasta)
-      await db().execute("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = ?", [u.id]);
-    return { ok: true, usuario: { ...u, intentosFallidos: 0, bloqueadoHasta: null } };
-  }
-
-  const intentos = u.intentosFallidos + 1;
-  const esperaMs = esperaTrasFallos(intentos);
-  const hasta = esperaMs ? new Date(ahora + esperaMs).toISOString() : null;
-  await db().lote([
-    { sql: "UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = ? WHERE id = ?", params: [intentos, hasta, u.id] },
-    bitacora(u.id, esperaMs ? "login.bloqueado" : "login.fallido", "usuario", u.id, { intentos, esperaMs }),
-  ]);
-  return { ok: false, motivo: "pin", esperaMs, intentos };
+function aLogin(r: Respuesta): ResultadoLogin {
+  if (r.resultado === "ok") return { ok: true, usuario: { ...r.usuario, activo: true }, minutosInactividad: r.minutosInactividad };
+  return { ok: false, esperaMs: r.esperaMs, intentos: r.intentos };
 }
 
-/**
- * Autorización del dueño "en el momento" (descuento alto, anulación, corrección con efectivo):
- * basta el PIN de cualquier dueño activo. Devuelve ese dueño, o null si el PIN no es de ninguno.
- * Cada fallo queda en bitácora; con 5 fallos en un minuto se frena un rato.
- */
-export async function autorizarDueno(pin: string, contexto: string, actorId: string | null, ahora = Date.now()): Promise<Usuario | null> {
-  const desde = new Date(ahora - 60_000).toISOString();
-  const recientes = Number(
-    (await db().select("SELECT COUNT(*) AS n FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?", [desde]))[0].n,
-  );
-  if (recientes >= 5) throw new Error("Demasiados PIN incorrectos. Espere un minuto.");
-  const duenos = await db().select("SELECT * FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL");
-  for (const d of duenos) if (await h().verificar(pin, String(d.pin_hash))) return aUsuario(d);
-  await db().lote([bitacora(actorId, "autorizacion.fallida", "usuario", null, { contexto })]);
-  return null;
+/** Rust responde igual si el usuario no existe que si el PIN está mal (no revela quién existe). */
+export async function iniciarSesion(usuarioId: string, pin: string): Promise<ResultadoLogin> {
+  return aLogin(await invocar<Respuesta>("sesion_iniciar", { usuarioId, pin }));
+}
+
+/** Entrada oculta del técnico. */
+export async function iniciarSesionTecnico(pin: string): Promise<ResultadoLogin> {
+  return aLogin(await invocar<Respuesta>("sesion_tecnico", { pin }));
+}
+
+export async function cerrarSesion(): Promise<void> {
+  await invocar("sesion_cerrar");
+}
+
+/** Hubo actividad en la pantalla: Rust renueva el plazo de inactividad. */
+export async function tocarSesion(): Promise<void> {
+  await invocar("sesion_tocar");
+}
+
+/** PIN mínimo por rol (debe coincidir con config pin_min_dueno / pin_min_cajero; Rust decide igual). */
+export function pinMinimo(rol: Rol): number {
+  return rol === "cajero" ? 4 : 6;
 }

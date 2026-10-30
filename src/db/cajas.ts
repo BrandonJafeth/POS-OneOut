@@ -24,23 +24,3 @@ export async function obtenerCaja(id = CAJA_1): Promise<Caja | null> {
 export function numeroTiquete(prefijo: string, consecutivo: number): string {
   return prefijo + consecutivo;
 }
-
-/**
- * Toma el siguiente consecutivo de la caja en UNA sentencia (UPDATE … RETURNING): dos
- * llamadas simultáneas nunca reciben el mismo número.
- * En la fase 2, la venta lo tomará dentro de su propio lote (INSERT … SELECT consecutivo_siguiente
- * + UPDATE en la misma transacción) para que una venta fallida no deje huecos.
- */
-export async function tomarConsecutivo(cajaId = CAJA_1): Promise<{ consecutivo: number; numero: string }> {
-  const f = (
-    await db().select(
-      `UPDATE cajas SET consecutivo_siguiente = consecutivo_siguiente + 1
-       WHERE id = ? AND eliminado_en IS NULL
-       RETURNING consecutivo_siguiente - 1 AS consecutivo, prefijo_tiquete`,
-      [cajaId],
-    )
-  )[0];
-  if (!f) throw new Error("Caja no encontrada");
-  const consecutivo = Number(f.consecutivo);
-  return { consecutivo, numero: numeroTiquete(texto(f.prefijo_tiquete), consecutivo) };
-}

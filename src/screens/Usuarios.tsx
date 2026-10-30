@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Modal from "../components/Modal";
 import Mensaje, { textoError } from "../components/Mensaje";
-import { cambiarPin, crearUsuario, editarUsuario, eliminarUsuario, listarUsuarios } from "../db/usuarios";
+import { cambiarPin, crearUsuario, editarUsuario, eliminarUsuario, listarUsuarios, pinMinimo } from "../db/usuarios";
 import { rolesAdministrables } from "../lib/permisos";
 import { ROL_NOMBRE, type Rol, type Usuario } from "../tipos";
 import Badge from "../ui/Badge";
@@ -20,7 +20,7 @@ export default function Usuarios() {
   const [error, setError] = useState("");
   const roles = rolesAdministrables(actor.rol);
 
-  const cargar = () => listarUsuarios({ incluirTecnico: actor.rol === "tecnico" }).then(setLista, (e) => setError(textoError(e)));
+  const cargar = () => listarUsuarios().then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
 
   const administrable = (u: Usuario) => u.id === yo.id || roles.includes(u.rol);
@@ -166,7 +166,7 @@ function NuevoUsuario(p: { roles: Rol[]; onCerrar(): void; onGuardar(d: { nombre
           </label>
         )}
         <label className="campo">
-          PIN (4 a 8 números)
+          PIN ({pinMinimo(rol)} a 12 números; la persona lo cambia al entrar)
           <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </label>
         <Mensaje error={error} />
@@ -194,7 +194,7 @@ function CambiarPin(p: { usuario: Usuario; onCerrar(): void; onGuardar(pin: stri
         }}
       >
         <label className="campo">
-          PIN nuevo
+          PIN nuevo ({pinMinimo(p.usuario.rol)} a 12 números)
           <input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </label>
         <label className="campo">

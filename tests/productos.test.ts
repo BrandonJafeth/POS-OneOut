@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { listarBitacora } from "../src/db/bitacora";
 import { db } from "../src/db/conexion";
 import { crearDepartamento, editarDepartamento, listarDepartamentos } from "../src/db/departamentos";
 import {
@@ -10,20 +9,20 @@ import {
   editarProducto,
   eliminarProducto,
   obtenerProducto,
+  marcarFavoritos,
   productoPorCodigo,
   quitarCodigo,
 } from "../src/db/productos";
 import type { Actor } from "../src/tipos";
-import { baseDePrueba } from "./driverNode";
+import { baseDePrueba, entradasBitacora as listarBitacora } from "./driverNode";
 
 const DUENO: Actor = { id: "D", rol: "dueno" };
 const CAJERO: Actor = { id: "C", rol: "cajero" };
 const LIBRERIA = "00000000000000000000000D01";
 const OFICINA = "00000000000000000000000D02";
 
-beforeEach(async () => {
-  const { driver } = baseDePrueba();
-  for (const a of [DUENO, CAJERO]) await driver.execute("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES (?, ?, ?, 'x')", [a.id, a.id, a.rol]);
+beforeEach(() => {
+  baseDePrueba({ rol: "dueno", usuarioId: DUENO.id });
 });
 
 describe("productos", () => {
@@ -114,5 +113,18 @@ describe("departamentos", () => {
     await editarDepartamento(DUENO, OFICINA, { nombre: "Oficina y escuela" });
     expect((await listarDepartamentos()).find((d) => d.id === OFICINA)?.nombre).toBe("Oficina y escuela");
     await expect(editarDepartamento(DUENO, OFICINA, { nombre: "librería" })).rejects.toThrow("Ya existe");
+  });
+});
+
+describe("favoritos en bloque", () => {
+  it("marca todos de una vez, en una transacción y con una sola entrada de bitácora", async () => {
+    const ids = [];
+    for (const n of ["Lápiz", "Borrador", "Regla"]) ids.push(await crearProducto(DUENO, { nombre: n, departamentoId: LIBRERIA, precio: 100 }));
+    expect(await marcarFavoritos(DUENO, ids, true)).toBe(3);
+    expect((await buscarProductos({ soloFavoritos: true })).total).toBe(3);
+    const b = (await listarBitacora()).filter((e) => (e.detalle as { favoritos?: string }).favoritos);
+    expect(b).toHaveLength(1);
+    expect(b[0].detalle).toMatchObject({ favoritos: "marcar", cantidad: 3 });
+    await expect(marcarFavoritos(CAJERO, ids, false)).rejects.toThrow("permiso");
   });
 });

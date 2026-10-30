@@ -1,7 +1,6 @@
 // Configuración clave → valor JSON. Lo que cambia entre negocios vive aquí, no en el código.
 import type { Actor } from "../tipos";
-import { ahoraIso } from "../lib/texto";
-import { bitacora } from "./bitacora";
+import { invocar } from "../lib/invocar";
 import { db } from "./conexion";
 
 /** Claves conocidas con su tipo. Las que no estén aquí igual se pueden guardar desde Configuración técnica. */
@@ -41,6 +40,18 @@ export interface ConfigApp {
   mostrar_iva: boolean;
   /** Color propio del negocio ("#rrggbb"); vacío = grafito. Se ajusta solo para cumplir contraste. */
   color_acento: string;
+  /** ¢: desde esta diferencia el cierre de caja exige nota y queda para revisión del dueño. */
+  caja_umbral_diferencia: number;
+  /** ¢: salidas de efectivo mayores piden el PIN del dueño. */
+  caja_salida_max_sin_pin: number;
+  /** El cajero cuenta sin ver lo esperado. */
+  caja_cierre_ciego: boolean;
+  caja_denominaciones: number[];
+  caja_motivos: { salida: string[]; entrada: string[] };
+  pin_min_dueno: number;
+  pin_min_cajero: number;
+  /** Minutos sin uso tras los que se bloquea la sesión. */
+  sesion_inactividad_min: number;
 }
 
 /** Valores por defecto si una clave falta en la base (los mismos que siembra la migración). */
@@ -70,6 +81,14 @@ export const CONFIG_DEFECTO: ConfigApp = {
   tema: "claro",
   mostrar_iva: false,
   color_acento: "",
+  caja_umbral_diferencia: 1000,
+  caja_salida_max_sin_pin: 20000,
+  caja_cierre_ciego: false,
+  caja_denominaciones: [50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
+  caja_motivos: { salida: ["Retiro de dinero", "Gasto menor", "Pago a proveedor", "Adelanto"], entrada: ["Ingreso de cambio", "Otro ingreso"] },
+  pin_min_dueno: 6,
+  pin_min_cajero: 4,
+  sesion_inactividad_min: 10,
 };
 
 /** Todas las claves tal como están en la base (para el editor técnico). */
@@ -90,20 +109,8 @@ export async function leerConfig(): Promise<ConfigApp> {
   return { ...CONFIG_DEFECTO, ...(await leerConfigCruda()) } as ConfigApp;
 }
 
-export async function guardarConfig(actor: Actor, clave: string, valor: unknown): Promise<void> {
+/** Rust revisa el permiso por clave (el cajero no puede subir su propio tope, etc.) y deja la bitácora. */
+export async function guardarConfig(_actor: Actor, clave: string, valor: unknown): Promise<void> {
   if (!/^[a-z0-9_]+$/.test(clave)) throw new Error("La clave solo admite minúsculas, números y _");
-  const antes = (await db().select("SELECT valor FROM config WHERE clave = ?", [clave]))[0]?.valor ?? null;
-  const json = JSON.stringify(valor);
-  if (antes === json) return;
-  await db().lote([
-    {
-      sql: `INSERT INTO config (clave, valor, actualizado_en) VALUES (?, ?, ?)
-            ON CONFLICT (clave) DO UPDATE SET valor = excluded.valor, actualizado_en = excluded.actualizado_en`,
-      params: [clave, json, ahoraIso()],
-    },
-    bitacora(actor.id, "config.cambiar", "config", clave, {
-      antes: antes == null ? null : JSON.parse(String(antes)),
-      despues: valor,
-    }),
-  ]);
+  await invocar("config_guardar", { clave, valor });
 }

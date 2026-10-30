@@ -1,8 +1,7 @@
 // Datos del negocio (una sola fila). El dueño edita lo de contacto; lo legal y el logo, solo el técnico.
 import type { Actor, LogoUnBit, Negocio } from "../tipos";
-import { puede, SinPermiso } from "../lib/permisos";
-import { ahoraIso } from "../lib/texto";
-import { bitacora } from "./bitacora";
+import { invocar } from "../lib/invocar";
+import { puede } from "../lib/permisos";
 import { bytes, db, texto } from "./conexion";
 
 export type CampoNegocio = Exclude<keyof Negocio, "logo" | "logoUmbral">;
@@ -52,54 +51,26 @@ export async function obtenerLogoOriginal(): Promise<{ datos: Uint8Array; mime: 
   return datos ? { datos, mime: texto(f?.logo_mime) } : null;
 }
 
-export async function guardarNegocio(actor: Actor, cambios: Partial<Record<CampoNegocio, string>>): Promise<void> {
-  const actual = await obtenerNegocio();
-  const antes: Record<string, string> = {};
-  const despues: Record<string, string> = {};
-  for (const [k, v] of Object.entries(cambios) as [CampoNegocio, string][]) {
-    if (!(k in COLUMNA) || v === undefined) continue;
-    const nuevo = v.trim();
-    if (nuevo === actual[k]) continue;
-    if (!puedeEditarCampo(actor, k)) throw new SinPermiso(`cambiar "${k}"`);
-    antes[k] = actual[k];
-    despues[k] = nuevo;
-  }
-  // Si cambió el texto del aviso y nadie tocó la versión, se sube sola: así cada cliente queda
-  // asociado a la versión exacta que se le mostró.
-  if ("avisoPrivacidadTexto" in despues && !("avisoPrivacidadVersion" in despues) && /^\d+$/.test(actual.avisoPrivacidadVersion)) {
-    antes.avisoPrivacidadVersion = actual.avisoPrivacidadVersion;
-    despues.avisoPrivacidadVersion = String(Number(actual.avisoPrivacidadVersion) + 1);
-  }
-  const campos = Object.keys(despues) as CampoNegocio[];
-  if (!campos.length) return;
-  await db().lote([
-    {
-      sql: `UPDATE negocio SET ${campos.map((c) => `${COLUMNA[c]} = ?`).join(", ")}, actualizado_en = ? WHERE id = 1`,
-      params: [...campos.map((c) => despues[c]), ahoraIso()],
-    },
-    bitacora(actor.id, "negocio.cambiar", "negocio", "1", { antes, despues }),
-  ]);
+/** Rust revisa campo por campo quién puede cambiarlo y sube sola la versión del aviso. */
+export async function guardarNegocio(_actor: Actor, cambios: Partial<Record<CampoNegocio, string>>): Promise<void> {
+  const limpio = Object.fromEntries(Object.entries(cambios).filter(([, v]) => v !== undefined).map(([k, v]) => [k, (v as string).trim()]));
+  await invocar("negocio_guardar", { cambios: limpio });
 }
 
 export async function guardarLogo(
-  actor: Actor,
+  _actor: Actor,
   datos: { original: Uint8Array; mime: string; logo: LogoUnBit; umbral: number } | null,
 ): Promise<void> {
-  if (!puede(actor.rol, "negocio.legal")) throw new SinPermiso("cambiar el logo");
-  await db().lote([
-    {
-      sql: `UPDATE negocio SET logo_original = ?, logo_mime = ?, logo_bits = ?, logo_ancho = ?, logo_alto = ?,
-            logo_umbral = ?, actualizado_en = ? WHERE id = 1`,
-      params: datos
-        ? [datos.original, datos.mime, datos.logo.bits, datos.logo.ancho, datos.logo.alto, datos.umbral, ahoraIso()]
-        : [null, null, null, null, null, null, ahoraIso()],
-    },
-    bitacora(
-      actor.id,
-      "negocio.logo",
-      "negocio",
-      "1",
-      datos ? { ancho: datos.logo.ancho, alto: datos.logo.alto, umbral: datos.umbral, bytesOriginal: datos.original.length } : { quitado: true },
-    ),
-  ]);
+  await invocar("negocio_logo", {
+    logo: datos
+      ? {
+          original: Array.from(datos.original),
+          mime: datos.mime,
+          bits: Array.from(datos.logo.bits),
+          ancho: datos.logo.ancho,
+          alto: datos.logo.alto,
+          umbral: datos.umbral,
+        }
+      : null,
+  });
 }

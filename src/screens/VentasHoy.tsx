@@ -1,23 +1,11 @@
-// Ventas del día: reimprimir (COPIA), corregir forma de pago, anular y cerrar el día.
-import { Ban, CalendarCheck, Pencil, Printer, ReceiptText, Save, ShieldCheck } from "lucide-react";
+// Ventas del día: reimprimir (COPIA), corregir forma de pago y anular. El cierre es el de Caja.
+import { Ban, Landmark, Pencil, Printer, ReceiptText, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
-import {
-  anularVenta,
-  cerrarDia,
-  correccionesDe,
-  corregirPago,
-  diaAbierto,
-  diaCerrado,
-  efectivoEsperado,
-  listarEsperas,
-  listarVentasDia,
-  obtenerVenta,
-  type VentaResumen,
-} from "../db/ventas";
+import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
 import { diaLocal } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { imprimirVenta } from "../lib/venta/imprimir";
@@ -25,56 +13,21 @@ import type { Banco, FormaPago, Venta, VentaPago } from "../tipos";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
-import { useConfirmar } from "../ui/Confirmar";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
 
 export default function VentasHoy() {
-  const { actor, config, puede } = useSesion();
-  const confirmar = useConfirmar();
+  const { caja, irA, puede } = useSesion();
   const [dia, setDia] = useState(diaLocal());
   const [lista, setLista] = useState<VentaResumen[]>([]);
-  const [efectivo, setEfectivo] = useState(0);
-  const [cerrado, setCerrado] = useState(false);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
 
   const cargar = async () => {
     setLista(await listarVentasDia(dia));
-    setEfectivo(await efectivoEsperado(dia));
-    setCerrado(await diaCerrado(dia));
   };
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [dia]);
-
-  async function cerrar() {
-    setError("");
-    setOk("");
-    const esperas = await listarEsperas();
-    const conProductos = esperas.filter((e) => e.estado.lineas.length).length;
-    const ok = await confirmar({
-      titulo: "¿Cerrar el día?",
-      texto: (
-        <>
-          <p>Después de cerrar ya no se podrán corregir formas de pago de las ventas de hoy.</p>
-          {config.avisar_espera_al_cerrar && conProductos > 0 && (
-            <Alert tono="aviso">Hay {conProductos} venta(s) en espera con productos. Cóbrelas o descártelas antes, si corresponde.</Alert>
-          )}
-        </>
-      ),
-      aceptar: "Cerrar el día",
-      peligro: true,
-    });
-    if (!ok) return;
-    try {
-      await cerrarDia(actor);
-      await cargar();
-      setOk("Día cerrado.");
-    } catch (e) {
-      setError(textoError(e));
-    }
-  }
 
   const completadas = lista.filter((v) => v.estado === "completada");
   return (
@@ -88,28 +41,21 @@ export default function VentasHoy() {
         </div>
       </div>
       <div className="row">
-        {cerrado ? (
-          <Badge tono="aviso">Día cerrado: ya no se corrigen formas de pago</Badge>
-        ) : (
-          dia === diaLocal() && <Badge tono="ok">Día abierto</Badge>
-        )}
+        {caja?.turno ? <Badge tono="ok">Caja abierta</Badge> : <Badge tono="aviso">Caja cerrada</Badge>}
         <span style={{ flex: 1 }} />
-        {puede("dia.cerrar") && dia === diaLocal() && !cerrado && (
-          <Button icono={CalendarCheck} onClick={cerrar}>
-            Cerrar el día
+        {puede("caja") && (
+          <Button icono={Landmark} onClick={() => irA("caja")}>
+            Ir a Caja
           </Button>
         )}
       </div>
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <div className="conteos">
         <div>
           <strong>{completadas.length}</strong>ventas
         </div>
         <div>
           <strong>{monto(completadas.reduce((s, v) => s + v.total, 0))}</strong>vendido
-        </div>
-        <div>
-          <strong>{monto(efectivo)}</strong>efectivo esperado
         </div>
       </div>
       <section className="card">
@@ -157,8 +103,7 @@ export default function VentasHoy() {
 function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }) {
   const { actor, config, puede } = useSesion();
   const [v, setV] = useState<Venta | null>(null);
-  const [abiertoDia, setAbiertoDia] = useState(false);
-  const [correcciones, setCorrecciones] = useState<Record<string, unknown>[]>([]);
+  const [correcciones, setCorrecciones] = useState<Correccion[]>([]);
   const [corrigiendo, setCorrigiendo] = useState<VentaPago | null>(null);
   const [anulando, setAnulando] = useState(false);
   const [error, setError] = useState("");
@@ -167,15 +112,14 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   const cargar = async () => {
     const x = await obtenerVenta(p.ventaId);
     setV(x);
-    if (x) {
-      setAbiertoDia(await diaAbierto(x.dia, x.cajaId));
-      setCorrecciones(await correccionesDe(x.id));
-    }
+    if (x) setCorrecciones(await correccionesDe(x.id));
   };
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [p.ventaId]);
   if (!v) return <Modal titulo="Venta" onCerrar={p.onCerrar}>{error ? <Mensaje error={error} /> : "Cargando…"}</Modal>;
 
   const verCliente = puede("clientes.basico");
+  // Turno cerrado: corregir o anular es un ajuste que solo hace el dueño (queda en la caja de hoy).
+  const puedeAjustar = v.turnoAbierto ? puede("venta") : puede("caja.admin");
   async function reimprimir() {
     setError("");
     setOk("");
@@ -238,7 +182,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
               <td className="num">{monto(pg.monto)}</td>
               <td className="num muted">{pg.vuelto ? `recibió ${monto(pg.recibido ?? 0)}, vuelto ${monto(pg.vuelto)}` : ""}</td>
               <td>
-                {abiertoDia && v.estado === "completada" && (
+                {puedeAjustar && v.estado === "completada" && (
                   <Button icono={Pencil} onClick={() => setCorrigiendo(pg)}>
                     Corregir forma
                   </Button>
@@ -248,14 +192,19 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           ))}
         </tbody>
       </table>
-      {!abiertoDia && <Alert tono="info">El día de esta venta ya se cerró: la forma de pago no se puede corregir.</Alert>}
+      {!v.turnoAbierto && (
+        <Alert tono="info">
+          La caja de esta venta ya se cerró. {puede("caja.admin") ? "Una corrección o anulación queda como ajuste en la caja de hoy." : "Solo el dueño puede corregirla o anularla."}
+        </Alert>
+      )}
       {correcciones.length > 0 && (
         <>
           <h3>Correcciones</h3>
           <ul className="muted">
             {correcciones.map((c, i) => (
               <li key={i}>
-                {new Date(String(c.fecha)).toLocaleString("es-CR")} · {String(c.usuario)}: {String(c.antes)} → {String(c.despues)} — {String(c.motivo)}
+                {new Date(c.fecha).toLocaleString("es-CR")} · {c.usuario}: {c.antes} → {c.despues} — {c.motivo}
+                {c.donde === "ajuste" && " (ajuste posterior al cierre)"}
               </li>
             ))}
           </ul>
@@ -267,7 +216,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           Reimprimir (sale como COPIA)
         </Button>
         <span className="separador" />
-        {v.estado === "completada" && (
+        {v.estado === "completada" && puedeAjustar && (
           <Button variante="peligro" icono={Ban} onClick={() => setAnulando(true)}>
             Anular venta
           </Button>
@@ -276,6 +225,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
       {corrigiendo && (
         <CorregirPago
           pago={corrigiendo}
+          turnoAbierto={v.turnoAbierto}
           onCerrar={() => setCorrigiendo(null)}
           onListo={async () => {
             setCorrigiendo(null);
@@ -289,6 +239,9 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
         <Anular
           ventaId={v.id}
           numero={v.numero}
+          total={v.total}
+          efectivo={v.pagos.filter((x) => x.tipo === "efectivo").reduce((s, x) => s + x.monto, 0)}
+          turnoAbierto={v.turnoAbierto}
           onCerrar={() => setAnulando(false)}
           onListo={async () => {
             setAnulando(false);
@@ -302,7 +255,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   );
 }
 
-function CorregirPago(p: { pago: VentaPago; onCerrar(): void; onListo(): Promise<void> }) {
+function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): void; onListo(): Promise<void> }) {
   const { actor } = useSesion();
   const [formas, setFormas] = useState<FormaPago[]>([]);
   const [bancos, setBancos] = useState<Banco[]>([]);
@@ -319,7 +272,8 @@ function CorregirPago(p: { pago: VentaPago; onCerrar(): void; onListo(): Promise
   }, []);
   const nueva = formas.find((f) => f.id === forma);
   const antes = formas.find((f) => f.id === p.pago.formaPagoId);
-  const tocaEfectivo = !!nueva && !!antes && nueva.daVuelto !== antes.daVuelto;
+  // Turno cerrado: siempre el PIN del dueño. Abierto: solo si entra o sale efectivo de la gaveta.
+  const pidePin = !p.turnoAbierto || (!!nueva && !!antes && nueva.daVuelto !== antes.daVuelto);
 
   return (
     <Modal titulo={`Corregir pago de ${monto(p.pago.monto)}`} onCerrar={p.onCerrar} ancho={480}>
@@ -373,9 +327,9 @@ function CorregirPago(p: { pago: VentaPago; onCerrar(): void; onListo(): Promise
         <Field label="Motivo (obligatorio)" ayuda="Ej. «El cliente pagó con SINPE, no con tarjeta».">
           <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
         </Field>
-        {tocaEfectivo && (
+        {pidePin && (
           <label className="campo">
-            PIN del dueño (cambia el efectivo de la caja)
+            {p.turnoAbierto ? "PIN del dueño (cambia el efectivo de la caja)" : "Su PIN de dueño (la caja de esta venta ya cerró)"}
             <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </label>
         )}
@@ -388,10 +342,11 @@ function CorregirPago(p: { pago: VentaPago; onCerrar(): void; onListo(): Promise
   );
 }
 
-function Anular(p: { ventaId: string; numero: string; onCerrar(): void; onListo(): Promise<void> }) {
+function Anular(p: { ventaId: string; numero: string; total: number; efectivo: number; turnoAbierto: boolean; onCerrar(): void; onListo(): Promise<void> }) {
   const { actor } = useSesion();
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
+  const [devolver, setDevolver] = useState(p.efectivo > 0 ? String(p.efectivo) : "");
   const [error, setError] = useState("");
   return (
     <Modal titulo={`Anular tiquete ${p.numero}`} onCerrar={p.onCerrar} ancho={420}>
@@ -400,7 +355,8 @@ function Anular(p: { ventaId: string; numero: string; onCerrar(): void; onListo(
           e.preventDefault();
           setError("");
           try {
-            await anularVenta(actor, p.ventaId, pin, motivo);
+            const dev = p.turnoAbierto ? 0 : Number(devolver.replace(/\D/g, "") || 0);
+            await anularVenta(actor, p.ventaId, pin, motivo, dev);
             await p.onListo();
           } catch (err) {
             setError(textoError(err));
@@ -412,6 +368,11 @@ function Anular(p: { ventaId: string; numero: string; onCerrar(): void; onListo(
         <Field label="Motivo (obligatorio)">
           <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
         </Field>
+        {!p.turnoAbierto && (
+          <Field label="Efectivo que se devuelve ahora" ayuda={`Sale de la caja de hoy como salida. Máximo ${monto(p.total)}; 0 si no se devuelve dinero.`}>
+            <input inputMode="numeric" value={devolver} onChange={(e) => setDevolver(e.target.value.replace(/\D/g, ""))} />
+          </Field>
+        )}
         <Field label="PIN del dueño">
           <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </Field>

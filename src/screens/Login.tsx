@@ -1,7 +1,7 @@
 import { ArrowLeft, LogIn, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { textoError } from "../components/Mensaje";
-import { iniciarSesion, listarUsuarios, tecnico } from "../db/usuarios";
+import { iniciarSesion, iniciarSesionTecnico, usuariosParaEntrar } from "../db/usuarios";
 import { formatoEspera, INTENTOS_LIBRES } from "../lib/bloqueo";
 import { ROL_NOMBRE, type Usuario } from "../tipos";
 import Alert from "../ui/Alert";
@@ -10,10 +10,13 @@ import Field from "../ui/Field";
 
 // Entrada discreta del técnico: no aparece en ningún menú.
 const ATAJO_TECNICO = (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.key.toLowerCase() === "t";
+const TECNICO = "__tecnico";
 
-export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: string; onEntrar(u: Usuario): void }) {
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-  const [elegido, setElegido] = useState<Usuario | null>(null);
+type Elegible = Pick<Usuario, "id" | "nombre" | "rol">;
+
+export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: string; onEntrar(u: Usuario, minutosInactividad: number): void }) {
+  const [usuarios, setUsuarios] = useState<Elegible[]>([]);
+  const [elegido, setElegido] = useState<Elegible | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -21,24 +24,23 @@ export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: stri
   const primero = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    listarUsuarios({ soloActivos: true }).then(setUsuarios, (e) => setError(textoError(e)));
+    usuariosParaEntrar().then(setUsuarios, (e) => setError(textoError(e)));
   }, []);
   useEffect(() => {
     if (!elegido) primero.current?.focus();
   }, [usuarios, elegido]);
 
   useEffect(() => {
-    const k = async (e: KeyboardEvent) => {
+    const k = (e: KeyboardEvent) => {
       if (!ATAJO_TECNICO(e)) return;
       e.preventDefault();
-      const t = await tecnico();
-      if (t) elegir(t);
+      elegir({ id: TECNICO, nombre: "Técnico", rol: "tecnico" });
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
 
-  function elegir(u: Usuario | null) {
+  function elegir(u: Elegible | null) {
     setElegido(u);
     setPin("");
     setError("");
@@ -51,13 +53,13 @@ export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: stri
     setOcupado(true);
     setError("");
     try {
-      const r = await iniciarSesion(elegido.id, pin);
-      if (r.ok) return onEntrar(r.usuario);
+      const r = elegido.id === TECNICO ? await iniciarSesionTecnico(pin) : await iniciarSesion(elegido.id, pin);
+      if (r.ok) return onEntrar(r.usuario, r.minutosInactividad);
       setPin("");
-      if (r.motivo === "inexistente") setError("Este usuario ya no está disponible. Elija otro.");
-      else if (r.motivo === "bloqueado") setError(`Demasiados intentos. Espere ${formatoEspera(r.esperaMs)} y vuelva a intentar.`);
-      else if (r.esperaMs) setError(`PIN incorrecto. Espere ${formatoEspera(r.esperaMs)} antes del próximo intento.`);
-      else setError(`PIN incorrecto. Revise y vuelva a escribirlo (intento ${r.intentos} de ${INTENTOS_LIBRES} antes de tener que esperar).`);
+      // Rust responde igual si el usuario no existe: no se dice cuál de las dos cosas falló.
+      if (r.esperaMs) setError(`PIN incorrecto o demasiados intentos. Espere ${formatoEspera(r.esperaMs)} y vuelva a intentar.`);
+      else if (r.intentos) setError(`PIN incorrecto. Revise y vuelva a escribirlo (intento ${r.intentos} de ${INTENTOS_LIBRES} antes de tener que esperar).`);
+      else setError("PIN incorrecto.");
     } catch (err) {
       setError(textoError(err));
     } finally {

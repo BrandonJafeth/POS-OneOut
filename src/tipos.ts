@@ -15,8 +15,8 @@ export interface Usuario {
   nombre: string;
   rol: Rol;
   activo: boolean;
-  intentosFallidos: number;
-  bloqueadoHasta: string | null;
+  /** Entró con un PIN puesto por otro o más corto que el mínimo: debe cambiarlo antes de seguir. */
+  debeCambiarPin: boolean;
 }
 
 export interface Departamento {
@@ -129,9 +129,24 @@ export type AccionBitacora =
   | "venta.pago_corregido"
   | "venta.anular"
   | "venta.factura_emitida"
-  | "dia.cerrar"
   | "forma_pago.guardar"
-  | "banco.guardar";
+  | "banco.guardar"
+  | "login.ok"
+  | "caja.abrir"
+  | "caja.entrada"
+  | "caja.salida"
+  | "caja.cerrar"
+  | "caja.diferencia"
+  | "caja.diferencia_revisada"
+  | "caja.reabrir"
+  | "caja.z_reimprimir"
+  | "caja.ajuste_pago"
+  | "bitacora.alterada"
+  | "bd.integridad_fallida"
+  | "respaldo.restaurar"
+  | "cliente.ver"
+  | "cliente.listar"
+  | "cliente.editar";
 
 export interface EntradaBitacora {
   id: string;
@@ -223,7 +238,8 @@ export interface EstadoEspera {
   nombreTiquete: string | null;
   requiereFactura: boolean;
   /** Dueño que autorizó un descuento por encima del tope, y hasta qué %. */
-  autorizacion: { duenoId: string; pct: number } | null;
+  /** Descuento sobre el tope autorizado por el dueño: token de un solo uso que emitió Rust. */
+  autorizacion: { duenoId: string; pct: number; token?: string } | null;
 }
 
 export interface VentaEspera {
@@ -274,6 +290,9 @@ export interface VentaLinea {
 export interface Venta {
   id: string;
   cajaId: string;
+  turnoId: string | null;
+  /** El turno de caja de la venta sigue abierto (si no, corregir o anular es un ajuste del dueño). */
+  turnoAbierto: boolean;
   consecutivo: number;
   numero: string;
   fecha: string;

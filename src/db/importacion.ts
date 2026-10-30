@@ -26,16 +26,13 @@ export async function aplicarImportacion(actor: Actor, plan: Plan): Promise<{ cr
   for (const it of plan.nuevos) {
     // ON CONFLICT: si entre la vista previa y la confirmación apareció ese web_id, se actualiza en vez de duplicar.
     s.push({
-      sql: `INSERT INTO productos (id, web_id, nombre, nombre_busqueda, departamento_id, precio, creado_en, actualizado_en)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (web_id) DO UPDATE SET nombre = excluded.nombre, nombre_busqueda = excluded.nombre_busqueda,
-              precio = excluded.precio, actualizado_en = excluded.actualizado_en`,
+      id: "importacion.crear",
       params: [ulid(), it.webId, it.nombre, normalizar(it.nombre), it.departamentoId, it.precio, ahora, ahora],
     });
   }
   for (const it of plan.actualizar) {
     s.push({
-      sql: "UPDATE productos SET nombre = ?, nombre_busqueda = ?, precio = ?, actualizado_en = ? WHERE id = ?",
+      id: "importacion.actualizar",
       params: [it.nombre, normalizar(it.nombre), it.precio, ahora, it.productoId!],
     });
   }

@@ -4,6 +4,8 @@ import type { Rol } from "../tipos";
 
 export type Permiso =
   | "venta"
+  | "caja" // abrir, entradas/salidas, cerrar y ver su propio turno
+  | "caja.admin" // todos los turnos, reabrir, revisar diferencias, umbrales de caja
   | "productos" // ver, crear y editar productos y sus códigos
   | "productos.importar"
   | "departamentos" // nombre, orden, activo
@@ -13,18 +15,20 @@ export type Permiso =
   | "negocio.legal" // nombre, razón social, cédula, régimen, dirección, logo
   | "config.tecnica"
   | "reportes"
-  | "clientes.basico" // buscar/crear cliente para un apartado: solo nombre y teléfono
+  | "clientes.basico" // buscar/crear cliente en la venta: solo nombre, teléfono y cédula
   | "clientes" // lista completa, datos del cliente, exportar, anonimizar
   | "respaldo" // el respaldo lleva datos de clientes
-  | "facturas" // pendientes de factura electrónica (muestra datos del cliente)
-  | "dia.cerrar";
+  | "facturas"; // pendientes de factura electrónica (muestra datos del cliente)
 
-// Ley 8968: el técnico administra el sistema pero NO tiene acceso a datos de clientes
-// (ni al respaldo, que los contiene).
+// Copia de src-tauri/src/permisos.rs: Rust es quien decide; aquí solo se usa para mostrar u ocultar.
+// Ley 8968: el técnico administra el sistema pero NO ve datos de clientes (ni el respaldo).
+// Y no maneja dinero: no vende ni toca la caja.
 export const PERMISOS: Record<Rol, readonly Permiso[]> = {
-  cajero: ["venta", "clientes.basico", "facturas"],
+  cajero: ["venta", "caja", "clientes.basico", "facturas"],
   dueno: [
     "venta",
+    "caja",
+    "caja.admin",
     "productos",
     "productos.importar",
     "departamentos",
@@ -35,10 +39,8 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "clientes",
     "respaldo",
     "facturas",
-    "dia.cerrar",
   ],
   tecnico: [
-    "venta",
     "productos",
     "productos.importar",
     "departamentos",
@@ -48,7 +50,6 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "negocio.legal",
     "config.tecnica",
     "reportes",
-    "dia.cerrar",
   ],
 };
 

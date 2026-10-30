@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { listarBitacora } from "../src/db/bitacora";
 import { db } from "../src/db/conexion";
 import { aplicarImportacion, productosParaImportar } from "../src/db/importacion";
 import { buscarProductos, crearProducto, eliminarProducto } from "../src/db/productos";
@@ -7,7 +6,7 @@ import { detectarSeparador, leerCsv } from "../src/lib/csv";
 import { categoriasSinMapear, crearPlan, leerPrecio } from "../src/lib/importar/plan";
 import { leerCsvWeb } from "../src/lib/importar/web";
 import type { Actor } from "../src/tipos";
-import { baseDePrueba } from "./driverNode";
+import { baseDePrueba, entradasBitacora as listarBitacora } from "./driverNode";
 
 const OTROS = "00000000000000000000000D12";
 const PAPELERIA = "00000000000000000000000D03";
@@ -114,9 +113,8 @@ describe("plan de importación", () => {
 });
 
 describe("aplicar importación", () => {
-  beforeEach(async () => {
-    const { driver } = baseDePrueba();
-    await driver.execute("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES ('D', 'Dueño', 'dueno', 'x')");
+  beforeEach(() => {
+    baseDePrueba({ rol: "dueno", usuarioId: DUENO.id });
   });
 
   async function importar(csv: string) {

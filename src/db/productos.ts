@@ -161,11 +161,11 @@ async function sentenciasCodigo(actor: Actor, productoId: string, codigo: string
   if (dueno && !dueno.eliminado && !mover) throw new CodigoOcupado(codigo, { id: dueno.id, nombre: dueno.nombre });
   if (dueno)
     return [
-      { sql: "UPDATE codigos SET producto_id = ?, tipo = ? WHERE codigo = ?", params: [productoId, tipo, codigo] },
+      { id: "codigo.mover", params: [productoId, tipo, codigo] },
       bitacora(actor.id, "codigo.mover", "codigo", codigo, { de: dueno.id, deNombre: dueno.nombre, a: productoId }),
     ];
   return [
-    { sql: "INSERT INTO codigos (codigo, producto_id, tipo, creado_en) VALUES (?, ?, ?, ?)", params: [codigo, productoId, tipo, ahoraIso()] },
+    { id: "codigo.asociar", params: [codigo, productoId, tipo, ahoraIso()] },
     bitacora(actor.id, "codigo.asociar", "codigo", codigo, { producto: productoId, tipo }),
   ];
 }
@@ -182,8 +182,7 @@ export async function crearProducto(
   const ahora = ahoraIso();
   const sentencias: Sentencia[] = [
     {
-      sql: `INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio, activo, cabys, tasa_iva, exento, creado_en, actualizado_en)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id: "producto.crear",
       params: [
         id,
         datos.nombre.trim(),
@@ -219,9 +218,7 @@ export async function editarProducto(actor: Actor, id: string, cambios: Partial<
 
   const sentencias: Sentencia[] = [
     {
-      sql: `UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?,
-              cabys = ?, tasa_iva = ?, exento = ?, actualizado_en = ?
-            WHERE id = ?`,
+      id: "producto.editar",
       params: [n.nombre, normalizar(n.nombre), n.departamentoId, n.precio, n.activo, n.cabys, n.tasaIva, n.exento, ahoraIso(), id],
     },
   ];
@@ -240,7 +237,7 @@ export async function eliminarProducto(actor: Actor, id: string): Promise<void> 
   if (!p) throw new Error("Producto no encontrado");
   const ahora = ahoraIso();
   await db().lote([
-    { sql: "UPDATE productos SET eliminado_en = ?, actualizado_en = ? WHERE id = ?", params: [ahora, ahora, id] },
+    { id: "producto.eliminar", params: [ahora, ahora, id] },
     bitacora(actor.id, "producto.eliminar", "producto", id, { nombre: p.nombre, precio: p.precio, codigos: p.codigos.map((c) => c.codigo) }),
   ]);
 }
@@ -257,7 +254,7 @@ export async function quitarCodigo(actor: Actor, codigo: string): Promise<void> 
   const dueno = await duenoDelCodigo(codigo);
   if (!dueno) return;
   await db().lote([
-    { sql: "DELETE FROM codigos WHERE codigo = ?", params: [codigo] },
+    { id: "codigo.quitar", params: [codigo] },
     bitacora(actor.id, "codigo.quitar", "codigo", codigo, { producto: dueno.id, nombre: dueno.nombre }),
   ]);
 }
@@ -268,15 +265,10 @@ export async function quitarCodigo(actor: Actor, codigo: string): Promise<void> 
  * (p. ej. si alguien asoció a mano un código 200…).
  */
 export async function siguienteCodigoInterno(): Promise<string> {
-  await db().execute("INSERT OR IGNORE INTO config (clave, valor) VALUES ('codigo_interno_siguiente', '1')");
+  await db().lote([{ id: "codigo_interno.asegurar" }]);
   for (let intento = 0; intento < 1000; intento++) {
-    const f = (
-      await db().select(
-        `UPDATE config SET valor = CAST(valor AS INTEGER) + 1, actualizado_en = ? WHERE clave = 'codigo_interno_siguiente'
-         RETURNING CAST(valor AS INTEGER) - 1 AS n`,
-        [ahoraIso()],
-      )
-    )[0];
+    const [filas] = (await db().lote([{ id: "codigo_interno.tomar", params: [ahoraIso()] }])) as Record<string, unknown>[][];
+    const f = filas[0];
     const codigo = codigoInterno(Number(f.n));
     if (!(await duenoDelCodigo(codigo))) return codigo;
   }
@@ -299,7 +291,20 @@ export async function marcarFavorito(actor: Actor, id: string, favorito: boolean
   if (!p) throw new Error("Producto no encontrado");
   if (p.favorito === favorito) return;
   await db().lote([
-    { sql: "UPDATE productos SET favorito = ?, actualizado_en = ? WHERE id = ?", params: [favorito, ahoraIso(), id] },
+    { id: "producto.favorito", params: [favorito, ahoraIso(), id] },
     bitacora(actor.id, "producto.editar", "producto", id, { antes: { favorito: p.favorito }, despues: { favorito } }),
   ]);
+}
+
+/** Marca o desmarca varios productos de una vez (p. ej. todo un departamento). Una sola transacción. */
+export async function marcarFavoritos(actor: Actor, ids: string[], favorito: boolean): Promise<number> {
+  permitir(actor);
+  if (!ids.length) return 0;
+  if (ids.length > 1000) throw new Error("Son demasiados productos de una vez: filtre un poco más");
+  const ahora = ahoraIso();
+  await db().lote([
+    ...ids.map((id) => ({ id: "producto.favorito", params: [favorito, ahora, id] })),
+    bitacora(actor.id, "producto.editar", "producto", null, { favoritos: favorito ? "marcar" : "quitar", cantidad: ids.length, ids: ids.slice(0, 200) }),
+  ]);
+  return ids.length;
 }

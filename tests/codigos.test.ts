@@ -37,9 +37,8 @@ describe("códigos internos", () => {
   });
 
   describe("en la base", () => {
-    beforeEach(async () => {
-      const { driver } = baseDePrueba();
-      await driver.execute("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES ('D', 'Dueño', 'dueno', 'x')");
+    beforeEach(() => {
+      baseDePrueba({ rol: "dueno", usuarioId: DUENO.id });
     });
 
     it("son secuenciales y avanzan el contador", async () => {

@@ -1,9 +1,10 @@
 import { ChevronDown, FileUp, PackagePlus, PackageSearch, Search, Star } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
+import { useConfirmar } from "../ui/Confirmar";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { listarDepartamentos } from "../db/departamentos";
-import { buscarProductos, marcarFavorito, productoPorCodigo } from "../db/productos";
+import { buscarProductos, marcarFavorito, marcarFavoritos, productoPorCodigo } from "../db/productos";
 import { monto } from "../lib/tickets";
 import { useEscaner } from "../lib/useEscaner";
 import type { Codigo, Departamento, ProductoLista } from "../tipos";
@@ -21,6 +22,7 @@ type Dialogo = { tipo: "editar"; id: string | null; codigo?: Codigo } | { tipo: 
 
 export default function Productos() {
   const { actor, config, puede } = useSesion();
+  const confirmar = useConfirmar();
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [texto, setTexto] = useState("");
   const [depto, setDepto] = useState("");
@@ -80,6 +82,26 @@ export default function Productos() {
     if (p) setDialogo({ tipo: "editar", id: p.id });
   }
 
+  /** Todos los que coinciden con la búsqueda (no solo la página cargada) pasan a favoritos, o salen. */
+  async function favoritosEnBloque(favorito: boolean) {
+    setError("");
+    const ok = await confirmar({
+      titulo: favorito ? "Marcar como favoritos" : "Quitar de favoritos",
+      texto: favorito
+        ? `Los ${total} productos de esta búsqueda aparecerán como tarjetas en Venta.`
+        : `Los ${total} productos de esta búsqueda dejarán de aparecer como tarjetas en Venta.`,
+      aceptar: favorito ? "Marcar" : "Quitar",
+    });
+    if (!ok) return;
+    try {
+      const todos = await buscarProductos({ texto, departamentoId: depto || undefined, incluirInactivos: inactivos, limite: 1000 });
+      await marcarFavoritos(actor, todos.filas.filter((p) => p.favorito !== favorito).map((p) => p.id), favorito);
+      await cargar();
+    } catch (e) {
+      setError(textoError(e));
+    }
+  }
+
   if (importando) return <Importar onSalir={() => (setImportando(false), void cargar())} />;
 
   return (
@@ -128,7 +150,19 @@ export default function Productos() {
           />
         ) : (
         <>
-        <p className="muted">{`${filas.length} de ${total.toLocaleString("es-CR")} productos`}</p>
+        <div className="row between">
+          <p className="muted">{`${filas.length} de ${total.toLocaleString("es-CR")} productos`}</p>
+          {(texto.trim() || depto) && (
+            <div className="row">
+              <Button icono={Star} onClick={() => void favoritosEnBloque(true)}>
+                Marcar los {total.toLocaleString("es-CR")} como favoritos
+              </Button>
+              <Button variante="fantasma" onClick={() => void favoritosEnBloque(false)}>
+                Quitar de favoritos
+              </Button>
+            </div>
+          )}
+        </div>
         <table className="tbl tbl-grande">
           <thead>
             <tr>

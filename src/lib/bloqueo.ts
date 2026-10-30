@@ -22,4 +22,4 @@ export function formatoEspera(ms: number): string {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
 }
 
-export const PIN_VALIDO = /^\d{4,8}$/;
+export const PIN_VALIDO = /^\d{4,12}$/;

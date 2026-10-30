@@ -1,6 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import {
   FileText,
+  Landmark,
   LogOut,
   Moon,
   Package,
@@ -12,17 +13,20 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { crearSesion, SesionCtx } from "./app/sesion";
 import { textoError } from "./components/Mensaje";
+import { estadoCaja, type EstadoCaja } from "./db/caja";
 import { guardarConfig, leerConfig, type ConfigApp } from "./db/config";
 import { iniciarBase } from "./db/iniciar";
-import { obtenerNegocio } from "./db/negocio";
-import { tecnico, usarHasher } from "./db/usuarios";
+import { cerrarSesion, estadoSistema, tocarSesion } from "./db/usuarios";
 import { pendientesFactura } from "./db/ventas";
-import type { Permiso } from "./lib/permisos";
-import { hasherTauri } from "./lib/pinApi";
+import { alPerderSesion, SESION_EXPIRADA } from "./lib/invocar";
+import { puede, type Permiso } from "./lib/permisos";
+import { fechaHora } from "./lib/tickets";
 import Administracion from "./screens/Administracion";
+import Caja from "./screens/Caja";
+import CambiarPinObligatorio from "./screens/CambiarPinObligatorio";
 import Clientes from "./screens/Clientes";
 import ConfigTecnica from "./screens/ConfigTecnica";
 import Login from "./screens/Login";
@@ -37,7 +41,7 @@ import Button from "./ui/Button";
 import { ConfirmarProvider } from "./ui/Confirmar";
 import { aplicarTema } from "./ui/tema";
 
-export type Pagina = "venta" | "ventas" | "productos" | "clientes" | "facturas" | "admin" | "config";
+export type Pagina = "venta" | "caja" | "ventas" | "productos" | "clientes" | "facturas" | "admin" | "config";
 
 interface Seccion {
   id: Pagina;
@@ -46,9 +50,10 @@ interface Seccion {
   permisos: Permiso[]; // basta uno
 }
 
-// Lo del día a día (máximo 5). Lo avanzado va aparte, abajo.
+// Lo del día a día. Lo avanzado va aparte, abajo.
 const PRINCIPAL: Seccion[] = [
   { id: "venta", texto: "Venta", icono: ShoppingCart, permisos: ["venta"] },
+  { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja"] },
   { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["venta"] },
   { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
   { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes"] },
@@ -65,25 +70,48 @@ type Fase =
   | { f: "error"; mensaje: string }
   | { f: "primer" }
   | { f: "login" }
-  | { f: "dentro"; usuario: Usuario };
+  | { f: "dentro"; usuario: Usuario; minutos: number };
 
 export default function App() {
   const [fase, setFase] = useState<Fase>({ f: "cargando" });
   const [config, setConfig] = useState<ConfigApp | null>(null);
   const [nombreNegocio, setNombreNegocio] = useState("");
+  const [avisoLogin, setAvisoLogin] = useState("");
+
+  /** Antes de entrar solo se sabe lo que Rust deja ver sin sesión: nombre, tema y si falta el técnico. */
+  const cargarSistema = useCallback(async () => {
+    const s = await estadoSistema();
+    if (s.error) return setFase({ f: "error", mensaje: s.error });
+    aplicarTema(s.tema === "oscuro" ? "oscuro" : "claro", typeof s.colorAcento === "string" ? s.colorAcento : "");
+    setNombreNegocio(s.nombreNegocio);
+    setFase(s.necesitaTecnico ? { f: "primer" } : { f: "login" });
+  }, []);
 
   useEffect(() => {
     aplicarTema("claro");
     if (!isTauri()) return setFase({ f: "sinTauri" });
-    (async () => {
-      await iniciarBase();
-      usarHasher(hasherTauri);
-      const c = await leerConfig();
-      aplicarTema(c.tema, c.color_acento);
-      setConfig(c);
-      setNombreNegocio((await obtenerNegocio()).nombreComercial);
-      setFase((await tecnico()) ? { f: "login" } : { f: "primer" });
-    })().catch((e) => setFase({ f: "error", mensaje: textoError(e) }));
+    iniciarBase();
+    cargarSistema().catch((e) => setFase({ f: "error", mensaje: textoError(e) }));
+  }, []);
+
+  // Rust cerró la sesión (inactividad): de vuelta a la entrada.
+  useEffect(
+    () =>
+      alPerderSesion((m) => {
+        if (m !== SESION_EXPIRADA) return;
+        setConfig(null);
+        setAvisoLogin("La sesión se cerró por inactividad.");
+        setFase({ f: "login" });
+      }),
+    [],
+  );
+
+  const entrar = useCallback(async (usuario: Usuario, minutos: number) => {
+    const c = await leerConfig();
+    aplicarTema(c.tema, c.color_acento);
+    setConfig(c);
+    setAvisoLogin("");
+    setFase({ f: "dentro", usuario, minutos });
   }, []);
 
   const recargarConfig = useCallback(async () => {
@@ -92,8 +120,11 @@ export default function App() {
     setConfig(c);
   }, []);
   const salir = useCallback(() => {
-    void obtenerNegocio().then((n) => setNombreNegocio(n.nombreComercial));
-    setFase({ f: "login" });
+    void cerrarSesion()
+      .catch(() => undefined)
+      .then(() => cargarSistema())
+      .catch((e) => setFase({ f: "error", mensaje: textoError(e) }));
+    setConfig(null);
   }, []);
 
   let contenido: ReactNode;
@@ -114,21 +145,70 @@ export default function App() {
         </Alert>
       </div>
     );
-  else if (fase.f === "primer") contenido = <PrimerArranque onListo={(usuario) => setFase({ f: "dentro", usuario })} />;
-  else if (fase.f === "login" || !config) contenido = <Login nombreNegocio={nombreNegocio} onEntrar={(usuario) => setFase({ f: "dentro", usuario })} />;
-  else contenido = <Dentro usuario={fase.usuario} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
+  else if (fase.f === "primer") contenido = <PrimerArranque onListo={(u, m) => void entrar(u, m)} />;
+  else if (fase.f === "login" || !config)
+    contenido = (
+      <>
+        {avisoLogin && (
+          <div className="aviso-flotante">
+            <Alert tono="info">{avisoLogin}</Alert>
+          </div>
+        )}
+        <Login nombreNegocio={nombreNegocio} onEntrar={(u, m) => void entrar(u, m)} />
+      </>
+    );
+  else if (fase.usuario.debeCambiarPin)
+    contenido = <CambiarPinObligatorio usuario={fase.usuario} onSalir={salir} onListo={() => setFase({ ...fase, usuario: { ...fase.usuario, debeCambiarPin: false } })} />;
+  else contenido = <Dentro usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
 
   return <ConfirmarProvider>{contenido}</ConfirmarProvider>;
 }
 
-function Dentro(p: { usuario: Usuario; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(): void }) {
-  const sesion = useMemo(() => crearSesion(p.usuario, p.config, p.recargarConfig, p.salir), [p.usuario, p.config, p.recargarConfig, p.salir]);
+function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(): void }) {
+  const usaCaja = puede(p.usuario.rol, "caja");
+  const [caja, setCaja] = useState<EstadoCaja | null>(null);
+  const recargarCaja = useCallback(async () => {
+    if (usaCaja) setCaja(await estadoCaja());
+  }, [usaCaja]);
+  const [pagina, setPagina] = useState<Pagina>("venta");
+  const irA = useCallback((x: string) => setPagina(x as Pagina), []);
+  const sesion = useMemo(
+    () => crearSesion(p.usuario, p.config, p.recargarConfig, p.salir, caja, recargarCaja, irA),
+    [p.usuario, p.config, p.recargarConfig, p.salir, caja, recargarCaja, irA],
+  );
   const visible = (s: Seccion) => s.permisos.some((x) => sesion.puede(x));
   const principal = PRINCIPAL.filter(visible);
   const avanzado = AVANZADO.filter(visible);
-  // Todos entran a Venta: es la pantalla principal.
-  const [pagina, setPagina] = useState<Pagina>(principal[0]?.id ?? "admin");
+  // Arranca en la primera sección que el rol puede usar (Venta para cajero y dueño).
+  useEffect(() => setPagina(principal[0]?.id ?? avanzado[0]?.id ?? "admin"), []);
   const [facturas, setFacturas] = useState(0);
+
+  useEffect(() => {
+    void recargarCaja().catch(() => undefined);
+  }, [pagina]);
+
+  // Inactividad: cada tanto se avisa a Rust que hubo uso; sin uso por N minutos, se bloquea.
+  const ultimo = useRef(Date.now());
+  useEffect(() => {
+    let avisado = 0;
+    const actividad = () => {
+      ultimo.current = Date.now();
+      if (Date.now() - avisado > 60_000) {
+        avisado = Date.now();
+        void tocarSesion().catch(() => undefined);
+      }
+    };
+    const t = setInterval(() => {
+      if (Date.now() - ultimo.current > p.minutos * 60_000) p.salir();
+    }, 15_000);
+    window.addEventListener("keydown", actividad, true);
+    window.addEventListener("pointerdown", actividad, true);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("keydown", actividad, true);
+      window.removeEventListener("pointerdown", actividad, true);
+    };
+  }, [p.minutos, p.salir]);
 
   // Contador de facturas pendientes en el menú: que no se olvide ninguna.
   useEffect(() => {
@@ -143,6 +223,7 @@ function Dentro(p: { usuario: Usuario; config: ConfigApp; nombreNegocio: string;
 
   const paginas: Record<Pagina, ReactNode> = {
     venta: <Venta />,
+    caja: <Caja />,
     ventas: <VentasHoy />,
     productos: <Productos />,
     clientes: <Clientes />,
@@ -173,6 +254,16 @@ function Dentro(p: { usuario: Usuario; config: ConfigApp; nombreNegocio: string;
       <div className="app">
         <aside className="lateral" aria-label="Menú">
           <div className="lateral-marca">{p.nombreNegocio || "Punto de venta"}</div>
+          {usaCaja && caja && (
+            <button className={caja.turno && !caja.deOtroDia ? "caja-indicador abierta" : "caja-indicador"} onClick={() => setPagina("caja")}>
+              <span className="punto" aria-hidden />
+              {caja.turno
+                ? caja.deOtroDia
+                  ? `Caja abierta desde el ${caja.turno.dia}`
+                  : `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(-5)}`
+                : "Caja cerrada"}
+            </button>
+          )}
           <nav aria-label="Principal">{principal.map(boton)}</nav>
           {avanzado.length > 0 && (
             <nav className="avanzado" aria-label="Avanzado">

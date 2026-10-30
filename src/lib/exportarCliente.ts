@@ -24,7 +24,9 @@ function campos(e: ExportacionCliente): [string, string][] {
 }
 
 function celda(s: string): string {
-  return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // Inyección de fórmulas: Excel ejecuta una celda que empieza con = + - @ (o tab/CR). Se le antepone '.
+  const t = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+  return /[",;\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
 }
 
 /** CSV (UTF-8 con BOM para que Excel muestre bien las tildes). */

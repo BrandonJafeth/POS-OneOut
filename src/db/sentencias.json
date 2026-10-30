@@ -1,0 +1,72 @@
+{
+  "_comentario": "Únicas escrituras de catálogo que el frontend puede pedir, por nombre. Rust ejecuta el SQL de aquí (nunca uno que mande la pantalla) y revisa el permiso contra la sesión. bitacora.registrar es especial: la escribe Rust con el usuario de la sesión y la cadena de hashes.",
+  "producto.crear": {
+    "permiso": "productos",
+    "sql": "INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio, activo, cabys, tasa_iva, exento, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  },
+  "producto.editar": {
+    "permiso": "productos",
+    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?, cabys = ?, tasa_iva = ?, exento = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "producto.eliminar": {
+    "permiso": "productos",
+    "sql": "UPDATE productos SET eliminado_en = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "producto.favorito": {
+    "permiso": "productos",
+    "sql": "UPDATE productos SET favorito = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "codigo.asociar": {
+    "permiso": "productos",
+    "sql": "INSERT INTO codigos (codigo, producto_id, tipo, creado_en) VALUES (?, ?, ?, ?)"
+  },
+  "codigo.mover": {
+    "permiso": "productos",
+    "sql": "UPDATE codigos SET producto_id = ?, tipo = ? WHERE codigo = ?"
+  },
+  "codigo.quitar": {
+    "permiso": "productos",
+    "sql": "DELETE FROM codigos WHERE codigo = ?"
+  },
+  "codigo_interno.asegurar": {
+    "permiso": "productos",
+    "sql": "INSERT OR IGNORE INTO config (clave, valor) VALUES ('codigo_interno_siguiente', '1')"
+  },
+  "codigo_interno.tomar": {
+    "permiso": "productos",
+    "devuelve": true,
+    "sql": "UPDATE config SET valor = CAST(valor AS INTEGER) + 1, actualizado_en = ? WHERE clave = 'codigo_interno_siguiente' RETURNING CAST(valor AS INTEGER) - 1 AS n"
+  },
+  "departamento.crear": {
+    "permiso": "departamentos.estructura",
+    "sql": "INSERT INTO departamentos (id, codigo, nombre, orden) VALUES (?, ?, ?, ?)"
+  },
+  "departamento.editar": {
+    "permiso": "departamentos",
+    "sql": "UPDATE departamentos SET nombre = ?, orden = ?, activo = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "departamento.cambiar_codigo": {
+    "permiso": "departamentos.estructura",
+    "sql": "UPDATE departamentos SET codigo = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "departamento.orden": {
+    "permiso": "departamentos",
+    "sql": "UPDATE departamentos SET orden = ?, actualizado_en = ? WHERE id = ?"
+  },
+  "forma_pago.guardar": {
+    "permiso": "config.tecnica",
+    "sql": "INSERT INTO formas_pago (id, codigo, nombre, tipo, requiere_banco, requiere_referencia, da_vuelto, pide_ultimos4, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET codigo = excluded.codigo, nombre = excluded.nombre, tipo = excluded.tipo, requiere_banco = excluded.requiere_banco, requiere_referencia = excluded.requiere_referencia, da_vuelto = excluded.da_vuelto, pide_ultimos4 = excluded.pide_ultimos4, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en"
+  },
+  "banco.guardar": {
+    "permiso": "config.tecnica",
+    "sql": "INSERT INTO bancos (id, nombre, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en"
+  },
+  "importacion.crear": {
+    "permiso": "productos.importar",
+    "sql": "INSERT INTO productos (id, web_id, nombre, nombre_busqueda, departamento_id, precio, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (web_id) DO UPDATE SET nombre = excluded.nombre, nombre_busqueda = excluded.nombre_busqueda, precio = excluded.precio, actualizado_en = excluded.actualizado_en"
+  },
+  "importacion.actualizar": {
+    "permiso": "productos.importar",
+    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, precio = ?, actualizado_en = ? WHERE id = ?"
+  }
+}

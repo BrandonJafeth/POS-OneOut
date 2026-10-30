@@ -1,12 +1,13 @@
 // Solo técnico. Lo que cambia entre negocios se ajusta aquí, sin tocar código.
-import { appConfigDir } from "@tauri-apps/api/path";
+import Alert from "../ui/Alert";
+import Button from "../ui/Button";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
-import { listarBitacora } from "../db/bitacora";
+import { listarBitacora, verificarBitacora, type VerificacionBitacora } from "../db/bitacora";
 import { obtenerCaja } from "../db/cajas";
 import { guardarConfig, leerConfigCruda } from "../db/config";
-import { estadoBase, type EstadoBase } from "../db/iniciar";
+import { estadoSistema, type EstadoSistema } from "../db/usuarios";
 import { ajustesImpresora } from "../lib/impresion";
 import { PERMISOS, type Permiso } from "../lib/permisos";
 import { listPrinters } from "../lib/printerApi";
@@ -224,7 +225,8 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   clientes: "Clientes: lista, datos, exportar, anonimizar",
   respaldo: "Respaldo cifrado (lleva datos de clientes)",
   facturas: "Pendientes de factura electrónica",
-  "dia.cerrar": "Cerrar el día",
+  caja: "Caja: abrir, movimientos, cerrar",
+  "caja.admin": "Caja: todos los turnos, reabrir, revisar",
 };
 
 function Permisos() {
@@ -297,29 +299,37 @@ function Bitacora() {
 }
 
 function Sistema() {
-  const [base, setBase] = useState<EstadoBase | null>(null);
-  const [ruta, setRuta] = useState("");
+  const [estado, setEstado] = useState<EstadoSistema | null>(null);
+  const [bit, setBit] = useState<VerificacionBitacora | null>(null);
   const [caja, setCaja] = useState<Caja | null>(null);
+  const [error, setError] = useState("");
   useEffect(() => {
-    void estadoBase().then(setBase);
-    void appConfigDir().then(setRuta);
-    void obtenerCaja().then(setCaja);
+    void estadoSistema().then(setEstado, (e) => setError(textoError(e)));
+    void obtenerCaja().then(setCaja, (e) => setError(textoError(e)));
   }, []);
   return (
     <section className="card">
       <div className="grid2">
-        <span>Archivo de datos</span>
-        <span className="mono">{ruta ? `${ruta}\\pos.db` : "…"}</span>
-        <span>journal_mode</span>
-        <span className="mono">{base?.journalMode ?? "…"}</span>
-        <span>foreign_keys</span>
-        <span className="mono">{base ? (base.foreignKeys ? "ON" : "OFF") : "…"}</span>
+        <span>Carpeta de datos</span>
+        <span className="mono">{estado ? estado.carpeta : "…"}</span>
+        <span>Base de datos</span>
+        <span>{estado ? (estado.cifrada ? "Cifrada (SQLCipher, clave protegida por Windows)" : "SIN CIFRAR (compilación de desarrollo)") : "…"}</span>
         <span>Caja</span>
+        <span>{caja ? `${caja.nombre} · próximo tiquete ${caja.prefijoTiquete}${caja.consecutivoSiguiente}` : "…"}</span>
+        <span>Bitácora</span>
         <span>
-          {caja ? `${caja.nombre} · próximo tiquete ${caja.prefijoTiquete}${caja.consecutivoSiguiente}` : "…"}
+          {bit ? (bit.ok ? `Íntegra (${bit.filas} registros)` : `ALTERADA desde el registro ${bit.rotaEn}`) : (
+            <Button onClick={() => verificarBitacora().then(setBit, (e) => setError(textoError(e)))}>
+              Verificar ahora
+            </Button>
+          )}
         </span>
       </div>
-      <p className="muted">Respaldo: copie pos.db (con la app cerrada) junto con pos.db-wal y pos.db-shm si existen.</p>
+      {error && <Alert tono="error">{error}</Alert>}
+      <p className="muted">
+        La base y su clave solo sirven en esta computadora y con este usuario de Windows. Para llevar los datos a otra, use un respaldo
+        cifrado (Administración → Respaldo).
+      </p>
     </section>
   );
 }

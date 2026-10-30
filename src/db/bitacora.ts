@@ -1,9 +1,9 @@
-// Bitácora: TODA acción sensible pasa por bitacora(). Devuelve una sentencia para meterla
+// Bitácora: TODA acción sensible queda registrada. bitacora() devuelve una operación para meterla
 // en el mismo lote que el cambio (así no queda un cambio sin registro ni un registro sin cambio).
+// Rust la escribe con el usuario de la SESIÓN (el primer parámetro se ignora) y la encadena con hash.
 import type { AccionBitacora, EntradaBitacora } from "../tipos";
-import { ulid } from "../lib/ulid";
-import { ahoraIso } from "../lib/texto";
-import { db, textoONull, type Sentencia } from "./conexion";
+import { invocar } from "../lib/invocar";
+import { db, type Sentencia } from "./conexion";
 
 export function bitacora(
   usuarioId: string | null,
@@ -12,10 +12,7 @@ export function bitacora(
   entidadId: string | null,
   detalle: unknown = {},
 ): Sentencia {
-  return {
-    sql: "INSERT INTO bitacora (id, fecha, usuario_id, accion, entidad, entidad_id, detalle) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    params: [ulid(), ahoraIso(), usuarioId, accion, entidad, entidadId, JSON.stringify(detalle ?? {})],
-  };
+  return { id: "bitacora.registrar", params: [usuarioId, accion, entidad, entidadId, JSON.stringify(detalle ?? {})] };
 }
 
 /** Para acciones que no cambian nada más (p. ej. login fallido). */
@@ -24,19 +21,16 @@ export async function registrar(...args: Parameters<typeof bitacora>): Promise<v
 }
 
 export async function listarBitacora(limite = 200, entidad?: string): Promise<EntradaBitacora[]> {
-  const filas = await db().select(
-    `SELECT b.*, u.nombre AS usuario FROM bitacora b LEFT JOIN usuarios u ON u.id = b.usuario_id
-     ${entidad ? "WHERE b.entidad = ?" : ""} ORDER BY b.fecha DESC, b.id DESC LIMIT ?`,
-    entidad ? [entidad, limite] : [limite],
-  );
-  return filas.map((f) => ({
-    id: String(f.id),
-    fecha: String(f.fecha),
-    usuarioId: textoONull(f.usuario_id),
-    usuario: textoONull(f.usuario),
-    accion: f.accion as AccionBitacora,
-    entidad: String(f.entidad),
-    entidadId: textoONull(f.entidad_id),
-    detalle: JSON.parse(String(f.detalle ?? "{}")),
-  }));
+  return invocar<EntradaBitacora[]>("bitacora_listar", { limite, entidad: entidad ?? null });
+}
+
+export interface VerificacionBitacora {
+  ok: boolean;
+  filas: number;
+  rotaEn: string | null;
+}
+
+/** Recorre la cadena de hashes: si alguien editó o borró una fila directo en el archivo, aparece aquí. */
+export function verificarBitacora(): Promise<VerificacionBitacora> {
+  return invocar<VerificacionBitacora>("bitacora_verificar");
 }

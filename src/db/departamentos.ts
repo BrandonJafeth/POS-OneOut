@@ -34,7 +34,7 @@ export async function crearDepartamento(actor: Actor, datos: { codigo: string; n
   const orden = Number((await db().select("SELECT COALESCE(MAX(orden), 0) + 1 AS o FROM departamentos"))[0].o);
   await db().lote([
     {
-      sql: "INSERT INTO departamentos (id, codigo, nombre, orden) VALUES (?, ?, ?, ?)",
+      id: "departamento.crear",
       params: [id, datos.codigo, datos.nombre.trim(), orden],
     },
     bitacora(actor.id, "departamento.crear", "departamento", id, datos),
@@ -54,11 +54,11 @@ export async function editarDepartamento(
     throw new SinPermiso("cambiar el código de un departamento");
   const n = { ...d, ...cambios, nombre: (cambios.nombre ?? d.nombre).trim() };
   await validar(n, id);
+  const ahora = ahoraIso();
   await db().lote([
-    {
-      sql: "UPDATE departamentos SET codigo = ?, nombre = ?, orden = ?, activo = ?, actualizado_en = ? WHERE id = ?",
-      params: [n.codigo, n.nombre, n.orden, n.activo, ahoraIso(), id],
-    },
+    // El código va aparte: solo lo cambia quien tiene departamentos.estructura (Rust lo vuelve a revisar).
+    ...(n.codigo !== d.codigo ? [{ id: "departamento.cambiar_codigo", params: [n.codigo, ahora, id] }] : []),
+    { id: "departamento.editar", params: [n.nombre, n.orden, n.activo, ahora, id] },
     bitacora(actor.id, "departamento.editar", "departamento", id, { antes: d, despues: n }),
   ]);
 }
@@ -74,7 +74,7 @@ export async function moverDepartamento(actor: Actor, id: string, dir: -1 | 1): 
   // Se renumera toda la lista para que el orden quede 1, 2, 3… aunque hubiera repetidos.
   [lista[i], lista[j]] = [lista[j], lista[i]];
   await db().lote([
-    ...lista.map((d, k) => ({ sql: "UPDATE departamentos SET orden = ?, actualizado_en = ? WHERE id = ?", params: [k + 1, ahora, d.id] })),
+    ...lista.map((d, k) => ({ id: "departamento.orden", params: [k + 1, ahora, d.id] })),
     bitacora(actor.id, "departamento.editar", "departamento", id, { orden: dir < 0 ? "arriba" : "abajo" }),
   ]);
 }

@@ -10,18 +10,35 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Punto de Venta",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 1024,
-        "minHeight": 640,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-src": "'none'",
+        "frame-ancestors": "'none'",
+        "worker-src": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost ws://localhost:1420",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-src": "'none'"
+      },
+      "freezePrototype": true
     }
   },
   "bundle": {
@@ -34,12 +51,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "sql": {
-      "preload": [
-        "sqlite:pos.db"
-      ]
-    }
   }
 }

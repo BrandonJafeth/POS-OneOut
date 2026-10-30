@@ -1,6 +1,6 @@
 // Respaldo cifrado (Rust: src-tauri/src/respaldo.rs). Aquí se valida antes de llamar,
 // y Rust vuelve a validar: sin contraseña de 8+ caracteres no se genera nada.
-import { invoke } from "@tauri-apps/api/core";
+import { invocar as invocarRust } from "./invocar";
 
 export const CONTRASENA_MINIMA = 8;
 
@@ -20,8 +20,22 @@ export function marcaTiempo(d = new Date()): string {
 
 type Invocar = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 
-/** Devuelve la ruta del archivo creado. `invocar` se inyecta en las pruebas. */
-export async function crearRespaldo(contrasena: string, repetida: string, invocar: Invocar = invoke): Promise<string> {
+/** Lo crea Rust en la carpeta de la app sin pasar por un archivo en claro. Devuelve la ruta. */
+export async function crearRespaldo(contrasena: string, repetida: string, invocar: Invocar = invocarRust): Promise<string> {
   validarContrasenaRespaldo(contrasena, repetida);
-  return String(await invocar("respaldo_crear", { contrasena, marca: marcaTiempo() }));
+  return String(await invocar("respaldo_crear", { contrasena }));
+}
+
+/**
+ * Restaura desde un archivo elegido con <input type="file"> (la ventana no tiene acceso al disco).
+ * Rust lo descifra, revisa integridad y lo deja listo; la app se reinicia para usarlo.
+ */
+export async function restaurarRespaldo(archivo: File, contrasena: string, pinDueno: string, invocar: Invocar = invocarRust): Promise<void> {
+  if (!archivo.name.toLowerCase().endsWith(".posbak")) throw new Error("Elija un archivo .posbak");
+  const datos = Array.from(new Uint8Array(await archivo.arrayBuffer()));
+  await invocar("respaldo_restaurar", { pin: pinDueno, archivo: datos, contrasena });
+}
+
+export async function reiniciarApp(): Promise<void> {
+  await invocarRust("app_reiniciar");
 }

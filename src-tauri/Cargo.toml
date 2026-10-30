@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Punto de venta local (librerías y floristerías)"
 authors = ["you"]
 edition = "2024"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,6 +15,12 @@ edition = "2024"
 name = "pos_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# SQLCipher (base cifrada). Necesita Perl nativo (Strawberry) para compilar OpenSSL.
+# Sin esta función la app se niega a usar una clave: solo sirve para desarrollo.
+default = ["cifrado"]
+cifrado = ["libsqlite3-sys/bundled-sqlcipher-vendored-openssl"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -21,20 +28,33 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# SQLite (pool + migraciones). sqlx va con la MISMA versión que usa el plugin: así el
-# comando sql_lote puede abrir transacciones sobre el pool del plugin.
-tauri-plugin-sql = { version = "2.6.0", features = ["sqlite"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+# Base de datos: SQLite manejada SOLO desde Rust (el frontend no recibe acceso a SQL).
+# libsqlite3-sys directo: misma versión que usa sqlx; permite SQLCipher y serializar en memoria.
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio", "migrate"] }
+libsqlite3-sys = { version = "0.30.1", features = ["bundled"] }
+tokio = { version = "1", features = ["sync", "time"] }
+futures-core = "0.3"
+# Cadena de hashes de la bitácora.
+sha2 = "0.10"
+# Fecha y hora local (día de caja).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+getrandom = "0.2"
 # Hash de PIN (Argon2id).
 argon2 = "0.6.0"
 # Cifrado de respaldos (AES-256-GCM).
 aes-gcm = "0.11.1"
 
 
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
 # Argon2 sin optimizar (modo dev) tarda varios segundos por PIN: se compila optimizado siempre.
 [profile.dev.package.argon2]
 opt-level = 3
 [profile.dev.package.blake2]
+opt-level = 3
+# SQLite (y SQLCipher) compilado sin optimizar hace lentas las pruebas.
+[profile.dev.package.libsqlite3-sys]
 opt-level = 3
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -47,4 +67,4 @@ strip = true
 
 # Solo en Windows: API del spooler para mandar bytes RAW a la impresora.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Security_Cryptography"] }
