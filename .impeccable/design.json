@@ -1,0 +1,417 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T12:00:00Z",
+  "title": "Design System: Punto de venta (Librería y Bazar Chagui)",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Grafito",
+        "canonical": "#24272c",
+        "tonalRamp": [
+          "#0e0f11",
+          "#1a1c20",
+          "#24272c",
+          "#3b3f46",
+          "#575b63",
+          "#84888f",
+          "#c3c6cb",
+          "#eaebed"
+        ]
+      },
+      "accent-bg": {
+        "role": "primary",
+        "displayName": "Gris Selección",
+        "canonical": "#eaebed",
+        "tonalRamp": [
+          "#24272c",
+          "#4a4e55",
+          "#727680",
+          "#9a9ea6",
+          "#c1c4ca",
+          "#dadce0",
+          "#eaebed",
+          "#f5f5f6"
+        ]
+      },
+      "focus": {
+        "role": "primary",
+        "displayName": "Grafito (foco)",
+        "canonical": "#24272c"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Gris Mostrador",
+        "canonical": "#f2f3f4",
+        "tonalRamp": [
+          "#1a1c20",
+          "#30333a",
+          "#575b63",
+          "#84888f",
+          "#b5b8bd",
+          "#e3e5e8",
+          "#f2f3f4",
+          "#fafafb"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Blanco Tarjeta",
+        "canonical": "#ffffff"
+      },
+      "card2": {
+        "role": "neutral",
+        "displayName": "Blanco Humo",
+        "canonical": "#f7f7f8"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Gris Borde",
+        "canonical": "#84888f"
+      },
+      "hair": {
+        "role": "neutral",
+        "displayName": "Gris Hilo",
+        "canonical": "#e3e5e8"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Tinta",
+        "canonical": "#1a1c20"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Gris Secundario",
+        "canonical": "#575b63"
+      },
+      "ok": {
+        "role": "tertiary",
+        "displayName": "Verde Correcto",
+        "canonical": "#0b6b4d"
+      },
+      "warn": {
+        "role": "tertiary",
+        "displayName": "Ámbar Aviso",
+        "canonical": "#7a4a00"
+      },
+      "err": {
+        "role": "tertiary",
+        "displayName": "Rojo Error",
+        "canonical": "#b42318"
+      },
+      "mark": {
+        "role": "tertiary",
+        "displayName": "Resaltador",
+        "canonical": "#ffd54a"
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "Tiza",
+        "canonical": "#eceef1"
+      },
+      "dark-on-accent": {
+        "role": "primary",
+        "displayName": "Texto sobre Tiza",
+        "canonical": "#18191c"
+      },
+      "dark-accent-bg": {
+        "role": "primary",
+        "displayName": "Grafito Selección",
+        "canonical": "#2e3036"
+      },
+      "dark-bg": {
+        "role": "neutral",
+        "displayName": "Carbón",
+        "canonical": "#111214"
+      },
+      "dark-card": {
+        "role": "neutral",
+        "displayName": "Tarjeta Carbón",
+        "canonical": "#18191c"
+      },
+      "dark-card2": {
+        "role": "neutral",
+        "displayName": "Carbón Alto",
+        "canonical": "#1f2024"
+      }
+    },
+    "typographyMeta": {
+      "amount-hero": {
+        "displayName": "Monto héroe",
+        "purpose": "Total en el diálogo de cobro."
+      },
+      "amount-charge": {
+        "displayName": "Monto de cobro",
+        "purpose": "Cifra dentro del botón Cobrar."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Título de pantalla."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Títulos de tarjeta y diálogo."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Texto corrido y campos."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Botones y nombres de producto."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Etiquetas de campo, chips, totales."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Subtítulos de línea, cabeceras de tabla, insignias."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Vista previa del papel térmico, kbd y volcados hex."
+      }
+    },
+    "shadows": [
+      {
+        "name": "levante-tarjeta",
+        "value": "0 4px 14px var(--sombra)",
+        "purpose": "Hover de tarjeta de producto."
+      },
+      {
+        "name": "capa-modal",
+        "value": "0 24px 60px var(--sombra), 0 2px 8px var(--sombra)",
+        "purpose": "Diálogos sobre velo rgba(10,18,24,.45)."
+      },
+      {
+        "name": "halo-recorte",
+        "value": "0 0 0 3px var(--bg)",
+        "purpose": "Separa la insignia de cantidad del borde de la tarjeta."
+      }
+    ],
+    "motion": [
+      {
+        "name": "estado",
+        "value": "150ms ease-out",
+        "purpose": "Color de fondo, borde y texto en botones; borde y sombra en tarjetas."
+      },
+      {
+        "name": "aparecer",
+        "value": "150ms ease-out",
+        "purpose": "Fundido del velo modal."
+      },
+      {
+        "name": "subir",
+        "value": "180ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Entrada del modal (8px, scale .99). Se anula con prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compacto",
+        "value": "max-width: 1200px"
+      },
+      {
+        "name": "medio",
+        "value": "max-width: 1440px"
+      },
+      {
+        "name": "amplio",
+        "value": "min-width: 1700px"
+      }
+    ],
+    "brandAccent": {
+      "configKey": "color_acento",
+      "format": "#rrggbb; vacío = grafito",
+      "adjust": "temaConAcento(): conserva el tono; oscurece (claro, hacia #000000) o aclara (oscuro, hacia #ffffff) en pasos de 6 % hasta 4,5:1 sobre card, bg y accent-bg.",
+      "accentBg": "color mezclado sobre card: 10 % en claro, 20 % en oscuro",
+      "onAccent": "#ffffff o #111214, el de mayor contraste",
+      "replaces": [
+        "accent",
+        "accent-bg",
+        "on-accent",
+        "focus"
+      ],
+      "samples": [
+        {
+          "input": "#ff69b4",
+          "claro": "#b0487c",
+          "oscuro": "#ff69b4"
+        },
+        {
+          "input": "#ffd400",
+          "claro": "#816b00",
+          "oscuro": "#ffd400"
+        },
+        {
+          "input": "#1a4fc4",
+          "claro": "#1a4fc4",
+          "oscuro": "#6a8dd9"
+        },
+        {
+          "input": "#2e7d32",
+          "claro": "#2b762f",
+          "oscuro": "#669f69"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "name": "Botón Cobrar",
+      "kind": "button",
+      "refersTo": "button-charge",
+      "description": "Acción final de la venta: ancho completo y dice el monto.",
+      "html": "<button class=\"ds-cobrar\"><span>Cobrar</span><span class=\"ds-cobrar-monto\">¢13.225</span></button>",
+      "css": ".ds-cobrar { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 64px; padding: 12px 24px; border: 1px solid #24272c; border-radius: 12px; background: #24272c; color: #ffffff; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 22px; font-weight: 550; cursor: pointer; transition: background-color 150ms ease-out; } .ds-cobrar-monto { font-size: 26px; font-weight: 750; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; } .ds-cobrar:hover { filter: brightness(1.1); } .ds-cobrar:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; } .ds-cobrar:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Botón Cobrar con color del negocio",
+      "kind": "button",
+      "refersTo": "button-charge",
+      "description": "El mismo Cobrar con color_acento = #ff69b4 (floristería), ajustado a #b0487c por temaConAcento() en tema claro.",
+      "html": "<button class=\"ds-cobrar-negocio\"><span>Cobrar</span><span class=\"ds-cobrar-negocio-monto\">¢13.225</span></button>",
+      "css": ".ds-cobrar-negocio { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 64px; padding: 12px 24px; border: 1px solid #b0487c; border-radius: 12px; background: #b0487c; color: #ffffff; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 22px; font-weight: 550; cursor: pointer; transition: background-color 150ms ease-out; } .ds-cobrar-negocio-monto { font-size: 26px; font-weight: 750; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; } .ds-cobrar-negocio:hover { filter: brightness(1.1); } .ds-cobrar-negocio:focus-visible { outline: 2px solid #b0487c; outline-offset: 2px; } .ds-cobrar-negocio:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Botón normal",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Acción neutra con borde de control.",
+      "html": "<button class=\"ds-btn\">Descuento</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 16px; border: 1px solid #84888f; border-radius: 8px; background: #ffffff; color: #1a1c20; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 15px; font-weight: 550; cursor: pointer; transition: background-color 150ms ease-out; } .ds-btn:hover { background: #f7f7f8; } .ds-btn:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; } .ds-btn:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Botón peligro",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Quitar o descartar.",
+      "html": "<button class=\"ds-btn-peligro\">Quitar</button>",
+      "css": ".ds-btn-peligro { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px; border: 1px solid #b42318; border-radius: 8px; background: transparent; color: #b42318; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 15px; font-weight: 550; cursor: pointer; transition: background-color 150ms ease-out; } .ds-btn-peligro:hover { background: #fdeceb; } .ds-btn-peligro:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Buscador",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Campo ancho de búsqueda o escaneo encima del catálogo.",
+      "html": "<label class=\"ds-buscar\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input placeholder=\"Buscar o escanear producto\"></label>",
+      "css": ".ds-buscar { position: relative; display: block; width: 100%; } .ds-buscar svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #575b63; pointer-events: none; } .ds-buscar input { width: 100%; min-height: 52px; padding: 8px 12px 8px 46px; border: 1px solid #84888f; border-radius: 12px; background: #ffffff; color: #1a1c20; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 18px; } .ds-buscar input::placeholder { color: #575b63; } .ds-buscar input:focus { outline: 2px solid #24272c; outline-offset: 0; border-color: #24272c; }"
+    },
+    {
+      "name": "Chip de filtro",
+      "kind": "chip",
+      "refersTo": "chip-filter",
+      "description": "Departamentos y Favoritos sobre la grilla.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\" aria-pressed=\"true\">Favoritos</button><button class=\"ds-chip\" aria-pressed=\"false\">Papelería</button></div>",
+      "css": ".ds-chips { display: flex; gap: 4px; flex-wrap: wrap; } .ds-chip { min-height: 40px; padding: 2px 12px; border: 1px solid #e3e5e8; border-radius: 999px; background: #ffffff; color: #575b63; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-size: 14px; font-weight: 550; cursor: pointer; transition: background-color 150ms ease-out, border-color 150ms ease-out; } .ds-chip:hover { background: #f7f7f8; } .ds-chip[aria-pressed=\"true\"] { border-color: #24272c; background: #eaebed; color: #24272c; font-weight: 650; } .ds-chip:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Tarjeta de producto",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "Tarjeta tocable de la grilla; borde de acento e insignia cuando ya está en la venta.",
+      "html": "<div class=\"ds-tile-wrap\"><button class=\"ds-tile ds-en-venta\"><span class=\"ds-tile-nombre\">Lápiz HB Mongol</span><span class=\"ds-tile-pie\"><span class=\"ds-tile-dep\">Lapicero y lápiz</span><span class=\"ds-tile-precio\">¢350</span></span></button><span class=\"ds-tile-cant\">2</span><span class=\"ds-tile-estrella\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z\"/></svg></span></div>",
+      "css": ".ds-tile-wrap { position: relative; width: 180px; height: 132px; margin: 12px; } .ds-tile { display: flex; flex-direction: column; justify-content: space-between; width: 100%; height: 100%; padding: 12px 12px 12px 16px; border: 1px solid #e3e5e8; border-radius: 12px; background: #ffffff; color: #1a1c20; text-align: left; font-family: 'Public Sans Variable', 'Segoe UI', system-ui, sans-serif; font-weight: 500; cursor: pointer; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-tile:hover { border-color: #84888f; box-shadow: 0 4px 14px rgba(20,22,26,0.12); } .ds-tile.ds-en-venta { border-color: #24272c; } .ds-tile:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; } .ds-tile-nombre { font-size: 15px; line-height: 1.3; padding-right: 22px; } .ds-tile-pie { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; } .ds-tile-dep { font-size: 12px; color: #575b63; } .ds-tile-precio { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-tile-cant { position: absolute; top: -8px; left: -8px; min-width: 26px; height: 26px; padding: 0 7px; display: grid; place-items: center; border-radius: 999px; background: #24272c; color: #ffffff; font: 700 13px 'Public Sans Variable', sans-serif; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 3px #f2f3f4; } .ds-tile-estrella { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; display: grid; place-items: center; color: #7a4a00; }"
+    },
+    {
+      "name": "Paso de cantidad",
+      "kind": "custom",
+      "refersTo": "button-ghost",
+      "description": "− n + en la línea del tiquete; con cantidad 1 la papelera ocupa el lugar del −.",
+      "html": "<div class=\"ds-paso\"><button class=\"ds-paso-quitar\" aria-label=\"Quitar\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><line x1=\"10\" x2=\"10\" y1=\"11\" y2=\"17\"/><line x1=\"14\" x2=\"14\" y1=\"11\" y2=\"17\"/></svg></button><input value=\"1\" aria-label=\"Cantidad\"><button aria-label=\"Una más\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg></button></div>",
+      "css": ".ds-paso { display: inline-flex; align-items: center; gap: 2px; } .ds-paso button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #575b63; cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-paso button:hover { background: #f7f7f8; color: #1a1c20; } .ds-paso .ds-paso-quitar { color: #b42318; } .ds-paso button:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; } .ds-paso input { width: 44px; height: 34px; padding: 2px 4px; text-align: center; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #1a1c20; font: 600 16px 'Public Sans Variable', sans-serif; font-variant-numeric: tabular-nums; } .ds-paso input:hover { border-color: #84888f; } .ds-paso input:focus { outline: 2px solid #24272c; outline-offset: 0; border-color: #24272c; }"
+    },
+    {
+      "name": "Control segmentado ¢/%",
+      "kind": "custom",
+      "refersTo": "segment-selected",
+      "description": "Tipo de descuento; la opción elegida se llena de acento.",
+      "html": "<span class=\"ds-segmento\" role=\"group\"><button aria-pressed=\"true\">¢</button><button aria-pressed=\"false\">%</button></span>",
+      "css": ".ds-segmento { display: inline-flex; padding: 2px; border: 1px solid #84888f; border-radius: 8px; background: #f7f7f8; } .ds-segmento button { min-height: 36px; min-width: 40px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: #575b63; font: 550 15px 'Public Sans Variable', sans-serif; cursor: pointer; } .ds-segmento button[aria-pressed=\"true\"] { background: #24272c; color: #ffffff; } .ds-segmento button:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Navegación lateral",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Menú del shell; ítem activo en accent sobre accent-bg (Gris Selección por defecto).",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-item ds-activo\">Venta</button><button class=\"ds-nav-item\">Ventas del día</button><button class=\"ds-nav-item\">Productos</button></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 216px; padding: 16px 12px; background: #ffffff; border-right: 1px solid #e3e5e8; } .ds-nav-item { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #575b63; font: 550 15px 'Public Sans Variable', sans-serif; text-align: left; cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-nav-item:hover { background: #f7f7f8; color: #1a1c20; } .ds-nav-item.ds-activo { background: #eaebed; color: #24272c; font-weight: 650; } .ds-nav-item:focus-visible { outline: 2px solid #24272c; outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "El Mostrador",
+    "overview": "Esto es un mostrador, no un tablero. El cajero escanea o toca, ve crecer el tiquete y cobra con un botón que dice el monto. El catálogo vive a la izquierda como una grilla de tarjetas tocables; el tiquete queda fijo a la derecha, siempre a la vista, con el botón de cobro anclado al pie. Todo lo demás (navegación, filtros, clientes) es soporte de ese gesto.\n\nEl mundo es gris neutro y blanco, con bordes de 1 px y un solo acento que aparece solo donde hay acción o selección. Por defecto el acento es grafito; cada negocio puede poner su propio color (config `color_acento`) y la app lo ajusta sola hasta que cumpla AA. El sistema no tiene un tono de marca propio: le sirve igual a una librería que a una floristería y no se parece a marcas de terceros. Las tarjetas son planas en reposo y se levantan apenas al pasar el puntero. La densidad es de herramienta de trabajo (modo Operate): controles de 44 px como mínimo, números tabulares, texto corto en español de Costa Rica. Hay un tema oscuro de grafito casi negro con acento claro para las horas de poca luz; ambos temas salen de una sola fuente (`src/ui/tema.ts`) y una prueba verifica cada par de contraste contra WCAG 2.1 AA, también con ocho colores de negocio de muestra.\n\nRechazos confirmados: el formulario de líneas con botones apilados (el viejo POS); los atajos de teclado pintados dentro de los botones (el usuario se quejó; viven en el tooltip y en `aria-keyshortcuts`); un acento predeterminado con tono de marca (el verde azulado anterior se parecía a un competidor).",
+    "keyCharacteristics": [
+      "Dos columnas fijas en la venta: catálogo flexible + tiquete de 372 a 460 px.",
+      "Un acento (grafito o el color del negocio, ajustado a AA), usado para acción primaria, selección y estado \"en esta venta\".",
+      "Bordes de 1 px en dos pesos: `line` para controles, `hair` para divisores.",
+      "Planos en reposo; la sombra es una respuesta al hover o a la capa modal.",
+      "Montos en colones con ¢, punto de miles y cifras tabulares.",
+      "Public Sans Variable, empaquetada sin conexión, con pesos intermedios (550, 650, 750)."
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "Hay un solo acento por instalación, grafito o el color del negocio, y significa \"acción o selección\" (más el tono informativo de alertas e insignias, sobre accent-bg). No se usa como fondo de sección, ilustración ni texto decorativo: si algo lleva el color de acento, se puede tocar o está elegido. Los componentes lo piden siempre como `var(--accent)`, `var(--accent-bg)`, `var(--on-accent)` y `var(--focus)`, nunca como un hex fijo.",
+        "section": "colors"
+      },
+      {
+        "name": "The Own Color Rule",
+        "body": "El negocio elige el tono y el sistema garantiza que se lea. `temaConAcento()` conserva el tono y lo oscurece (tema claro, mezclándolo con negro en pasos de 6 %) o lo aclara (tema oscuro, mezclándolo con blanco) hasta que el acento como texto llegue a 4,5:1 sobre card, bg y su propio accent-bg. accent-bg es el color mezclado al 10 % (claro) o al 20 % (oscuro) sobre card; on-accent es blanco o #111214, el que dé más contraste; focus es el mismo acento ajustado. Un valor inválido deja el grafito. Ejemplos medidos: el rosa #ff69b4 queda en #b0487c en claro y en oscuro se conserva, con texto #111214; el amarillo #ffd400 queda en #816b00 en claro; el azul #1a4fc4 se aclara a #6a8dd9 en oscuro. Solo el técnico lo edita, en Datos del negocio, con vista previa en vivo del botón Cobrar y un botón \"Usar grafito\" para volver al predeterminado.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Lines Rule",
+        "body": "`line` (#84888f, ≥ 3:1) delimita todo lo que es un control (campo, botón, segmento, contorno discontinuo de \"Venta simple\"); `hair` (#e3e5e8) delimita lo que solo separa (tarjetas, divisores, chips en reposo, tablas). Un borde que identifica un control nunca usa `hair`.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tested Pair Rule",
+        "body": "Todo color nuevo entra a `TEMAS` en ambos temas y su combinación a `combinaciones()` con su mínimo (4,5:1 texto, 3:1 bordes y foco). La prueba también corre con ocho colores de negocio de muestra (rosa, amarillo, azul, verde, rojo, morado, blanco y negro) en los dos temas, incluido acento sobre accent-bg ≥ 4,5:1. Si la prueba no lo cubre, no se usa.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Money Rule",
+        "body": "Toda cifra de dinero o cantidad lleva `font-variant-numeric: tabular-nums` y va alineada a la derecha. Formato: `¢` pegado, punto de miles, sin decimales (¢13.225).",
+        "section": "typography"
+      },
+      {
+        "name": "The No Caps Rule",
+        "body": "No hay mayúsculas sostenidas ni tracking abierto en la interfaz; la jerarquía se hace con tamaño y peso.",
+        "section": "typography"
+      },
+      {
+        "name": "The Fixed Ticket Rule",
+        "body": "El tiquete nunca se desplaza junto con el catálogo ni se oculta; solo su lista de líneas desplaza. Cobrar queda siempre visible al pie.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat-Until-Hover Rule",
+        "body": "Tarjetas, chips y paneles no tienen sombra en reposo. La selección se marca con borde y fondo de acento, nunca con sombra.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** usar accent solo para acción primaria y selección; todo lo demás es neutro.",
+      "**Do** pedir el acento por variable (`var(--accent)`, `var(--accent-bg)`, `var(--on-accent)`, `var(--focus)`) para que el color del negocio llegue a todas partes.",
+      "**Do** delimitar controles con `line` y divisores con `hair`.",
+      "**Do** escribir montos como ¢13.225: ¢ pegado, punto de miles, cifras tabulares, alineados a la derecha.",
+      "**Do** mantener controles de 44 px como mínimo y el foco visible de 2 px en `focus`.",
+      "**Do** poner los atajos de teclado en `title` y `aria-keyshortcuts`, no en el botón.",
+      "**Do** mostrar filas de IVA y subtotal solo si `mostrar_iva` está activo o hay descuento/redondeo.",
+      "**Do** escribir el texto en español de Costa Rica, corto y en usted (\"Pruebe con otra palabra o escanee el código\").",
+      "**Do** agregar cada color nuevo a ambos temas y a la prueba de contraste, y comprobarlo con los colores de negocio de muestra."
+    ],
+    "donts": [
+      "**Don't** apilar botones de acción bajo un formulario de líneas; la venta es grilla + tiquete.",
+      "**Don't** pintar chips de atajo (`F12`, `Supr`) dentro de los botones.",
+      "**Don't** dar sombra a tarjetas o paneles en reposo, ni marcar selección con sombra.",
+      "**Don't** usar `hair` como borde de un campo o botón.",
+      "**Don't** introducir un segundo color de acento ni usar el acento como decoración.",
+      "**Don't** fijar un hex de acento dentro de un componente ni dar al sistema un tono de marca predeterminado; el predeterminado es grafito y el tono lo pone el negocio.",
+      "**Don't** aplicar el color del negocio sin pasar por `temaConAcento()`; el ajuste de contraste no es opcional.",
+      "**Don't** ocultar la estrella de favorito hasta el hover."
+    ]
+  }
+}
