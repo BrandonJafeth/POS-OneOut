@@ -266,6 +266,8 @@ pub fn validar_lectura(sql: &str) -> Res<()> {
     }
     const PROHIBIDAS: &[&str] = &[
         // ventas_espera guarda el cliente de la venta (nombre, teléfono); cuentas/abonos, notas del apartado.
+        // Caja y pagos: solo por comandos tipados (cierre ciego, turnos ajenos, últimos 4 dígitos).
+        "caja_turnos", "caja_movimientos", "caja_ajustes", "cierres_dia", "venta_pagos", "venta_pago_correcciones", "nombre_tiquete",
         "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
         "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
     ];
@@ -331,6 +333,8 @@ mod tests {
             "SELECT * FROM clientes",
             "SELECT * FROM bitacora",
             "SELECT datos FROM ventas_espera",
+            "SELECT monto_esperado, diferencia FROM caja_turnos",
+            "SELECT ultimos4 FROM venta_pagos",
             "PRAGMA key = 'x'",
             "ATTACH DATABASE 'x' AS y",
             "UPDATE config SET valor = '100' WHERE clave = 'descuento_max_pct'",

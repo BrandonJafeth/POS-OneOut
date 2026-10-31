@@ -325,6 +325,8 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
         .await
         .map_err(e)?;
     sqlx::query("UPDATE cuentas SET notas = '', actualizado_en = ? WHERE cliente_id = ?").bind(&ahora).bind(id).execute(&mut *tx).await.map_err(e)?;
+    // Las ventas (en espera y ya cobradas) guardan una copia del cliente con nombre, teléfono y cédula.
+    sqlx::query("UPDATE ventas_espera SET datos = json_set(datos, '$.cliente', NULL) WHERE json_extract(datos, '$.cliente.id') = ?").bind(id).execute(&mut *tx).await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "cliente.anonimizar", "cliente", Some(id), &json!({"motivo": motivo})).await?;
     tx.commit().await.map_err(e)?;
     Ok(())
@@ -378,10 +380,18 @@ mod tests {
         assert_eq!(listar(p, &dueno, "maria", false).await.unwrap().len(), 1);
         let det: Vec<String> = sqlx::query_scalar("SELECT detalle FROM bitacora").fetch_all(p).await.unwrap();
         assert!(det.iter().all(|d| !d.contains("8888") && !d.contains("María") && !d.contains("maria")));
+        // Una venta guardada con el cliente lleva copia de su nombre y teléfono.
+        let est = crate::calculo::Estado {
+            cliente: Some(crate::calculo::ClienteBasico { id: c.id.clone(), nombre: c.nombre.clone(), telefono: Some("8888-1234".into()), cedula: None }),
+            ..Default::default()
+        };
+        crate::ventas::crear_espera(p, &cajero, crate::caja::CAJA_1, &est).await.unwrap();
         // Anonimizar: dueño con PIN.
         assert!(anonimizar(p, &dueno, &c.id, "000000", "otro").await.is_err());
         anonimizar(p, &dueno, &c.id, "246813", "solicitud_titular").await.unwrap();
         let n: Option<String> = sqlx::query_scalar("SELECT telefono FROM clientes WHERE id = ?").bind(&c.id).fetch_one(p).await.unwrap();
         assert!(n.is_none());
+        let esperas: Vec<String> = sqlx::query_scalar("SELECT datos FROM ventas_espera").fetch_all(p).await.unwrap();
+        assert!(esperas.iter().all(|d| !d.contains("8888") && !d.contains("María")));
     }
 }

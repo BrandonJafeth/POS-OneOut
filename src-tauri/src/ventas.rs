@@ -1029,4 +1029,26 @@ mod tests {
         let esp2 = crear_espera(p, &luis, CAJA_1, &e).await.unwrap();
         assert!(cobrar(p, &luis, CAJA_1, &esp2.id, &e, &[pago(EF, 1000)]).await.unwrap_err().contains("desactivado"));
     }
+
+    #[tokio::test]
+    async fn pedir_factura_una_vez_y_no_en_anuladas() {
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let (pid, dep) = producto(p, 1000).await;
+        abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+        let e = est(&pid, &dep, 1000, 1, 0);
+        let esp = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+        let v = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago(EF, 1000)]).await.unwrap().venta_id;
+        let cli = crate::clientes::crear(p, &cajero, &crate::clientes::Datos { nombre: "Ana Mora".into(), telefono: "8000-0000".into(), ..Default::default() }, true, "1").await.unwrap();
+        assert!(pedir_factura(p, &cajero, &v, "NO-EXISTE").await.unwrap_err().contains("cliente"));
+        pedir_factura(p, &cajero, &v, &cli.id).await.unwrap();
+        let (req, c): (i64, Option<String>) = sqlx::query_as("SELECT requiere_factura, cliente_id FROM ventas WHERE id = ?").bind(&v).fetch_one(p).await.unwrap();
+        assert_eq!((req, c.as_deref()), (1, Some(cli.id.as_str())));
+        // Dos veces no; y una venta anulada tampoco.
+        assert!(pedir_factura(p, &cajero, &v, &cli.id).await.is_err());
+        let esp2 = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+        let v2 = cobrar(p, &cajero, CAJA_1, &esp2.id, &e, &[pago(EF, 1000)]).await.unwrap().venta_id;
+        anular(p, &dueno, CAJA_1, &v2, "246813", "Se equivocó", 0).await.unwrap();
+        assert!(pedir_factura(p, &cajero, &v2, &cli.id).await.is_err());
+    }
 }

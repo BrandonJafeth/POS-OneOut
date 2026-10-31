@@ -366,7 +366,8 @@ mod tests_disco {
         let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
         let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
         assert!(!archivo.windows(5).any(|w| w == &"Lápiz".as_bytes()[..5]));

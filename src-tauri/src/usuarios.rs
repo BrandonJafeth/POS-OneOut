@@ -12,6 +12,10 @@ use sqlx::{Row, SqlitePool};
 
 const INTENTOS_LIBRES: i64 = 4;
 
+/// Una verificación de PIN a la vez: el conteo de fallos se lee y se escribe sin que otra llamada
+/// en paralelo cuele intentos gratis (leer → Argon2 → escribir no es atómico por sí solo).
+static PIN_EN_CURSO: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Usuario {
@@ -197,6 +201,7 @@ pub enum Login {
 
 /// Entrada con PIN, con bloqueo progresivo guardado en la base (no se reinicia cerrando la app).
 pub async fn iniciar_sesion(pool: &SqlitePool, id: &str, p: &str, ahora_ms: i64) -> Res<Login> {
+    let _turno = PIN_EN_CURSO.lock().await;
     let Some((u, hash, intentos, hasta)) = obtener(pool, id).await? else {
         return Ok(Login::Rechazado { espera_ms: 0, intentos: 0 });
     };
@@ -235,7 +240,9 @@ pub async fn iniciar_sesion(pool: &SqlitePool, id: &str, p: &str, ahora_ms: i64)
 
 /// Autorización del dueño EN EL MOMENTO (nunca se guarda): PIN de cualquier dueño activo.
 /// Cada fallo queda en bitácora; con 5 fallos en un minuto se frena.
+/// Un PIN que puso otra persona (debe_cambiar_pin) no autoriza nada hasta que el dueño lo cambie.
 pub async fn autorizar_dueno(pool: &SqlitePool, p: &str, contexto: &str, actor_id: &str) -> Res<String> {
+    let _turno = PIN_EN_CURSO.lock().await;
     let desde = chrono::Utc::now() - chrono::Duration::seconds(60);
     let recientes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
         .bind(desde.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
@@ -245,7 +252,7 @@ pub async fn autorizar_dueno(pool: &SqlitePool, p: &str, contexto: &str, actor_i
     if recientes >= 5 {
         return Err("Demasiados PIN incorrectos. Espere un minuto.".into());
     }
-    let duenos = sqlx::query("SELECT id, pin_hash FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL").fetch_all(pool).await.map_err(e)?;
+    let duenos = sqlx::query("SELECT id, pin_hash FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL").fetch_all(pool).await.map_err(e)?;
     for d in &duenos {
         if pin::verificar(p, &d.get::<String, _>("pin_hash")) {
             return Ok(d.get("id"));
@@ -272,6 +279,7 @@ pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &
     if a.rol == Rol::Cajero {
         return Err(sin_permiso(contexto));
     }
+    let _turno = PIN_EN_CURSO.lock().await;
     let desde = chrono::Utc::now() - chrono::Duration::seconds(60);
     let recientes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
         .bind(desde.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
@@ -306,26 +314,60 @@ pub mod tests {
         let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "Técnico".into() };
         let d = crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let c = crear(&bd.pool, &tec, "Luis", Rol::Cajero, "2580").await.unwrap();
+        // Ana entra por primera vez y pone su propio PIN (si no, su PIN no autoriza nada).
+        let ana = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
+        cambiar_pin(&bd.pool, &ana, &d.id, "246813").await.unwrap();
         (
             bd,
             tec,
-            Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() },
+            ana,
             Actor { id: c.id, rol: Rol::Cajero, nombre: "Luis".into() },
         )
     }
 
     #[tokio::test]
     async fn pin_minimo_y_cambio_obligatorio() {
-        let (bd, tec, dueno, _) = base_con_usuarios().await;
+        let (bd, tec, _, _) = base_con_usuarios().await;
         // Dueño y técnico: mínimo 6. Repetidos no.
         assert!(crear(&bd.pool, &tec, "Otro", Rol::Dueno, "1234").await.unwrap_err().contains("6"));
         assert!(crear(&bd.pool, &tec, "Otro", Rol::Dueno, "111111").await.unwrap_err().contains("repetido"));
         // Creado por otro → debe cambiar PIN; cambiándolo él mismo, ya no.
-        let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &dueno.id, "246813", 0).await.unwrap() else { panic!() };
+        let o = crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "864209", 0).await.unwrap() else { panic!() };
         assert!(usuario.debe_cambiar_pin);
-        cambiar_pin(&bd.pool, &dueno, &dueno.id, "975318").await.unwrap();
-        let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &dueno.id, "975318", 0).await.unwrap() else { panic!() };
+        let otra = Actor { id: o.id.clone(), rol: Rol::Dueno, nombre: "Otra".into() };
+        cambiar_pin(&bd.pool, &otra, &o.id, "975318").await.unwrap();
+        let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "975318", 0).await.unwrap() else { panic!() };
         assert!(!usuario.debe_cambiar_pin);
+    }
+
+    #[tokio::test]
+    async fn pin_puesto_por_el_tecnico_no_autoriza() {
+        let (bd, tec, dueno, cajero) = base_con_usuarios().await;
+        assert_eq!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.unwrap(), dueno.id);
+        // El técnico resetea el PIN de Ana: ni el viejo ni el nuevo autorizan hasta que Ana lo cambie.
+        cambiar_pin(&bd.pool, &tec, &dueno.id, "802468").await.unwrap();
+        assert!(autorizar_dueno(&bd.pool, "802468", "prueba", &cajero.id).await.is_err());
+        assert!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.is_err());
+        cambiar_pin(&bd.pool, &dueno, &dueno.id, "913579").await.unwrap();
+        assert_eq!(autorizar_dueno(&bd.pool, "913579", "prueba", &cajero.id).await.unwrap(), dueno.id);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn intentos_en_paralelo_cuentan_todos() {
+        let (bd, _, _, cajero) = base_con_usuarios().await;
+        let tareas: Vec<_> = (0..6)
+            .map(|_| {
+                let (pool, id) = (bd.pool.clone(), cajero.id.clone());
+                tokio::spawn(async move { iniciar_sesion(&pool, &id, "0000", 1_800_000_000_000).await.unwrap() })
+            })
+            .collect();
+        for t in tareas {
+            t.await.unwrap();
+        }
+        // 4 libres + el 5.º bloquea; el 6.º ya encuentra el bloqueo. Sin turno, todos leían 0 y quedaba en 1.
+        let n: i64 = sqlx::query_scalar("SELECT intentos_fallidos FROM usuarios WHERE id = ?").bind(&cajero.id).fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(n, 5);
     }
 
     #[tokio::test]

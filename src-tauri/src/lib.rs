@@ -529,8 +529,15 @@ async fn print_raw(st: St<'_>, printer_name: String, data: Vec<u8>) -> Res<()> {
     if data.len() > 2_000_000 {
         return Err("Trabajo de impresión demasiado grande".into());
     }
+    // Solo impresoras instaladas: un nombre inventado (\\equipo\cola) haría que Windows se conecte a otra máquina.
+    if !printer::list_printers()?.contains(&printer_name) {
+        return Err("Esa impresora no está instalada en este equipo".into());
+    }
     printer::print_raw(&printer_name, &data)
 }
+
+#[cfg(all(not(debug_assertions), not(feature = "cifrado")))]
+compile_error!("Una compilación release sin la feature `cifrado` guardaría la base sin cifrar.");
 
 /// Abre la base al arrancar. Errores no tumban la app: la pantalla los muestra (sistema_estado).
 async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]>) {

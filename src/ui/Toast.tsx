@@ -31,7 +31,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [actual, setActual] = useState<(AvisoToast & { id: number }) | null>(null);
   const id = useRef(0);
   const cerrar = useCallback(() => setActual(null), []);
-  const mostrar = useCallback((a: AvisoToast) => setActual({ ...a, id: ++id.current }), []);
+  // Un aviso con acción ("Deshacer") no lo tapa uno simple: perderlo sería perder lo que deshace.
+  const mostrar = useCallback((a: AvisoToast) => setActual((v) => (v?.accion && !a.accion ? v : { ...a, id: ++id.current })), []);
   const api = useMemo<Api>(
     () => ({ mostrar, cerrar, ok: (titulo, texto) => mostrar({ tono: "ok", titulo, texto }), info: (titulo, texto) => mostrar({ tono: "info", titulo, texto }) }),
     [mostrar, cerrar],
