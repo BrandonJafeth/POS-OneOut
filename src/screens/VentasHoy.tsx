@@ -1,12 +1,14 @@
 // Ventas del día: reimprimir (COPIA), corregir forma de pago y anular. El cierre es el de Caja.
-import { Ban, Landmark, Pencil, Printer, ReceiptText, Save, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+// Para encontrar una venta cuando el cliente vuelve ("la de la tijera, como a las 3"): buscar por
+// tiquete, producto, monto o cajero, acotar por hora y filtrar por factura pendiente, anuladas o pago.
+import { Ban, FileText, Landmark, Pencil, Printer, ReceiptText, Save, Search, ShieldCheck, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
-import { conMiles, diaLocal } from "../lib/texto";
+import { conMiles, diaLocal, normalizar, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { imprimirVenta } from "../lib/venta/imprimir";
 import type { Banco, FormaPago, Venta, VentaPago } from "../tipos";
@@ -17,6 +19,8 @@ import EmptyState from "../ui/EmptyState";
 import CampoMonto from "../ui/CampoMonto";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
+import PedirFactura from "./venta/PedirFactura";
+import { useToast } from "../ui/Toast";
 
 export default function VentasHoy() {
   const { caja, irA, puede } = useSesion();
@@ -24,6 +28,10 @@ export default function VentasHoy() {
   const [lista, setLista] = useState<VentaResumen[]>([]);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [texto, setTexto] = useState("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [filtro, setFiltro] = useState("todas");
 
   const cargar = async () => {
     setLista(await listarVentasDia(dia));
@@ -31,6 +39,28 @@ export default function VentasHoy() {
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [dia]);
 
   const completadas = lista.filter((v) => v.estado === "completada");
+  const hora = (iso: string) => new Date(iso).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const formasDelDia = useMemo(() => [...new Set(lista.flatMap((v) => v.formas.split(" + ").filter(Boolean)))].sort(), [lista]);
+  const pendientes = lista.filter((v) => v.requiereFactura && !v.facturaEmitida && v.estado !== "anulada").length;
+  const anuladas = lista.filter((v) => v.estado === "anulada").length;
+  const visibles = useMemo(() => {
+    const q = normalizar(texto);
+    const cifras = texto.replace(/\D/g, "");
+    return lista.filter((v) => {
+      if (filtro === "factura" && !(v.requiereFactura && !v.facturaEmitida && v.estado !== "anulada")) return false;
+      if (filtro === "anuladas" && v.estado !== "anulada") return false;
+      if (filtro.startsWith("forma:") && !v.formas.split(" + ").includes(filtro.slice(6))) return false;
+      const h = hora(v.fecha);
+      if (desde && h < desde) return false;
+      if (hasta && h > hasta) return false;
+      if (!q) return true;
+      // Monto: "3500" o "3.500" encuentran ¢3.500 (y ¢13.500); el número de tiquete también.
+      if (cifras && cifras.length === texto.replace(/[\s.¢₡]/g, "").length && (String(v.total).includes(cifras) || v.numero.includes(cifras))) return true;
+      return normalizar(`${v.numero} ${v.productos} ${v.cajero} ${v.formas}`).includes(q);
+    });
+  }, [lista, texto, desde, hasta, filtro]);
+  const hayFiltros = !!(texto || desde || hasta || filtro !== "todas");
+  const limpiar = () => (setTexto(""), setDesde(""), setHasta(""), setFiltro("todas"));
   return (
     <div className="screen">
       <div className="encabezado">
@@ -59,16 +89,53 @@ export default function VentasHoy() {
           <strong>{monto(completadas.reduce((s, v) => s + v.total, 0))}</strong>vendido
         </div>
       </div>
+      {lista.length > 0 && (
+        <section className="card ventas-filtros" aria-label="Buscar ventas">
+          <div className="row abajo">
+            <Field label="Buscar" flex={1} className="sin-margen">
+              <div className="buscador-entrada">
+                <Search size={20} aria-hidden />
+                <input value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Tiquete, producto, monto o cajero" />
+              </div>
+            </Field>
+            <Field label="Desde (hora)" className="sin-margen">
+              <input type="time" value={desde} onChange={(e) => setDesde(e.target.value)} />
+            </Field>
+            <Field label="Hasta" className="sin-margen">
+              <input type="time" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+            </Field>
+            {hayFiltros && (
+              <Button variante="fantasma" icono={X} onClick={limpiar}>
+                Limpiar
+              </Button>
+            )}
+          </div>
+          <div className="chips" role="group" aria-label="Filtrar ventas">
+            {[
+              ["todas", `Todas (${lista.length})`],
+              ...(pendientes ? [["factura", `Factura pendiente (${pendientes})`]] : []),
+              ...(anuladas ? [["anuladas", `Anuladas (${anuladas})`]] : []),
+              ...formasDelDia.map((fp) => [`forma:${fp}`, fp]),
+            ].map(([k, t]) => (
+              <button key={k} type="button" className="tab" aria-pressed={filtro === k} onClick={() => setFiltro(filtro === k ? "todas" : k)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="card">
         {lista.length === 0 ? (
           <EmptyState icono={ReceiptText} titulo="Todavía no hay ventas este día" texto="Las ventas cobradas aparecen aquí para reimprimir, corregir el pago o anular." />
         ) : (
         <>
+        {hayFiltros && <p className="muted">{visibles.length ? `${plural(visibles.length, "venta coincide", "ventas coinciden")} de ${lista.length}.` : "Ninguna venta coincide."}</p>}
         <table className="tbl tbl-grande">
           <thead>
             <tr>
-              <th>Tiquete</th>
               <th>Hora</th>
+              <th>Tiquete</th>
+              <th>Productos</th>
               <th>Cajero</th>
               <th>Pago</th>
               <th className="num">Total</th>
@@ -76,10 +143,14 @@ export default function VentasHoy() {
             </tr>
           </thead>
           <tbody>
-            {lista.map((v) => (
+            {visibles.map((v) => (
               <FilaClic key={v.id} etiqueta={`Abrir tiquete ${v.numero}`} className={v.estado === "anulada" ? "inactivo" : ""} onAbrir={() => setAbierta(v.id)}>
+                <td className="hora">{hora(v.fecha)}</td>
                 <td className="mono">{v.numero}</td>
-                <td>{new Date(v.fecha).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" })}</td>
+                <td className="productos-venta" title={v.productos}>
+                  <span className="muted">{plural(v.articulos, "art.", "art.")} · </span>
+                  {v.productos || <span className="muted">—</span>}
+                </td>
                 <td>{v.cajero}</td>
                 <td>{v.formas}</td>
                 <td className="num">{monto(v.total)}</td>
@@ -107,8 +178,9 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   const [correcciones, setCorrecciones] = useState<Correccion[]>([]);
   const [corrigiendo, setCorrigiendo] = useState<VentaPago | null>(null);
   const [anulando, setAnulando] = useState(false);
+  const [factura, setFactura] = useState(false);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const cargar = async () => {
     const x = await obtenerVenta(p.ventaId);
@@ -123,10 +195,9 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   const puedeAjustar = v.turnoAbierto ? puede("caja.admin") || (puede("venta") && v.turnoUsuarioId === usuario.id) : puede("caja.admin");
   async function reimprimir() {
     setError("");
-    setOk("");
     try {
       await imprimirVenta(actor, v!.id, config, { copia: true, verCliente });
-      setOk("Copia enviada a la impresora.");
+      toast.ok("Copia enviada a la impresora.");
       await cargar();
     } catch (e) {
       setError(textoError(e));
@@ -138,8 +209,13 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
       <p className="muted">
         {new Date(v.fecha).toLocaleString("es-CR")} · {v.cajero}
         {verCliente && (v.cliente || v.nombreTiquete) && ` · ${v.cliente ?? v.nombreTiquete}`}
-        {v.reimpresiones > 0 && ` · reimpreso ${v.reimpresiones} vez/veces`}
+        {v.reimpresiones > 0 && ` · reimpreso ${plural(v.reimpresiones, "vez", "veces")}`}
       </p>
+      {v.requiereFactura && (
+        <Alert tono={v.facturaEmitida ? "ok" : "aviso"} titulo={v.facturaEmitida ? `Factura hecha${v.facturaReferencia ? ` (${v.facturaReferencia})` : ""}` : "Factura pendiente"}>
+          {!v.facturaEmitida && "Está en «Pendientes de factura» para hacerla en el sistema de facturación."}
+        </Alert>
+      )}
       {v.estado === "anulada" && <Alert tono="error" titulo="Venta anulada">{v.anuladaMotivo ?? ""}</Alert>}
       <table className="tbl">
         <tbody>
@@ -211,18 +287,37 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           </ul>
         </>
       )}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <div className="fila-botones">
         <Button icono={Printer} onClick={reimprimir}>
           Reimprimir (sale como COPIA)
         </Button>
+        {v.estado === "completada" && !v.requiereFactura && puede("facturas") && (
+          <Button icono={FileText} onClick={() => setFactura(true)}>
+            Pedir factura
+          </Button>
+        )}
         <span className="separador" />
         {v.estado === "completada" && puedeAjustar && (
-          <Button variante="peligro" icono={Ban} onClick={() => setAnulando(true)}>
+          <Button variante="fantasma" className="texto-peligro" icono={Ban} onClick={() => setAnulando(true)}>
             Anular venta
           </Button>
         )}
       </div>
+      {factura && (
+        <PedirFactura
+          ventaId={v.id}
+          numero={v.numero}
+          clienteActual={v.clienteId && v.cliente ? { id: v.clienteId, nombre: v.cliente, cedula: null, telefono: null } : null}
+          onCerrar={() => setFactura(false)}
+          onListo={() => {
+            setFactura(false);
+            toast.ok("Quedó pendiente de factura.");
+            void cargar();
+            p.onCambio();
+          }}
+        />
+      )}
       {corrigiendo && (
         <CorregirPago
           pago={corrigiendo}
@@ -232,7 +327,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
             setCorrigiendo(null);
             await cargar();
             p.onCambio();
-            setOk("Forma de pago corregida.");
+            toast.ok("Forma de pago corregida.");
           }}
         />
       )}
@@ -249,7 +344,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
             setAnulando(false);
             await cargar();
             p.onCambio();
-            setOk("Venta anulada.");
+            toast.ok("Venta anulada.");
           }}
         />
       )}

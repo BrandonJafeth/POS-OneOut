@@ -11,6 +11,7 @@ import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
 import DatosCliente from "./clientes/DatosCliente";
+import { plural } from "../lib/texto";
 import NuevoCliente from "./clientes/NuevoCliente";
 
 export default function Clientes() {
@@ -45,7 +46,7 @@ export default function Clientes() {
       </div>
       <Mensaje error={error} />
       {sugeridos.length > 0 && (
-        <Alert tono="aviso" titulo={`${sugeridos.length} cliente(s) sin movimientos ni saldos en ${config.retencion_clientes_meses} meses`}>
+        <Alert tono="aviso" titulo={`${plural(sugeridos.length, "cliente", "clientes")} sin movimientos ni saldos en ${config.retencion_clientes_meses} meses`}>
           La ley pide no guardar datos más tiempo del necesario. Revise si conviene anonimizarlos (no se hace solo).
           <div className="chips" style={{ marginTop: 8 }}>
             {sugeridos.map((s) => (

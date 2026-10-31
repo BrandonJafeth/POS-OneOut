@@ -26,6 +26,7 @@ import Button from "../../ui/Button";
 import { useConfirmar } from "../../ui/Confirmar";
 import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
+import { useToast } from "../../ui/Toast";
 
 interface Props {
   /** null = producto nuevo. */
@@ -54,7 +55,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   const [conflicto, setConflicto] = useState<{ error: CodigoOcupado; tipo: TipoCodigo } | null>(null);
   const [etiqueta, setEtiqueta] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   async function cargar(pid: string) {
     const p = await obtenerProducto(pid);
@@ -87,7 +88,6 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
 
   function limpiarAvisos() {
     setError("");
-    setOk("");
     setConflicto(null);
   }
 
@@ -104,7 +104,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
         await cargar(nuevoId);
       }
       if (id) await cargar(id);
-      setOk("Producto guardado.");
+      toast.ok("Producto guardado.");
       onCambio();
     } catch (e) {
       if (e instanceof CodigoOcupado) setConflicto({ error: e, tipo: codigos.find((c) => c.codigo === e.codigo)?.tipo ?? "manual" });
@@ -117,13 +117,13 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     limpiarAvisos();
     try {
       const c = limpiarCodigo(texto);
-      if (codigos.some((x) => x.codigo.toLowerCase() === c.toLowerCase())) return setOk(`El código ${c} ya está en este producto.`);
+      if (codigos.some((x) => x.codigo.toLowerCase() === c.toLowerCase())) return toast.ok(`El código ${c} ya está en este producto.`);
       if (!id) setCodigos([...codigos, { codigo: c, tipo }]);
       else {
         await asociarCodigo(actor, id, c, tipo, { mover });
         await cargar(id);
         onCambio();
-        setOk(mover ? `Código ${c} movido a este producto.` : `Código ${c} agregado.`);
+        toast.ok(mover ? `Código ${c} movido a este producto.` : `Código ${c} agregado.`);
       }
       setCodigoNuevo("");
     } catch (e) {
@@ -174,8 +174,27 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   useEscaner((c) => void agregarCodigo(c, "barras"), { activo: !etiqueta, debounceMs: config.escaner_debounce_ms });
 
   return (
-    <Modal titulo={id ? "Editar producto" : "Nuevo producto"} onCerrar={onCerrar} ancho={620}>
+    <Modal
+      titulo={id ? "Editar producto" : "Nuevo producto"}
+      onCerrar={onCerrar}
+      ancho={620}
+      pie={
+        <>
+          {id && (
+            <Button variante="fantasma" className="texto-peligro" icono={Trash2} onClick={eliminar}>
+              Eliminar
+            </Button>
+          )}
+          <span className="separador" />
+          <Button onClick={onCerrar}>{sucio ? "Cancelar" : "Cerrar"}</Button>
+          <Button type="submit" form="form-producto" variante="primario" icono={Save} disabled={!sucio}>
+            {id ? "Guardar cambios" : "Crear producto"}
+          </Button>
+        </>
+      }
+    >
       <form
+        id="form-producto"
         onSubmit={(e) => {
           e.preventDefault();
           void guardar();
@@ -202,7 +221,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             <CampoMonto valor={precio} onCambio={setPrecio} />
           </label>
         </div>
-        <label>
+        <label className="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} /> Activo (aparece en la venta)
         </label>
         <details className="fiscal">
@@ -216,31 +235,20 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
               IVA %
               <input className="small" inputMode="decimal" value={tasaIva} disabled={exento} onChange={(e) => setTasaIva(e.target.value)} />
             </label>
-            <label>
+            <label className="check">
               <input type="checkbox" checked={exento} onChange={(e) => setExento(e.target.checked)} /> Exento
             </label>
           </div>
         </details>
-        <div className="row" style={{ marginTop: 12 }}>
-          <Button type="submit" variante="primario" icono={Save} disabled={!sucio}>
-            {id ? "Guardar cambios" : "Crear producto"}
-          </Button>
-          <span style={{ flex: 1 }} />
-          {id && (
-            <Button variante="peligro" icono={Trash2} onClick={eliminar}>
-              Eliminar producto
-            </Button>
-          )}
-        </div>
       </form>
 
-      <h3>Códigos</h3>
+      <h3 className="editor-seccion">Códigos</h3>
       <p className="muted">Escanee con el lector para agregar, o escriba el código (letras o números).</p>
       <div className="chips">
         {codigos.length === 0 && <span className="muted">Sin códigos.</span>}
         {codigos.map((c) => (
-          <span key={c.codigo} className="chip mono" title={c.tipo}>
-            {c.codigo}
+          <span key={c.codigo} className="chip chip-codigo" title={c.tipo}>
+            <span className="mono">{c.codigo}</span>
             {isValidEan13(c.codigo) && id && (
               <button onClick={() => setEtiqueta(c.codigo)} aria-label={`Imprimir etiqueta de ${c.codigo}`}>
                 <Tag size={16} aria-hidden /> Etiqueta
@@ -302,7 +310,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
           </div>
         </div>
       )}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       {etiqueta && prod && <Etiqueta producto={prod} codigo={etiqueta} onCerrar={() => setEtiqueta(null)} />}
     </Modal>
   );

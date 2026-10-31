@@ -39,6 +39,7 @@ import { ROL_NOMBRE, type Usuario } from "./tipos";
 import Alert from "./ui/Alert";
 import Button from "./ui/Button";
 import { ConfirmarProvider } from "./ui/Confirmar";
+import { ToastProvider } from "./ui/Toast";
 import { aplicarTema } from "./ui/tema";
 
 export type Pagina = "venta" | "caja" | "ventas" | "productos" | "clientes" | "facturas" | "admin" | "config";
@@ -173,7 +174,11 @@ export default function App() {
     );
   else contenido = <Dentro usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
 
-  return <ConfirmarProvider>{contenido}</ConfirmarProvider>;
+  return (
+    <ConfirmarProvider>
+      <ToastProvider>{contenido}</ToastProvider>
+    </ConfirmarProvider>
+  );
 }
 
 function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(): void }) {

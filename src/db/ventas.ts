@@ -63,6 +63,9 @@ export interface VentaResumen {
   facturaEmitida: boolean;
   formas: string;
   turnoAbierto: boolean;
+  /** Descripciones de las líneas, separadas por " · ". */
+  productos: string;
+  articulos: number;
 }
 
 export function listarVentasDia(dia: string): Promise<VentaResumen[]> {
@@ -134,6 +137,11 @@ export interface PendienteFactura {
 
 export function pendientesFactura(_actor: Actor): Promise<PendienteFactura[]> {
   return invocar<PendienteFactura[]>("venta_pendientes_factura");
+}
+
+/** Una venta ya cobrada pasa a "Pendientes de factura" con ese cliente. */
+export async function pedirFactura(_actor: Actor, ventaId: string, clienteId: string): Promise<void> {
+  await invocar("venta_pedir_factura", { ventaId, clienteId });
 }
 
 export async function marcarFacturaEmitida(_actor: Actor, ventaId: string, referencia: string): Promise<void> {

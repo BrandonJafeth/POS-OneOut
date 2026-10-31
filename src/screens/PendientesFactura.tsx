@@ -12,13 +12,14 @@ import { monto } from "../lib/tickets";
 import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
+import { useToast } from "../ui/Toast";
 
 export default function PendientesFactura() {
   const { actor } = useSesion();
   const [lista, setLista] = useState<PendienteFactura[]>([]);
   const [marcando, setMarcando] = useState<PendienteFactura | null>(null);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const cargar = () => pendientesFactura(actor).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
@@ -29,7 +30,7 @@ export default function PendientesFactura() {
       const v = await datoParaFactura(actor, p.clienteId, campo);
       if (!v) return setError("El cliente no tiene ese dato");
       await copiar(v);
-      setOk(`${campo === "nombre" ? "Nombre" : campo === "cedula" ? "Cédula" : "Correo"} copiado.`);
+      toast.ok(`${campo === "nombre" ? "Nombre" : campo === "cedula" ? "Cédula" : "Correo"} copiado.`);
     } catch (e) {
       setError(textoError(e));
     }
@@ -39,7 +40,7 @@ export default function PendientesFactura() {
     <div className="screen">
       <h1>Facturas pendientes</h1>
       <p className="muted" style={{ marginTop: -8 }}>Hágalas en el sistema de facturación y márquelas aquí.</p>
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <section className="card">
         {lista.length === 0 ? (
           <EmptyState icono={CheckCircle2} titulo="No hay facturas pendientes" texto="Cuando una venta pida factura electrónica, aparecerá aquí hasta que la marque como emitida." />
@@ -98,7 +99,7 @@ export default function PendientesFactura() {
           onGuardar={async (ref) => {
             await marcarFacturaEmitida(actor, marcando.ventaId, ref);
             setMarcando(null);
-            setOk(`Tiquete ${marcando.numero}: factura registrada.`);
+            toast.ok(`Tiquete ${marcando.numero}: factura registrada.`);
             await cargar();
           }}
         />

@@ -3,6 +3,7 @@ import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { crearDepartamento, editarDepartamento, listarDepartamentos, moverDepartamento } from "../db/departamentos";
 import type { Departamento } from "../tipos";
+import { useToast } from "../ui/Toast";
 
 /** Lista editable. El dueño cambia nombre, orden y activo; el técnico además crea y cambia códigos. */
 export default function Departamentos({ embebido = false }: { embebido?: boolean }) {
@@ -12,7 +13,7 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
   const [edicion, setEdicion] = useState<Record<string, { codigo: string; nombre: string }>>({});
   const [nuevo, setNuevo] = useState({ codigo: "", nombre: "" });
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const cargar = async () => {
     const l = await listarDepartamentos({ incluirInactivos: true });
@@ -23,11 +24,10 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
 
   async function hacer(f: () => Promise<unknown>, mensaje = "") {
     setError("");
-    setOk("");
     try {
       await f();
       await cargar();
-      setOk(mensaje);
+      toast.ok(mensaje);
     } catch (e) {
       setError(textoError(e));
     }
@@ -36,7 +36,7 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
   return (
     <div className="screen">
       {!embebido && <h1>Departamentos</h1>}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <section className="card">
         <table className="tbl tbl-grande">
           <thead>

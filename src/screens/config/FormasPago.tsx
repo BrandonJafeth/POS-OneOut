@@ -5,6 +5,7 @@ import Mensaje, { textoError } from "../../components/Mensaje";
 import { guardarBanco, guardarFormaPago, listarBancos, listarFormasPago } from "../../db/formasPago";
 import type { Banco, FormaPago, TipoFormaPago } from "../../tipos";
 import Button from "../../ui/Button";
+import { useToast } from "../../ui/Toast";
 
 const TIPOS: TipoFormaPago[] = ["efectivo", "tarjeta", "sinpe", "transferencia", "otro"];
 const NUEVA: Omit<FormaPago, "id"> = { codigo: "", nombre: "", tipo: "otro", requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, orden: 99, activo: true };
@@ -13,7 +14,7 @@ export function FormasPago() {
   const { actor } = useSesion();
   const [lista, setLista] = useState<(Omit<FormaPago, "id"> & { id?: string })[]>([]);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
   const cargar = () => listarFormasPago({ incluirInactivas: true }).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
 
@@ -25,7 +26,7 @@ export function FormasPago() {
   return (
     <section className="card">
       <p className="muted">Solo las que "dan vuelto" (efectivo) pueden pasar del total y abren la gaveta.</p>
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <div className="tabla-scroll">
       <table className="tbl tbl-compacta">
         <thead>
@@ -72,11 +73,10 @@ export function FormasPago() {
                   icono={Save}
                   onClick={async () => {
                     setError("");
-                    setOk("");
                     try {
                       await guardarFormaPago(actor, f);
                       await cargar();
-                      setOk(`"${f.nombre}" guardada.`);
+                      toast.ok(`"${f.nombre}" guardada.`);
                     } catch (e) {
                       setError(textoError(e));
                     }
@@ -103,14 +103,14 @@ export function Bancos() {
   const { actor } = useSesion();
   const [lista, setLista] = useState<(Omit<Banco, "id"> & { id?: string })[]>([]);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
   const cargar = () => listarBancos({ incluirInactivos: true }).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
   const set = (i: number, patch: Partial<Banco>) => setLista(lista.map((b, j) => (j === i ? { ...b, ...patch } : b)));
 
   return (
     <section className="card">
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <table className="tbl">
         <tbody>
           {lista.map((b, i) => (
@@ -135,7 +135,7 @@ export function Bancos() {
                     try {
                       await guardarBanco(actor, b);
                       await cargar();
-                      setOk(`"${b.nombre}" guardado.`);
+                      toast.ok(`"${b.nombre}" guardado.`);
                     } catch (e) {
                       setError(textoError(e));
                     }

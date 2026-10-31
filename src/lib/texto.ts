@@ -32,3 +32,8 @@ export function conMiles(s: string): string {
   const d = s.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
   return d.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
+
+/** "1 producto", "3 productos" (sin el "(s)" que se lee mal). */
+export function plural(n: number, uno: string, varios: string): string {
+  return `${n.toLocaleString("es-CR")} ${n === 1 ? uno : varios}`;
+}

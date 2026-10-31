@@ -8,11 +8,13 @@ interface Props {
   onCerrar(): void;
   children: ReactNode;
   ancho?: number;
+  /** Acciones del diálogo: quedan fijas abajo, siempre visibles aunque el contenido desplace. */
+  pie?: ReactNode;
 }
 
 const ENFOCABLES = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export default function Modal({ titulo, onCerrar, children, ancho = 560 }: Props) {
+export default function Modal({ titulo, onCerrar, children, ancho = 560, pie }: Props) {
   const caja = useRef<HTMLDivElement>(null);
   const id = useId();
   const cerrar = useRef(onCerrar);
@@ -57,6 +59,7 @@ export default function Modal({ titulo, onCerrar, children, ancho = 560 }: Props
           </button>
         </div>
         <div className="modal-cuerpo">{children}</div>
+        {pie && <div className="modal-pie">{pie}</div>}
       </div>
     </div>
   );

@@ -31,10 +31,11 @@ export function ConfirmarProvider({ children }: { children: ReactNode }) {
             {abierto.peligro && <AlertTriangle size={28} aria-hidden />}
             <div>{abierto.texto}</div>
           </div>
-          <div className="fila-botones">
+          <div className="fila-botones modal-acciones">
             <Button onClick={() => responder(false)} autoFocus>
               Cancelar
             </Button>
+            <span className="separador" />
             <Button variante={abierto.peligro ? "peligro-lleno" : "primario"} onClick={() => responder(true)}>
               {abierto.aceptar ?? "Aceptar"}
             </Button>

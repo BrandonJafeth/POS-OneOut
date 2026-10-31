@@ -392,6 +392,12 @@ async fn venta_pendientes_factura(st: St<'_>) -> Res<Vec<Value>> {
 }
 
 #[tauri::command]
+async fn venta_pedir_factura(st: St<'_>, venta_id: String, cliente_id: String) -> Res<()> {
+    let a = st.actor().await?;
+    ventas::pedir_factura(st.pool()?, &a, &venta_id, &cliente_id).await
+}
+
+#[tauri::command]
 async fn venta_marcar_factura(st: St<'_>, venta_id: String, referencia: String) -> Res<()> {
     let a = st.actor().await?;
     ventas::marcar_factura(st.pool()?, &a, &venta_id, &referencia).await
@@ -632,6 +638,7 @@ pub fn run() {
             venta_anular,
             venta_pendientes_factura,
             venta_marcar_factura,
+            venta_pedir_factura,
             cliente_crear,
             cliente_buscar,
             cliente_basico,

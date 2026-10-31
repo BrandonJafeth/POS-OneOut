@@ -1,4 +1,4 @@
-import { ImageUp, Save, Trash2, Undo2 } from "lucide-react";
+import { ImageUp, Save, Trash2, Undo2, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
@@ -11,8 +11,10 @@ import type { LogoUnBit, Negocio as TNegocio } from "../tipos";
 import Button from "../ui/Button";
 import { useConfirmar } from "../ui/Confirmar";
 import { guardarConfig } from "../db/config";
-import { esColor, TEMAS, temaConAcento } from "../ui/tema";
+import { alternativasAError, esColor, pareceError, TEMAS, temaConAcento } from "../ui/tema";
+import Alert from "../ui/Alert";
 import { monto } from "../lib/tickets";
+import { useToast } from "../ui/Toast";
 
 const CAMPOS: { k: CampoNegocio; texto: string; multilinea?: boolean }[] = [
   { k: "nombreComercial", texto: "Nombre comercial" },
@@ -35,7 +37,7 @@ export default function Negocio() {
   const [form, setForm] = useState<TNegocio | null>(null);
   const [logoNuevo, setLogoNuevo] = useState<LogoPendiente | null>(null);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const cargar = async () => {
     const n = await obtenerNegocio();
@@ -57,11 +59,10 @@ export default function Negocio() {
 
   async function guardar() {
     setError("");
-    setOk("");
     try {
       await guardarNegocio(actor, Object.fromEntries(CAMPOS.map(({ k }) => [k, form![k]])));
       await cargar();
-      setOk("Datos guardados.");
+      toast.ok("Datos guardados.");
     } catch (e) {
       setError(textoError(e));
     }
@@ -88,7 +89,7 @@ export default function Negocio() {
               </label>
             );
           })}
-          <Mensaje error={error} ok={ok} />
+          <Mensaje error={error} />
           <div className="row">
             <Button variante="primario" icono={Save} disabled={!cambiado} onClick={guardar}>
               Guardar
@@ -169,7 +170,7 @@ function LogoEditor(p: {
   const [umbral, setUmbral] = useState(128);
   const [invertir, setInvertir] = useState(false);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const pendiente = useMemo<LogoPendiente | null>(
     () => (img ? { original: img.original, mime: img.mime, umbral, logo: aUnBit(img.rgba, img.ancho, img.alto, umbral, invertir) } : null),
@@ -179,7 +180,6 @@ function LogoEditor(p: {
 
   async function abrir(original: Uint8Array, mime: string, umbralInicial?: number | null) {
     setError("");
-    setOk("");
     try {
       const i = await decodificar(original, mime);
       setUmbral(umbralInicial ?? umbralSugerido(i.rgba));
@@ -207,7 +207,7 @@ function LogoEditor(p: {
     try {
       await p.onGuardar(l);
       setImg(null);
-      setOk(mensaje);
+      toast.ok(mensaje);
     } catch (e) {
       setError(textoError(e));
     }
@@ -259,7 +259,7 @@ function LogoEditor(p: {
           </div>
         </>
       )}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
     </section>
   );
 }
@@ -272,16 +272,15 @@ function ColorNegocio() {
   const { actor, config, recargarConfig } = useSesion();
   const [color, setColor] = useState(config.color_acento || "#24272c");
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
   const vista = temaConAcento(TEMAS[config.tema], config.tema, color);
 
   async function guardar(valor: string) {
     setError("");
-    setOk("");
     try {
       await guardarConfig(actor, "color_acento", valor);
       await recargarConfig();
-      setOk(valor ? "Color guardado." : "Volvió al grafito.");
+      toast.ok(valor ? "Color guardado." : "Volvió al grafito.");
     } catch (e) {
       setError(textoError(e));
     }
@@ -290,7 +289,7 @@ function ColorNegocio() {
   return (
     <section className="card">
       <h2>Color del negocio</h2>
-      <p className="muted">Botón Cobrar, selección y filtros. Si el color no se lee bien, la app lo oscurece o aclara sola.</p>
+      <p className="muted">Botón Cobrar, botones principales, selección y filtros. Si el color no se lee bien, la app lo oscurece o aclara sola. El rojo de error y de borrar no cambia.</p>
       <div className="row abajo">
         <label className="campo sin-margen">
           Color
@@ -300,25 +299,43 @@ function ColorNegocio() {
           Código
           <input className="mono" style={{ width: 120 }} value={color} onChange={(e) => setColor(e.target.value.trim())} />
         </label>
-        <div
-          aria-hidden
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            minWidth: 220,
-            minHeight: 52,
-            padding: "0 16px",
-            borderRadius: 12,
-            background: vista.accent,
-            color: vista["on-accent"],
-            fontWeight: 650,
-          }}
-        >
+      </div>
+      {/* Muestra con los colores reales: la marca junto a lo que significa "peligro" y "error". */}
+      <div className="muestra-color" aria-label="Vista previa" style={{ background: vista.card, borderColor: vista.hair, color: vista.text }}>
+        <div className="muestra-cobrar" style={{ background: vista.accent, color: vista["on-accent"] }}>
           <span>Cobrar</span>
-          <span style={{ fontSize: 20 }}>{monto(13225)}</span>
+          <span>{monto(13225)}</span>
+        </div>
+        <div className="muestra-fila">
+          <span className="muestra-btn" style={{ background: vista.accent, color: vista["on-accent"], borderColor: vista.accent }}>
+            <Save size={16} aria-hidden /> Guardar
+          </span>
+          <span className="muestra-btn" style={{ background: vista["err-bg"], color: vista.err, borderColor: vista.err }}>
+            <Trash2 size={16} aria-hidden /> Eliminar
+          </span>
+          <span className="muestra-btn" style={{ background: vista["accent-bg"], color: vista.accent, borderColor: vista.accent }}>
+            Librería
+          </span>
+        </div>
+        <div className="muestra-error" style={{ background: vista["err-bg"], color: vista.err }}>
+          <XCircle size={18} aria-hidden /> Falta ¢500
         </div>
       </div>
+      {pareceError(color) && (
+        <Alert tono="aviso" titulo="Este color se parece al rojo de error y de borrar">
+          <p>
+            Se puede usar: los botones de peligro se distinguen por su estilo y su lugar. Pero con prisa un cajero puede confundir «Guardar» con «Eliminar» o «Cobrar»
+            con un aviso de error. Si quiere mantener la marca sin ese riesgo, pruebe un tono cercano:
+          </p>
+          <div className="row" style={{ marginTop: 8 }}>
+            {alternativasAError(color).map((a) => (
+              <Button key={a.nombre} onClick={() => setColor(a.color)}>
+                <span className="muestra-punto" style={{ background: a.color }} aria-hidden /> {a.nombre}
+              </Button>
+            ))}
+          </div>
+        </Alert>
+      )}
       <div className="fila-botones">
         <Button variante="primario" icono={Save} disabled={!esColor(color) || color === config.color_acento} onClick={() => guardar(color.toLowerCase())}>
           Guardar color
@@ -330,7 +347,7 @@ function ColorNegocio() {
         )}
       </div>
       {!esColor(color) && <Mensaje error="Use el formato #rrggbb, por ejemplo #2e7d32." />}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
     </section>
   );
 }

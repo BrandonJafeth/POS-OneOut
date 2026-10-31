@@ -17,6 +17,7 @@ import { Bancos, FormasPago } from "./config/FormasPago";
 import Departamentos from "./Departamentos";
 import Ajustes from "./hardware/Ajustes";
 import Diagnostico from "./hardware/Diagnostico";
+import { useToast } from "../ui/Toast";
 
 const TABS = [
   ["claves", "Claves de configuración"],
@@ -73,7 +74,7 @@ function Claves() {
   const [originales, setOriginales] = useState<Record<string, string>>({});
   const [nueva, setNueva] = useState({ clave: "", valor: "" });
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   const cargar = async () => {
     const c = await leerConfigCruda();
@@ -85,7 +86,6 @@ function Claves() {
 
   async function guardar(clave: string, texto: string) {
     setError("");
-    setOk("");
     let valor: unknown;
     try {
       valor = JSON.parse(texto);
@@ -96,7 +96,7 @@ function Claves() {
       await guardarConfig(actor, clave, valor);
       await cargar();
       await recargarConfig();
-      setOk(`"${clave}" guardada.`);
+      toast.ok(`"${clave}" guardada.`);
     } catch (e) {
       setError(textoError(e));
     }
@@ -104,7 +104,7 @@ function Claves() {
 
   return (
     <section className="card">
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       <table className="tbl tbl-grande">
         <thead>
           <tr>
@@ -153,7 +153,7 @@ function Hardware() {
   const { actor, config, recargarConfig } = useSesion();
   const [impresoras, setImpresoras] = useState<string[]>([]);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
   const ajustes = ajustesImpresora(config);
 
   useEffect(() => {
@@ -162,11 +162,10 @@ function Hardware() {
 
   async function guardar(cambios: Record<string, unknown>) {
     setError("");
-    setOk("");
     try {
       for (const [k, v] of Object.entries(cambios)) await guardarConfig(actor, k, v);
       await recargarConfig();
-      setOk("Guardado.");
+      toast.ok("Guardado.");
     } catch (e) {
       setError(textoError(e));
     }
@@ -199,7 +198,7 @@ function Hardware() {
         <div style={{ marginTop: 10 }}>
           <Ajustes settings={ajustes} onSettings={guardarAjustes} />
         </div>
-        <Mensaje error={error} ok={ok} />
+        <Mensaje error={error} />
       </section>
       <section className="card">
         <h2>Diagnóstico (prototipo de hardware)</h2>

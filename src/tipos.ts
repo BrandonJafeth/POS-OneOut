@@ -132,6 +132,7 @@ export type AccionBitacora =
   | "venta.reimprimir"
   | "venta.pago_corregido"
   | "venta.anular"
+  | "venta.pedir_factura"
   | "venta.factura_emitida"
   | "forma_pago.guardar"
   | "banco.guardar"

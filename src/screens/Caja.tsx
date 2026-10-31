@@ -8,7 +8,7 @@ import Modal from "../components/Modal";
 import { esMiTurno, detalleTurno, listarTurnos, marcarRevisada, reabrirCaja, type Detalle, type ResultadoCierre, type TurnoFila } from "../db/caja";
 import { listarEsperas } from "../db/ventas";
 import { imprimirMovimiento, imprimirZ } from "../lib/caja/imprimir";
-import { diaLocal } from "../lib/texto";
+import { diaLocal, plural } from "../lib/texto";
 import { fechaHora, monto } from "../lib/tickets";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
@@ -172,7 +172,7 @@ export default function Caja() {
                 )}
                 {r.porUsuario.length > 1 && (
                   <Alert tono="info" titulo="En este turno vendió más de una persona">
-                    {r.porUsuario.map((u) => `${u.usuario}: ${u.ventas} venta(s)${detalle.veEsperado ? ` · ${monto(u.total)}` : ""}`).join(" — ")}
+                    {r.porUsuario.map((u) => `${u.usuario}: ${plural(u.ventas, "venta", "ventas")}${detalle.veEsperado ? ` · ${monto(u.total)}` : ""}`).join(" — ")}
                   </Alert>
                 )}
                 <h3>Tarjeta, SINPE y transferencias</h3>

@@ -1689,8 +1689,17 @@ details.fiscal summary {
   background: var(--accent-bg);
 }
 
+/* Buscador con lupa: el espacio del ícono y el ancho completo van aquí, no en cada pantalla. */
 .buscador-entrada {
   position: relative;
+  width: 100%;
+}
+
+.buscador-entrada input {
+  width: 100%;
+  min-height: 48px;
+  font-size: 17px;
+  padding-left: 44px;
 }
 
 .buscador-entrada svg {
@@ -2631,4 +2640,347 @@ textarea::placeholder {
 .monto-campo.porcentaje input.precio {
   padding-left: var(--e3);
   padding-right: calc(var(--e3) + 18px);
+}
+
+/* ───── Pie de diálogo y botones de peligro ───── */
+.modal-pie {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e3);
+  align-items: center;
+  padding: var(--e3) var(--e5);
+  border-top: 1px solid var(--hair);
+}
+
+.modal-pie .separador,
+.modal-acciones .separador {
+  flex: 1;
+}
+
+.modal-acciones {
+  margin-top: var(--e5);
+}
+
+/* Peligro "fuerte" es tonal (fondo suave + texto rojo), nunca un bloque relleno: así no se
+   confunde con el botón primario aunque el color del negocio sea rojo o rosa. */
+.btn-peligro-lleno {
+  background: var(--err-bg);
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.btn-peligro-lleno:hover:not(:disabled) {
+  background: var(--err-bg);
+  filter: none;
+  box-shadow: inset 0 0 0 1px var(--err);
+}
+
+/* Acción destructiva secundaria: solo texto rojo, lejos del primario. */
+.btn.texto-peligro {
+  color: var(--err);
+}
+
+.btn.texto-peligro:hover:not(:disabled) {
+  background: var(--err-bg);
+}
+
+.editor-seccion {
+  margin: var(--e5) 0 var(--e1);
+  padding-top: var(--e4);
+  border-top: 1px solid var(--hair);
+  font-size: 17px;
+}
+
+.chip-codigo {
+  gap: var(--e2);
+}
+
+/* ───── Ventas del día ───── */
+.ventas-filtros {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e3);
+}
+
+.tbl td.hora {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tbl td.productos-venta {
+  max-width: 360px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cliente-elegido {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--e4);
+  padding: var(--e3) var(--e4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radio);
+  background: var(--accent-bg);
+}
+
+.lista-clientes {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio);
+  overflow: hidden;
+}
+
+.lista-clientes button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 52px;
+  padding: var(--e2) var(--e4);
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  border-radius: 0;
+  background: var(--card);
+  text-align: left;
+}
+
+.lista-clientes button:last-child {
+  border-bottom: 0;
+}
+
+.lista-clientes button:hover {
+  background: var(--card2);
+}
+
+/* Vista previa del color del negocio (Datos del negocio). */
+.muestra-color {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e3);
+  max-width: 420px;
+  margin-top: var(--e4);
+  padding: var(--e4);
+  border: 1px solid;
+  border-radius: var(--radio-g);
+}
+
+.muestra-cobrar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 56px;
+  padding: 0 var(--e4);
+  border-radius: var(--radio-g);
+  font-size: 20px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.muestra-fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2);
+}
+
+.muestra-btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--e3);
+  border: 1px solid;
+  border-radius: var(--radio);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.muestra-error {
+  display: flex;
+  gap: var(--e2);
+  align-items: center;
+  padding: var(--e2) var(--e3);
+  border-radius: var(--radio);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.muestra-punto {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.ventas-filtros input[type="time"] {
+  min-height: 48px;
+}
+
+/* ───── Avisos breves (toast) ───── */
+.toast-zona {
+  position: fixed;
+  left: 50%;
+  bottom: var(--e5);
+  z-index: 20;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  display: flex;
+  gap: var(--e3);
+  align-items: center;
+  padding: var(--e3) var(--e2) var(--e3) var(--e3);
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card);
+  color: var(--text);
+  box-shadow:
+    0 12px 32px var(--sombra),
+    0 2px 6px var(--sombra);
+  pointer-events: auto;
+  animation: toast-entra 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toast-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.toast-icono {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+}
+
+.toast-ok .toast-icono {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.toast-aviso .toast-icono {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.toast-error .toast-icono {
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+/* Info es neutro: el color del negocio (que puede ser rojo) no se usa para mensajes. */
+.toast-info .toast-icono {
+  background: var(--card2);
+  color: var(--text);
+}
+
+.toast-cuerpo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.toast-cuerpo strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.toast-texto {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+button.toast-accion {
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--e3);
+  border: 1px solid var(--line);
+  border-radius: var(--radio);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 650;
+}
+
+button.toast-accion:hover {
+  background: var(--card2);
+}
+
+button.toast-cerrar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radio);
+  background: transparent;
+  color: var(--muted);
+}
+
+button.toast-cerrar:hover {
+  background: var(--card2);
+  color: var(--text);
+}
+
+/* Barra del tiempo que queda, en el color del estado. Con el mouse o el foco encima se detiene. */
+.toast-tiempo {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  transform-origin: left;
+  animation-name: toast-tiempo;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.toast-ok .toast-tiempo {
+  background: var(--ok);
+}
+
+.toast-aviso .toast-tiempo {
+  background: var(--warn);
+}
+
+.toast-error .toast-tiempo {
+  background: var(--err);
+}
+
+.toast-info .toast-tiempo {
+  background: var(--line);
+}
+
+.toast:hover .toast-tiempo,
+.toast:focus-within .toast-tiempo {
+  animation-play-state: paused;
+}
+
+@keyframes toast-tiempo {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
 }

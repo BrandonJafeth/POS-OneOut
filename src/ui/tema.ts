@@ -94,6 +94,49 @@ export function mezclar(a: string, b: string, t: number): string {
   return aHex(x.map((v, i) => v + (y[i] - v) * t));
 }
 
+/** Tono (0–360°), saturación y luz (0–1). */
+function aHsl(hex: string): [number, number, number] {
+  const [r, g, b] = aRgb(hex).map((x) => x / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (!d) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, s, l];
+}
+
+function deHsl(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return aHex([r, g, b].map((v) => (v + m) * 255));
+}
+
+/**
+ * ¿El color del negocio se confunde con el rojo de error y de borrar? (mismo tono ±25° y con
+ * color de verdad, no un gris). La app igual lo acepta: es la marca del negocio. Solo se avisa.
+ */
+export function pareceError(hex: unknown): boolean {
+  if (!esColor(hex)) return false;
+  const [h, s, l] = aHsl(hex.toLowerCase());
+  const [he] = aHsl(TEMAS.claro.err);
+  const dist = Math.min(Math.abs(h - he), 360 - Math.abs(h - he));
+  return dist <= 25 && s >= 0.35 && l > 0.12 && l < 0.9;
+}
+
+/** Tonos parecidos a la marca que ya no se leen como error: vino (hacia el magenta) y un rojo muy oscuro. */
+export function alternativasAError(hex: string): { nombre: string; color: string }[] {
+  const [, s, l] = aHsl(hex.toLowerCase());
+  return [
+    { nombre: "Vino", color: deHsl(335, Math.max(0.55, s * 0.85), Math.min(0.38, Math.max(0.3, l))) },
+    { nombre: "Ciruela", color: deHsl(310, 0.45, 0.32) },
+    { nombre: "Grafito", color: TEMAS.claro.accent },
+  ];
+}
+
 export function esColor(hex: unknown): hex is string {
   return typeof hex === "string" && HEX.test(hex);
 }
@@ -164,6 +207,7 @@ export function combinaciones(t: Tema): [string, string, number, string][] {
     [t.err, t["err-bg"], 4.5, "error"],
     [t.err, t.card, 4.5, "botón rojo (texto) sobre tarjeta"],
     [t.ok, t.card, 4.5, "texto verde sobre tarjeta"],
+    [t.warn, t.card, 3, "barra de tiempo del aviso sobre tarjeta"],
     [t["on-err"], t.err, 4.5, "botón rojo lleno"],
     [t.line, t.card, 3, "borde de campo/botón sobre tarjeta"],
     [t.line, t.bg, 3, "borde de campo/botón sobre fondo"],

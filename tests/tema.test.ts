@@ -34,3 +34,13 @@ describe("contraste WCAG 2.1 AA", () => {
     expect(temaConAcento(TEMAS.claro, "claro", "rojo")).toEqual(TEMAS.claro);
   });
 });
+
+describe("color del negocio parecido al rojo de error", () => {
+  it("avisa con rojos y no con otros colores", async () => {
+    const { pareceError, alternativasAError } = await import("../src/ui/tema");
+    for (const rojo of ["#c62828", "#e53935", "#b71c1c", "#ff3b30"]) expect(pareceError(rojo)).toBe(true);
+    for (const otro of ["#24272c", "#1a4fc4", "#2e7d32", "#ffd400", "#8e44ad", "#808080", "#ff69b4"]) expect(pareceError(otro)).toBe(false);
+    // Las alternativas que propone ya no avisan.
+    for (const a of alternativasAError("#c62828")) expect(pareceError(a.color)).toBe(false);
+  });
+});

@@ -17,7 +17,7 @@ import {
   type PagoElectronico,
   type ResultadoCierre,
 } from "../../db/caja";
-import { leerMontoEntero } from "../../lib/texto";
+import { leerMontoEntero, plural } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
@@ -168,7 +168,7 @@ export function CerrarCaja(p: { estado: EstadoCaja; esperasAbiertas: number; pag
             Cuente todo el efectivo de la gaveta.{" "}
             {p.estado.cierreCiego ? "El sistema compara con lo esperado al cerrar." : "Al cerrar verá si cuadra con lo esperado."}
           </p>
-          {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {p.esperasAbiertas} venta(s) en espera sin cobrar. Se quedan para mañana.</Alert>}
+          {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {plural(p.esperasAbiertas, "venta", "ventas")} en espera sin cobrar. Se quedan para mañana.</Alert>}
           <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" />
           {error && <Alert tono="error">{error}</Alert>}
           <div className="fila-botones">

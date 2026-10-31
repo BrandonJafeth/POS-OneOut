@@ -13,7 +13,7 @@ import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { buscarProductos, marcarFavorito, ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
 import { autorizarDescuento, cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
-import { conMiles, leerMontoEntero } from "../lib/texto";
+import { conMiles, leerMontoEntero, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
@@ -23,7 +23,7 @@ import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEnt
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
 import CampoMonto from "../ui/CampoMonto";
-import { useConfirmar } from "../ui/Confirmar";
+import { useToast } from "../ui/Toast";
 import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
@@ -58,7 +58,7 @@ function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | 
 
 export default function Venta() {
   const { actor, usuario, config, puede, caja, recargarCaja, irA } = useSesion();
-  const confirmar = useConfirmar();
+  const toast = useToast();
   const [abrirCaja, setAbrirCaja] = useState(false);
   const [esperas, setEsperas] = useState<VentaEspera[]>([]);
   const [activaId, setActivaId] = useState<string | null>(null);
@@ -287,24 +287,42 @@ export default function Venta() {
     }
   }
 
+  // Descartar no pregunta: se hace al instante y el aviso ofrece "Deshacer" unos segundos
+  // (menos diálogos, y un toque equivocado se recupera). Queda anotado en la bitácora igual.
   async function descartar(e: VentaEspera) {
-    // Confirmación solo si hay algo que perder.
-    if (
-      e.estado.lineas.length &&
-      !(await confirmar({
-        titulo: `¿Descartar la venta ${e.numero}?`,
-        texto: `${e.estado.lineas.length} producto(s) por ${monto(calcularTotales(e.estado, config.redondeo_total).total)}. Queda anotado en la bitácora.`,
-        aceptar: "Descartar",
-        peligro: true,
-      }))
-    )
-      return;
     await descartarEspera(actor, e.id);
     const resto = esperasRef.current.filter((x) => x.id !== e.id);
     if (!resto.length) resto.push(await crearEspera(actor, estadoVacio()));
     ponerEsperas(resto);
     if (activaId === e.id) setActivaId(resto[0].id);
     alBuscador();
+    if (!e.estado.lineas.length) return;
+    toast.mostrar({
+      tono: "info",
+      titulo: `Venta ${e.numero} descartada`,
+      texto: `${plural(e.estado.lineas.length, "producto", "productos")} · ${monto(calcularTotales(e.estado, config.redondeo_total).total)}`,
+      accion: { texto: "Deshacer", onClick: () => void recuperar(e) },
+    });
+  }
+
+  /** Vuelve a poner una venta descartada: en una pestaña vacía si hay, si no en una nueva. */
+  async function recuperar(e: VentaEspera) {
+    try {
+      const vacia = esperasRef.current.find((x) => !x.estado.lineas.length);
+      if (vacia) {
+        await guardarEspera(vacia.id, e.estado);
+        ponerEsperas(esperasRef.current.map((x) => (x.id === vacia.id ? { ...x, estado: e.estado } : x)));
+        setActivaId(vacia.id);
+      } else {
+        const nueva = await crearEspera(actor, e.estado);
+        ponerEsperas([...esperasRef.current, nueva]);
+        setActivaId(nueva.id);
+      }
+      toast.ok("Venta recuperada");
+      alBuscador();
+    } catch (err) {
+      setError(textoError(err));
+    }
   }
 
   // ── Líneas
@@ -875,15 +893,16 @@ function DescuentoTotal(p: { subtotal: number; actual: number; tope: number; onA
             )}
           </span>
         </Field>
-        <div className="fila-botones">
-          <Button type="submit" variante="primario" atajo="Enter">
-            Aplicar
-          </Button>
+        <div className="fila-botones modal-acciones">
           {p.actual > 0 && (
-            <Button variante="peligro" icono={X} onClick={() => p.onAplicar(0)}>
+            <Button variante="fantasma" className="texto-peligro" icono={X} onClick={() => p.onAplicar(0)}>
               Quitar descuento
             </Button>
           )}
+          <span className="separador" />
+          <Button type="submit" variante="primario" atajo="Enter">
+            Aplicar
+          </Button>
         </div>
       </form>
     </Modal>

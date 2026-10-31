@@ -484,6 +484,9 @@ pub struct VentaResumen {
     pub factura_emitida: bool,
     pub formas: String,
     pub turno_abierto: bool,
+    /// Descripciones de las líneas ("Tijera · Cuaderno"), para buscar "la venta de la tijera".
+    pub productos: String,
+    pub articulos: i64,
 }
 
 pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) -> Res<Vec<VentaResumen>> {
@@ -491,7 +494,9 @@ pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) 
     let filas = sqlx::query(
         "SELECT v.id, v.numero, v.fecha, v.total, v.estado, v.requiere_factura, v.factura_emitida, u.nombre AS cajero, t.estado AS turno_estado,
            (SELECT group_concat(f.nombre, ' + ') FROM venta_pagos p JOIN formas_pago f ON f.id = p.forma_pago_id
-            WHERE p.venta_id = v.id AND p.eliminado_en IS NULL) AS formas
+            WHERE p.venta_id = v.id AND p.eliminado_en IS NULL) AS formas,
+           (SELECT group_concat(l.descripcion, ' · ') FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL) AS productos,
+           (SELECT COALESCE(SUM(l.cantidad), 0) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL) AS articulos
          FROM ventas v JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
          WHERE v.caja_id = ? AND v.dia = ? AND v.eliminado_en IS NULL ORDER BY v.consecutivo DESC",
     )
@@ -513,6 +518,8 @@ pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) 
             factura_emitida: f.get::<i64, _>("factura_emitida") == 1,
             formas: f.get::<Option<String>, _>("formas").unwrap_or_default(),
             turno_abierto: f.get::<Option<String>, _>("turno_estado").as_deref() == Some("abierto"),
+            productos: f.get::<Option<String>, _>("productos").unwrap_or_default(),
+            articulos: f.get("articulos"),
         })
         .collect())
 }
@@ -831,6 +838,38 @@ pub async fn pendientes_factura(pool: &SqlitePool, a: &Actor) -> Res<Vec<Value>>
             Value::Object(m)
         })
         .collect())
+}
+
+/// El cliente vuelve y pide factura de una venta ya cobrada: queda en "Pendientes de factura"
+/// con el cliente elegido (Hacienda lo necesita). No cambia montos ni pagos.
+pub async fn pedir_factura(pool: &SqlitePool, a: &Actor, venta_id: &str, cliente_id: &str) -> Res<()> {
+    a.exigir("facturas", "pedir facturas")?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let cliente: Option<i64> = sqlx::query_scalar("SELECT 1 FROM clientes WHERE id = ? AND anonimizado_en IS NULL")
+        .bind(cliente_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(e)?;
+    if cliente.is_none() {
+        return Err("Elija un cliente registrado".into());
+    }
+    let n = sqlx::query(
+        "UPDATE ventas SET requiere_factura = 1, cliente_id = ?, actualizado_en = ?
+         WHERE id = ? AND estado = 'completada' AND factura_emitida = 0 AND requiere_factura = 0 AND eliminado_en IS NULL",
+    )
+    .bind(cliente_id)
+    .bind(ahora_iso())
+    .bind(venta_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(e)?
+    .rows_affected();
+    if n == 0 {
+        return Err("Esa venta ya pidió factura, está anulada o ya tiene factura".into());
+    }
+    bitacora::registrar(&mut tx, Some(&a.id), "venta.pedir_factura", "venta", Some(venta_id), &json!({"cliente": cliente_id})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
 }
 
 pub async fn marcar_factura(pool: &SqlitePool, a: &Actor, venta_id: &str, referencia: &str) -> Res<()> {

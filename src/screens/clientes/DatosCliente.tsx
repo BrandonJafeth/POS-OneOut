@@ -17,7 +17,9 @@ import {
 import { obtenerNegocio } from "../../db/negocio";
 import { csvCliente, descargar, pdfCliente } from "../../lib/exportarCliente";
 import { monto } from "../../lib/tickets";
+import { plural } from "../../lib/texto";
 import { TIPO_IDENTIFICACION, type Cliente, type TipoIdentificacion } from "../../tipos";
+import { useToast } from "../../ui/Toast";
 
 export default function DatosCliente(p: { clienteId: string; motivoSugerido?: MotivoAnonimizacion; onCerrar(): void; onCambio(): void }) {
   const { actor } = useSesion();
@@ -26,7 +28,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
   const [pendientes, setPendientes] = useState<CuentaResumen[]>([]);
   const [anonimizando, setAnonimizando] = useState(false);
   const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
+  const toast = useToast();
 
   async function cargar() {
     const x = await obtenerCliente(actor, p.clienteId);
@@ -44,7 +46,6 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
 
   async function guardar() {
     setError("");
-    setOk("");
     try {
       await editarCliente(actor, c!.id, {
         nombre: form!.nombre,
@@ -56,7 +57,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
       });
       await cargar();
       p.onCambio();
-      setOk("Datos corregidos.");
+      toast.ok("Datos corregidos.");
     } catch (e) {
       setError(textoError(e));
     }
@@ -69,7 +70,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
       const base = `datos-cliente-${c!.id.slice(-6)}`;
       if (formato === "csv") descargar(`${base}.csv`, csvCliente(datos), "text/csv");
       else descargar(`${base}.pdf`, pdfCliente(datos, (await obtenerNegocio()).responsableTratamiento), "application/pdf");
-      setOk("Archivo guardado en Descargas. Entrégueselo solo al titular de los datos.");
+      toast.ok("Archivo guardado en Descargas. Entrégueselo solo al titular de los datos.");
     } catch (e) {
       setError(textoError(e));
     }
@@ -123,7 +124,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
           Saldo pendiente: {pendientes.map((k) => `${k.tipo} ${monto(k.saldo)}`).join(", ")}
         </p>
       )}
-      <Mensaje error={error} ok={ok} />
+      <Mensaje error={error} />
       {!anonimo && (
         <div className="row">
           <button className="primary" disabled={!sucio} onClick={guardar}>
@@ -138,7 +139,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
       )}
       {anonimizando && (
         <Anonimizar
-          bloqueo={pendientes.length ? `Tiene ${pendientes.length} apartado(s) o crédito(s) con saldo pendiente. Primero liquídelos o cancélelos.` : ""}
+          bloqueo={pendientes.length ? `Tiene ${plural(pendientes.length, "apartado o crédito", "apartados o créditos")} con saldo pendiente. Primero liquídelos o cancélelos.` : ""}
           motivoSugerido={p.motivoSugerido}
           onCerrar={() => setAnonimizando(false)}
           onConfirmar={async (pin, motivo) => {
@@ -146,7 +147,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
             setAnonimizando(false);
             await cargar();
             p.onCambio();
-            setOk("Cliente anonimizado.");
+            toast.ok("Cliente anonimizado.");
           }}
         />
       )}
