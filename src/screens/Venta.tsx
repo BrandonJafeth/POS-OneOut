@@ -11,7 +11,7 @@ import Modal from "../components/Modal";
 import PinDueno from "../components/PinDueno";
 import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
-import { buscarProductos, marcarFavorito, productoPorCodigo } from "../db/productos";
+import { buscarProductos, marcarFavorito, ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
 import { autorizarDescuento, cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
 import { leerMontoEntero } from "../lib/texto";
 import { monto } from "../lib/tickets";
@@ -28,9 +28,21 @@ import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
 import { AbrirCaja } from "./caja/Dialogos";
+import { esMiTurno } from "../db/caja";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | null;
 const FAVORITOS = "★";
+const POR_PAGINA = 60;
+
+/** Orden elegido en este equipo (comodidad del cajero; si no se puede leer, A–Z). */
+function ordenGuardado(): OrdenProductos {
+  try {
+    const o = localStorage.getItem("venta.orden");
+    return o && o in ORDENES_PRODUCTOS ? (o as OrdenProductos) : "nombre";
+  } catch {
+    return "nombre";
+  }
+}
 
 /** Monto en colones a partir de "500" (¢) o "10" (%) sobre `base`. */
 function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | null {
@@ -44,7 +56,7 @@ function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | 
 }
 
 export default function Venta() {
-  const { actor, config, puede, caja, recargarCaja, irA } = useSesion();
+  const { actor, usuario, config, puede, caja, recargarCaja, irA } = useSesion();
   const confirmar = useConfirmar();
   const [abrirCaja, setAbrirCaja] = useState(false);
   const [esperas, setEsperas] = useState<VentaEspera[]>([]);
@@ -55,6 +67,8 @@ export default function Venta() {
   const [texto, setTexto] = useState("");
   const [filtro, setFiltro] = useState<string>(FAVORITOS); // ★ o id de departamento
   const [productos, setProductos] = useState<ProductoLista[]>([]);
+  const [totalCatalogo, setTotalCatalogo] = useState(0);
+  const [orden, setOrden] = useState<OrdenProductos>(ordenGuardado);
   const [cargando, setCargando] = useState(true);
   const [sel, setSel] = useState(0); // tarjeta resaltada (teclado)
   const [lineaSel, setLineaSel] = useState<string | null>(null);
@@ -173,7 +187,7 @@ export default function Venta() {
 
   // ── Catálogo: búsqueda, favoritos o un departamento.
   const consulta = useRef(0);
-  const cargarCatalogo = useCallback(async () => {
+  const cargarCatalogo = useCallback(async (mas = false) => {
     const n = ++consulta.current;
     const q = texto.replace(/^\d+\*/, "").trim();
     setCargando(true);
@@ -182,21 +196,34 @@ export default function Venta() {
         texto: q.length >= 2 ? q : undefined,
         soloFavoritos: q.length < 2 && filtro === FAVORITOS,
         departamentoId: q.length < 2 && filtro !== FAVORITOS ? filtro : undefined,
-        limite: q.length >= 2 ? 60 : 240,
+        orden,
+        limite: POR_PAGINA,
+        desplazamiento: mas ? productos.length : 0,
       });
       if (n !== consulta.current) return;
-      setProductos(r.filas);
-      setSel(0);
+      setProductos(mas ? [...productos, ...r.filas] : r.filas);
+      setTotalCatalogo(r.total);
+      if (!mas) setSel(0);
     } catch (e) {
       setError(textoError(e));
     } finally {
       if (n === consulta.current) setCargando(false);
     }
-  }, [texto, filtro]);
+  }, [texto, filtro, orden, productos]);
   useEffect(() => {
     const h = setTimeout(() => void cargarCatalogo(), buscando ? 120 : 0);
     return () => clearTimeout(h);
-  }, [cargarCatalogo]);
+    // Solo al cambiar lo buscado, el filtro o el orden (no al agregar páginas).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [texto, filtro, orden]);
+  const cambiarOrden = (o: OrdenProductos) => {
+    setOrden(o);
+    try {
+      localStorage.setItem("venta.orden", o);
+    } catch {
+      /* sin almacenamiento: solo dura esta sesión */
+    }
+  };
 
   async function enterBuscador() {
     const m = /^(\d+)\*(.+)$/.exec(texto.trim());
@@ -214,7 +241,7 @@ export default function Venta() {
   async function alternarFavorito(p: ProductoLista) {
     try {
       await marcarFavorito(actor, p.id, !p.favorito);
-      if (filtro === FAVORITOS && !buscando) setProductos((l) => l.filter((x) => x.id !== p.id));
+      if (filtro === FAVORITOS && !buscando) setProductos((l) => l.filter((x) => x.id !== p.id)), setTotalCatalogo((t) => t - 1);
       else setProductos((l) => l.map((x) => (x.id === p.id ? { ...x, favorito: !p.favorito } : x)));
     } catch (e) {
       setError(textoError(e));
@@ -346,12 +373,21 @@ export default function Venta() {
   const articulos = estado.lineas.reduce((s, l) => s + l.cantidad, 0);
   const puedeFavoritos = puede("productos");
 
-  // Sin caja abierta de hoy no se vende (Rust también lo rechaza al cobrar).
-  if (caja && (!caja.turno || caja.deOtroDia))
+  // Sin caja abierta de hoy, o con la caja de otro cajero, no se vende (Rust también lo rechaza al cobrar).
+  const ajena = !!caja?.turno && !esMiTurno(caja.turno, usuario.id, puede("caja.admin"));
+  if (caja && (!caja.turno || caja.deOtroDia || ajena))
     return (
       <div className="screen centro">
         <section className="card login-card">
-          {caja.deOtroDia ? (
+          {ajena ? (
+            <>
+              <h1>La caja la tiene abierta {caja.turno?.usuarioApertura}</h1>
+              <p className="muted">
+                Cada cajero responde por su propio turno. {caja.turno?.usuarioApertura} debe cerrar su caja con el conteo (o el dueño, si ya
+                no está) y después usted abre la suya.
+              </p>
+            </>
+          ) : caja.deOtroDia ? (
             <>
               <h1>Quedó abierta la caja del {caja.turno?.dia}</h1>
               <p className="muted">Ciérrela con el conteo del efectivo antes de vender hoy.</p>
@@ -410,6 +446,26 @@ export default function Venta() {
           ))}
         </div>
 
+        <div className="catalogo-barra">
+          <span className="muted" aria-live="polite">
+            {cargando && !productos.length
+              ? "Cargando…"
+              : totalCatalogo === 1
+                ? "1 producto"
+                : `${totalCatalogo.toLocaleString("es-CR")} productos${productos.length < totalCatalogo ? ` · se ven ${productos.length}` : ""}`}
+          </span>
+          <label className="catalogo-orden">
+            <span>Ordenar</span>
+            <select value={orden} onChange={(e) => (cambiarOrden(e.target.value as OrdenProductos), alBuscador())}>
+              {Object.entries(ORDENES_PRODUCTOS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
         {aviso && <Alert tono="aviso">{aviso}</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
 
@@ -447,6 +503,12 @@ export default function Venta() {
               )}
             </div>
           ))}
+          {productos.length < totalCatalogo && (
+            <button className="tile-mas" onClick={() => void cargarCatalogo(true)} disabled={cargando}>
+              <Plus size={20} aria-hidden />
+              {cargando ? "Cargando…" : `Ver ${Math.min(POR_PAGINA, totalCatalogo - productos.length)} más (quedan ${(totalCatalogo - productos.length).toLocaleString("es-CR")})`}
+            </button>
+          )}
           {!cargando && productos.length === 0 && (
             <p className="grilla-aviso">
               {buscando

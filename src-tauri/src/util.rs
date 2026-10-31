@@ -5,8 +5,25 @@ use chrono::{Local, Utc};
 pub type Res<T> = Result<T, String>;
 
 /// Convierte cualquier error en texto para el frontend.
+/// Error técnico (base de datos, archivo, sistema). Lleva una marca para que la pantalla muestre
+/// un mensaje general ("contacte al administrador") y el detalle solo al técnico.
+pub const TECNICO: &str = "ERROR_TECNICO: ";
+
 pub fn e<E: std::fmt::Display>(err: E) -> String {
-    err.to_string()
+    format!("{TECNICO}{err}")
+}
+
+/// ¢1.825 (igual que monto() de la pantalla), para mensajes.
+pub fn colones(n: i64) -> String {
+    let s = n.abs().to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(c);
+    }
+    format!("{}¢{out}", if n < 0 { "-" } else { "" })
 }
 
 const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";

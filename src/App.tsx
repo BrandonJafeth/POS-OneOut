@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { crearSesion, SesionCtx } from "./app/sesion";
-import { textoError } from "./components/Mensaje";
+import { MARCA_TECNICA, mostrarDetalleTecnico, textoError } from "./components/Mensaje";
 import { estadoCaja, type EstadoCaja } from "./db/caja";
 import { guardarConfig, leerConfig, type ConfigApp } from "./db/config";
 import { iniciarBase } from "./db/iniciar";
@@ -81,7 +81,8 @@ export default function App() {
   /** Antes de entrar solo se sabe lo que Rust deja ver sin sesión: nombre, tema y si falta el técnico. */
   const cargarSistema = useCallback(async () => {
     const s = await estadoSistema();
-    if (s.error) return setFase({ f: "error", mensaje: s.error });
+    // Al arrancar no hay sesión: se muestra el detalle para que el administrador sepa qué pasó.
+    if (s.error) return setFase({ f: "error", mensaje: `${s.error.replace(MARCA_TECNICA, "")} Si no sabe cómo resolverlo, contacte al administrador.` });
     aplicarTema(s.tema === "oscuro" ? "oscuro" : "claro", typeof s.colorAcento === "string" ? s.colorAcento : "");
     setNombreNegocio(s.nombreNegocio);
     setFase(s.necesitaTecnico ? { f: "primer" } : { f: "login" });
@@ -107,10 +108,14 @@ export default function App() {
   );
 
   const entrar = useCallback(async (usuario: Usuario, minutos: number) => {
-    const c = await leerConfig();
-    aplicarTema(c.tema, c.color_acento);
-    setConfig(c);
     setAvisoLogin("");
+    // Con PIN pendiente de cambio Rust no deja leer nada: la configuración se carga después del cambio.
+    if (!usuario.debeCambiarPin) {
+      const c = await leerConfig();
+      aplicarTema(c.tema, c.color_acento);
+      setConfig(c);
+    }
+    mostrarDetalleTecnico(usuario.rol === "tecnico");
     setFase({ f: "dentro", usuario, minutos });
   }, []);
 
@@ -124,6 +129,7 @@ export default function App() {
       .catch(() => undefined)
       .then(() => cargarSistema())
       .catch((e) => setFase({ f: "error", mensaje: textoError(e) }));
+    mostrarDetalleTecnico(false);
     setConfig(null);
   }, []);
 
@@ -146,6 +152,14 @@ export default function App() {
       </div>
     );
   else if (fase.f === "primer") contenido = <PrimerArranque onListo={(u, m) => void entrar(u, m)} />;
+  else if (fase.f === "dentro" && fase.usuario.debeCambiarPin)
+    contenido = (
+      <CambiarPinObligatorio
+        usuario={fase.usuario}
+        onSalir={salir}
+        onListo={() => void entrar({ ...fase.usuario, debeCambiarPin: false }, fase.minutos).catch((e) => setFase({ f: "error", mensaje: textoError(e) }))}
+      />
+    );
   else if (fase.f === "login" || !config)
     contenido = (
       <>
@@ -154,11 +168,9 @@ export default function App() {
             <Alert tono="info">{avisoLogin}</Alert>
           </div>
         )}
-        <Login nombreNegocio={nombreNegocio} onEntrar={(u, m) => void entrar(u, m)} />
+        <Login nombreNegocio={nombreNegocio} onEntrar={(u, m) => entrar(u, m).catch((e) => setFase({ f: "error", mensaje: textoError(e) }))} />
       </>
     );
-  else if (fase.usuario.debeCambiarPin)
-    contenido = <CambiarPinObligatorio usuario={fase.usuario} onSalir={salir} onListo={() => setFase({ ...fase, usuario: { ...fase.usuario, debeCambiarPin: false } })} />;
   else contenido = <Dentro usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
 
   return <ConfirmarProvider>{contenido}</ConfirmarProvider>;
@@ -255,12 +267,17 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
         <aside className="lateral" aria-label="Menú">
           <div className="lateral-marca">{p.nombreNegocio || "Punto de venta"}</div>
           {usaCaja && caja && (
-            <button className={caja.turno && !caja.deOtroDia ? "caja-indicador abierta" : "caja-indicador"} onClick={() => setPagina("caja")}>
+            <button
+              className={caja.turno && !caja.deOtroDia && (caja.turno.usuarioAperturaId === p.usuario.id || puede(p.usuario.rol, "caja.admin")) ? "caja-indicador abierta" : "caja-indicador"}
+              onClick={() => setPagina("caja")}
+            >
               <span className="punto" aria-hidden />
               {caja.turno
                 ? caja.deOtroDia
                   ? `Caja abierta desde el ${caja.turno.dia}`
-                  : `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(-5)}`
+                  : caja.turno.usuarioAperturaId === p.usuario.id
+                    ? `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
+                    : `Caja de ${caja.turno.usuarioApertura.split(" ")[0]} · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
                 : "Caja cerrada"}
             </button>
           )}

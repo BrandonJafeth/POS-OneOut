@@ -1,6 +1,6 @@
 // Reporte Z (cierre de caja) y comprobante de movimiento, para la POS-58 (32 columnas, ¢).
 // La reimpresión del Z sale marcada "COPIA" (Rust lleva la cuenta de impresiones).
-import type { Detalle, Movimiento } from "../../db/caja";
+import { agruparPorForma, type Detalle, type Movimiento } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { escribirEncabezado } from "../impresion";
@@ -17,12 +17,15 @@ export function reporteZ(n: Negocio, d: Detalle, s: TicketSettings, o: { copia: 
   if (o.copia) p.bold(true).line("*** COPIA ***").bold(false);
   p.align("left");
   p.line(lr("Día:", t.dia));
-  p.line(lr("Abrió:", `${t.usuarioApertura.slice(0, 12)} ${fechaHora(new Date(t.abiertoEn)).slice(-5)}`));
-  if (t.cerradoEn) p.line(lr("Cerró:", `${(t.usuarioCierre ?? "").slice(0, 12)} ${fechaHora(new Date(t.cerradoEn)).slice(-5)}`));
+  p.line(lr("Abrió:", `${t.usuarioApertura.slice(0, 12)} ${fechaHora(new Date(t.abiertoEn)).slice(11, 16)}`));
+  if (t.cerradoEn) p.line(lr("Cerró:", `${(t.usuarioCierre ?? "").slice(0, 12)} ${fechaHora(new Date(t.cerradoEn)).slice(11, 16)}`));
   p.line(SEP);
   p.line(lr(`Ventas (${r.ventas})`, monto(r.totalVentas)));
   if (r.descuentos) p.line(lr("  Descuentos dados", monto(r.descuentos)));
   if (r.anuladas) p.line(lr(`Anuladas (${r.anuladas})`, monto(r.totalAnuladas)));
+  // Si alguien más (el dueño) vendió en este turno, queda a su nombre.
+  if ((r.porUsuario ?? []).length > 1)
+    for (const u of r.porUsuario) p.line(lr(`  ${u.usuario.slice(0, 16)} (${u.ventas})`, d.veEsperado ? monto(u.total) : ""));
   p.line(SEP);
   p.bold(true).line("POR FORMA DE PAGO").bold(false);
   for (const f of r.porForma) p.line(lr(`${f.nombre.slice(0, 18)} (${f.pagos})`, monto(f.monto)));
@@ -41,7 +44,22 @@ export function reporteZ(n: Negocio, d: Detalle, s: TicketSettings, o: { copia: 
   if (r.movimientos.length) {
     p.line(SEP);
     p.bold(true).line("MOVIMIENTOS").bold(false);
-    for (const m of r.movimientos) p.line(lr(`${m.tipo === "salida" ? "-" : "+"} ${m.categoria}`.slice(0, 20), monto(m.monto)));
+    for (const m of r.movimientos) {
+      p.line(lr(`${m.tipo === "salida" ? "-" : "+"} ${m.categoria}`.slice(0, 20), monto(m.monto)));
+      if (m.usuario !== t.usuarioApertura) p.line(`    por ${m.usuario.slice(0, 26)}`);
+    }
+  }
+  const grupos = agruparPorForma(r.pagosElectronicos ?? []);
+  if (grupos.length) {
+    p.line(SEP);
+    p.bold(true).line("DETALLE TARJETA/SINPE/TRANSF.").bold(false);
+    for (const g of grupos) {
+      p.bold(true).line(lr(`${g.forma.slice(0, 18)} (${g.pagos.length})`, monto(g.total))).bold(false);
+      for (const x of g.pagos) {
+        const dato = x.ultimos4 ? `****${x.ultimos4}` : (x.referencia ?? "").slice(0, 10);
+        p.line(lr(`  ${fechaHora(new Date(x.fecha)).slice(11, 16)} ${x.ventaNumero} ${dato}`.slice(0, 22), monto(x.monto)));
+      }
+    }
   }
   if (r.ajustes.length) {
     p.line(SEP);
@@ -51,8 +69,10 @@ export function reporteZ(n: Negocio, d: Detalle, s: TicketSettings, o: { copia: 
   if (t.conteoFinal && Object.keys(t.conteoFinal).length) {
     p.line(SEP);
     p.bold(true).line("CONTEO").bold(false);
-    for (const [den, cant] of Object.entries(t.conteoFinal).sort((a, b) => Number(b[0]) - Number(a[0])))
-      p.line(lr(`  ${cant} x ${monto(Number(den))}`, monto(Number(den) * cant)));
+    if ("total" in t.conteoFinal) p.line("  Total escrito, sin detalle");
+    else
+      for (const [den, cant] of Object.entries(t.conteoFinal).sort((a, b) => Number(b[0]) - Number(a[0])))
+        p.line(lr(`  ${cant} x ${monto(Number(den))}`, monto(Number(den) * cant)));
   }
   if (d.bitacoraOk === false) {
     p.line(SEP);

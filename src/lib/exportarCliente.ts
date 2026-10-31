@@ -1,6 +1,7 @@
 // Archivos de "exportar mis datos" (derecho de acceso, Ley 8968): CSV y PDF.
 import type { ExportacionCliente } from "../db/clientes";
 import { TIPO_IDENTIFICACION } from "../tipos";
+import { celdaSegura } from "./csv";
 import { crearPdf, type LineaPdf } from "./pdf";
 import { monto } from "./tickets";
 
@@ -23,11 +24,7 @@ function campos(e: ExportacionCliente): [string, string][] {
   ];
 }
 
-function celda(s: string): string {
-  // Inyección de fórmulas: Excel ejecuta una celda que empieza con = + - @ (o tab/CR). Se le antepone '.
-  const t = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
-  return /[",;\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-}
+const celda = celdaSegura;
 
 /** CSV (UTF-8 con BOM para que Excel muestre bien las tildes). */
 export function csvCliente(e: ExportacionCliente): Uint8Array {

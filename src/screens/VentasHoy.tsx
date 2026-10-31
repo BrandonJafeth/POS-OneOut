@@ -101,7 +101,7 @@ export default function VentasHoy() {
 }
 
 function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }) {
-  const { actor, config, puede } = useSesion();
+  const { actor, config, puede, usuario } = useSesion();
   const [v, setV] = useState<Venta | null>(null);
   const [correcciones, setCorrecciones] = useState<Correccion[]>([]);
   const [corrigiendo, setCorrigiendo] = useState<VentaPago | null>(null);
@@ -119,7 +119,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
 
   const verCliente = puede("clientes.basico");
   // Turno cerrado: corregir o anular es un ajuste que solo hace el dueño (queda en la caja de hoy).
-  const puedeAjustar = v.turnoAbierto ? puede("venta") : puede("caja.admin");
+  const puedeAjustar = v.turnoAbierto ? puede("caja.admin") || (puede("venta") && v.turnoUsuarioId === usuario.id) : puede("caja.admin");
   async function reimprimir() {
     setError("");
     setOk("");
@@ -240,6 +240,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           ventaId={v.id}
           numero={v.numero}
           total={v.total}
+          facturaEmitida={v.facturaEmitida}
           efectivo={v.pagos.filter((x) => x.tipo === "efectivo").reduce((s, x) => s + x.monto, 0)}
           turnoAbierto={v.turnoAbierto}
           onCerrar={() => setAnulando(false)}
@@ -273,6 +274,11 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
   const nueva = formas.find((f) => f.id === forma);
   const antes = formas.find((f) => f.id === p.pago.formaPagoId);
   // Turno cerrado: siempre el PIN del dueño. Abierto: solo si entra o sale efectivo de la gaveta.
+  const sinCambios =
+    forma === p.pago.formaPagoId &&
+    (nueva?.requiereBanco ? banco || null : null) === (p.pago.bancoId ?? null) &&
+    referencia.trim() === (p.pago.referencia ?? "") &&
+    (nueva?.pideUltimos4 ? ultimos4 : "") === (p.pago.ultimos4 ?? "");
   const pidePin = !p.turnoAbierto || (!!nueva && !!antes && nueva.daVuelto !== antes.daVuelto);
 
   return (
@@ -324,7 +330,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
             <input className="small" value={ultimos4} onChange={(e) => setUltimos4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
           </label>
         )}
-        <Field label="Motivo (obligatorio)" ayuda="Ej. «El cliente pagó con SINPE, no con tarjeta».">
+        <Field label="Motivo (obligatorio)" ayuda="Al menos 5 letras. Ej. «El cliente pagó con SINPE, no con tarjeta».">
           <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
         </Field>
         {pidePin && (
@@ -333,8 +339,9 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
             <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </label>
         )}
+        {sinCambios && <Alert tono="info">Esa ya es la forma de pago registrada. Elija la forma correcta (o cambie el banco o la referencia).</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={Save}>
+        <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || motivo.trim().length < 5}>
           Guardar corrección
         </Button>
       </form>
@@ -342,7 +349,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
   );
 }
 
-function Anular(p: { ventaId: string; numero: string; total: number; efectivo: number; turnoAbierto: boolean; onCerrar(): void; onListo(): Promise<void> }) {
+function Anular(p: { ventaId: string; numero: string; total: number; efectivo: number; turnoAbierto: boolean; facturaEmitida: boolean; onCerrar(): void; onListo(): Promise<void> }) {
   const { actor } = useSesion();
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
@@ -365,6 +372,11 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
         }}
       >
         <Alert tono="aviso">La venta queda registrada como anulada (no se borra) y conserva su número. No se puede deshacer.</Alert>
+        {p.facturaEmitida && (
+          <Alert tono="error" titulo="Esta venta ya tiene factura electrónica">
+            Anularla aquí no anula la factura en Hacienda: haga también la nota de crédito en el sistema de facturación.
+          </Alert>
+        )}
         <Field label="Motivo (obligatorio)">
           <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
         </Field>

@@ -17,6 +17,8 @@ export interface Usuario {
   activo: boolean;
   /** Entró con un PIN puesto por otro o más corto que el mínimo: debe cambiarlo antes de seguir. */
   debeCambiarPin: boolean;
+  /** true si debeCambiarPin fue por PIN demasiado corto (no porque otro lo asignó). */
+  pinCorto?: boolean;
 }
 
 export interface Departamento {
@@ -47,6 +49,8 @@ export interface Producto {
   exento: boolean;
   /** Aparece como tarjeta en la pantalla de venta. */
   favorito: boolean;
+  /** Entró de la web sin categoría o sin mapeo: el dueño debería revisarlo (se limpia al editarlo). */
+  revisar: boolean;
   actualizadoEn: string;
 }
 
@@ -293,6 +297,8 @@ export interface Venta {
   turnoId: string | null;
   /** El turno de caja de la venta sigue abierto (si no, corregir o anular es un ajuste del dueño). */
   turnoAbierto: boolean;
+  /** Quién abrió el turno de la venta. */
+  turnoUsuarioId: string | null;
   consecutivo: number;
   numero: string;
   fecha: string;

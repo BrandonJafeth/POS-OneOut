@@ -43,6 +43,8 @@ getrandom = "0.2"
 argon2 = "0.6.0"
 # Cifrado de respaldos (AES-256-GCM).
 aes-gcm = "0.11.1"
+# Lectura del CSV de productos (comillas, saltos de línea dentro de campos).
+csv = "1.3"
 
 
 [dev-dependencies]

@@ -1,5 +1,5 @@
 // Diálogos de caja: abrir (con conteo), entrada/salida de efectivo y cierre con arqueo.
-import { ArrowDownToLine, ArrowUpFromLine, Lock, LockOpen } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Banknote, Lock, LockOpen } from "lucide-react";
 import { useState } from "react";
 import { textoError } from "../../components/Mensaje";
 import Modal from "../../components/Modal";
@@ -10,9 +10,11 @@ import {
   NOTA_REQUERIDA,
   necesitaNota,
   registrarMovimiento,
+  CONTEO_VACIO,
   totalConteo,
-  type Conteo,
+  type ConteoEntrada,
   type EstadoCaja,
+  type PagoElectronico,
   type ResultadoCierre,
 } from "../../db/caja";
 import { leerMontoEntero } from "../../lib/texto";
@@ -21,9 +23,10 @@ import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
 import Field from "../../ui/Field";
 import ConteoDinero from "./Conteo";
+import PagosElectronicos from "./PagosElectronicos";
 
 export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta(): void }) {
-  const [conteo, setConteo] = useState<Conteo>({});
+  const [conteo, setConteo] = useState<ConteoEntrada>(CONTEO_VACIO);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   return (
@@ -121,9 +124,10 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
   );
 }
 
-export function CerrarCaja(p: { estado: EstadoCaja; esperasAbiertas: number; onCerrar(): void; onCerrada(r: ResultadoCierre): void }) {
-  const [conteo, setConteo] = useState<Conteo>({});
-  const [paso, setPaso] = useState<"contar" | "nota">("contar");
+export function CerrarCaja(p: { estado: EstadoCaja; esperasAbiertas: number; pagosElectronicos: PagoElectronico[]; onCerrar(): void; onCerrada(r: ResultadoCierre): void }) {
+  const [conteo, setConteo] = useState<ConteoEntrada>(CONTEO_VACIO);
+  // Primero se revisan tarjeta/SINPE/transferencias contra el datáfono; después se cuenta el efectivo.
+  const [paso, setPaso] = useState<"revisar" | "contar" | "nota">(p.pagosElectronicos.length ? "revisar" : "contar");
   const [nota, setNota] = useState("");
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -143,7 +147,21 @@ export function CerrarCaja(p: { estado: EstadoCaja; esperasAbiertas: number; onC
 
   return (
     <Modal titulo="Cerrar caja" onCerrar={p.onCerrar} ancho={720}>
-      {paso === "contar" ? (
+      {paso === "revisar" ? (
+        <>
+          <p className="muted">
+            1 de 2 · Revise que los pagos con tarjeta, SINPE y transferencia coincidan con el cierre del datáfono y los comprobantes.
+          </p>
+          <PagosElectronicos pagos={p.pagosElectronicos} abierto />
+          <div className="fila-botones">
+            <Button onClick={p.onCerrar}>Cancelar</Button>
+            <span className="separador" />
+            <Button variante="primario" icono={Banknote} onClick={() => setPaso("contar")}>
+              Coincide, contar el efectivo
+            </Button>
+          </div>
+        </>
+      ) : paso === "contar" ? (
         <>
           <p className="muted">
             Cuente todo el efectivo de la gaveta.{" "}

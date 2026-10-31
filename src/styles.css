@@ -409,9 +409,9 @@ label.check {
 }
 
 .segmento button[aria-pressed="true"] {
-  background: var(--card);
-  color: var(--text);
-  box-shadow: 0 1px 3px var(--sombra);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: none;
 }
 
 /* ───── Diseño general ───── */
@@ -1134,10 +1134,9 @@ details.fiscal summary {
 
 .deptos {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--e1);
-  overflow-x: auto;
   padding-bottom: 2px;
-  scrollbar-width: thin;
 }
 
 .deptos .tab {
@@ -1154,6 +1153,14 @@ details.fiscal summary {
   gap: var(--e3);
   align-content: start;
   padding: 10px 10px var(--e5) 2px;
+}
+
+.grilla > div {
+  display: flex;
+}
+
+.grilla .tile {
+  width: 100%;
 }
 
 .tile {
@@ -1225,7 +1232,7 @@ details.fiscal summary {
 .tile-cant {
   position: absolute;
   top: -8px;
-  right: -8px;
+  left: -8px; /* la esquina derecha es de la estrella */
   min-width: 26px;
   height: 26px;
   padding: 0 7px;
@@ -1249,7 +1256,7 @@ details.fiscal summary {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--line); /* siempre visible, con poco peso cuando no es favorito */
 }
 
 .tile-estrella[aria-pressed="true"] {
@@ -1297,6 +1304,7 @@ details.fiscal summary {
   gap: var(--e1);
   padding: var(--e3) var(--e3) 0;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--hair);
 }
 
@@ -1465,6 +1473,10 @@ details.fiscal summary {
   border-color: var(--line);
 }
 
+.paso button.paso-quitar {
+  color: var(--err);
+}
+
 .linea-editor {
   display: flex;
   flex-wrap: wrap;
@@ -1531,11 +1543,15 @@ details.fiscal summary {
 }
 
 .cobrar .btn-texto {
-  flex: none;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  text-align: left;
 }
 
 .cobrar-monto {
-  margin-left: auto;
+  margin-left: var(--e3);
   font-size: 26px;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
@@ -1851,56 +1867,10 @@ mark {
   border-color: var(--accent);
 }
 
-/* ── Ajustes tras la primera revisión ── */
-.grilla > div {
-  display: flex;
-}
-
-.grilla .tile {
-  width: 100%;
-}
-
-.cobrar .btn-texto {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  text-align: left;
-}
-
-.cobrar-monto {
-  margin-left: var(--e3);
-}
-
-.deptos {
-  flex-wrap: wrap;
-  overflow: visible;
-}
-
-/* Estrella siempre visible, con poco peso cuando no es favorito. */
-.tile-estrella {
-  color: var(--line);
-}
-
 .deptos .tab {
   min-height: 40px;
   padding: 2px var(--e3);
   font-size: 14px;
-}
-
-/* Arreglos de la revisión final */
-.tiquete-cab {
-  overflow-y: hidden;
-}
-
-.segmento button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
-  box-shadow: none;
-}
-
-.paso button.paso-quitar {
-  color: var(--err);
 }
 
 @media (max-width: 1200px) {
@@ -1914,13 +1884,6 @@ mark {
     font-size: 13px;
   }
 }
-
-/* Número de unidades a la izquierda: la esquina derecha es de la estrella. */
-.tile-cant {
-  right: auto;
-  left: -8px;
-}
-
 
 /* ───────── Caja (turnos, conteo, indicador) ───────── */
 
@@ -2117,4 +2080,531 @@ mark {
   .conteo-columnas {
     grid-template-columns: 1fr;
   }
+}
+
+.conteo .segmento {
+  align-self: flex-start;
+}
+
+.conteo-directo input {
+  width: 220px;
+}
+
+/* Cobro: monto, banco, referencia y últimos 4 en una misma línea, todos a la misma altura.
+   Pago dividido: columnas fijas (forma | monto | datos | quitar) para que las filas coincidan. */
+.cobro-campos {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--e3);
+}
+
+.cobro-campos .campo {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.cobro-campos input,
+.cobro-campos select {
+  width: 100%;
+  min-height: 48px;
+}
+
+.cobro-campos input.precio {
+  font-size: 18px;
+}
+
+.cobro-extras {
+  display: flex;
+  flex: 1.6 1 0;
+  gap: var(--e3);
+  min-width: 0;
+}
+
+.fila-pago.cobro-campos {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1.5fr 48px;
+}
+
+.fila-pago.cobro-campos > .btn {
+  min-height: 48px;
+}
+
+.cobro-forma {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+}
+
+.cobro-forma select {
+  flex: 1;
+  min-width: 0;
+}
+
+.electronicos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e2);
+}
+
+.electronicos details {
+  border: 1px solid var(--hair);
+  border-radius: var(--radio);
+  background: var(--card);
+}
+
+.electronicos summary {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  min-height: 44px;
+  padding: var(--e2) var(--e3);
+  cursor: pointer;
+}
+
+.electronicos summary span {
+  flex: 1;
+}
+
+.electronicos summary strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.electronicos table {
+  margin: 0 var(--e3) var(--e2);
+  width: calc(100% - 2 * var(--e3));
+}
+
+/* ───── Importar productos ───── */
+.pasos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2) var(--e5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.pasos li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e2);
+}
+
+.pasos-num {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pasos li.actual {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.pasos li.actual .pasos-num {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.pasos li.hecho .pasos-num {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.importar-archivo {
+  display: flex;
+  gap: var(--e5);
+  align-items: flex-start;
+  padding: var(--e6);
+}
+
+.importar-archivo p {
+  max-width: 68ch;
+  margin: var(--e2) 0 var(--e4);
+}
+
+button.enlace {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.importar-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--e4);
+  align-items: start;
+}
+
+.importar-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e4);
+  min-width: 0;
+}
+
+.importar-aside {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e3);
+}
+
+.importar-aside h2 {
+  overflow-wrap: anywhere;
+}
+
+.importar-aside > p {
+  margin: calc(-1 * var(--e2)) 0 0;
+  font-size: 14px;
+}
+
+.cifras {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+  border: 1px solid var(--hair);
+  border-radius: var(--radio);
+  overflow: hidden;
+}
+
+.cifras > div {
+  padding: var(--e2) var(--e3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.cifras > div:nth-child(odd) {
+  border-right: 1px solid var(--hair);
+}
+
+.cifras > div:nth-last-child(-n + 2):nth-child(odd),
+.cifras > div:last-child {
+  border-bottom: 0;
+}
+
+.cifras dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cifras dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.cifras .ok dd {
+  color: var(--ok);
+}
+
+.cifras .err dd {
+  color: var(--err);
+}
+
+.cifras .warn dd {
+  color: var(--warn);
+}
+
+.aside-notas {
+  margin: 0;
+  padding-left: var(--e4);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.aside-notas li + li {
+  margin-top: var(--e1);
+}
+
+.aside-botones {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e2);
+}
+
+.decision {
+  border-color: var(--line);
+}
+
+.decision h2 {
+  margin-bottom: var(--e2);
+}
+
+.lista-nombres {
+  margin: 0 0 var(--e4);
+  padding-left: var(--e4);
+  columns: 2 280px;
+  column-gap: var(--e5);
+  font-size: 15px;
+}
+
+.lista-nombres li {
+  break-inside: avoid;
+  margin-bottom: var(--e1);
+}
+
+.tab-panel {
+  padding-top: var(--e4);
+}
+
+.seccion-cab {
+  margin-bottom: var(--e3);
+}
+
+.seccion-cab h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.seccion-cab p {
+  margin: var(--e1) 0 0;
+  max-width: 80ch;
+  font-size: 14px;
+}
+
+.importar-reglas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e6);
+}
+
+.tbl-editable td {
+  padding: var(--e1) var(--e2);
+}
+
+.tbl-editable input:not([type="checkbox"]),
+.tbl-editable select {
+  width: 100%;
+}
+
+.acciones-fila {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.acciones-fila .btn {
+  min-width: var(--alto-control);
+  padding: 0;
+  justify-content: center;
+}
+
+.sin-mapeo {
+  margin-top: var(--e3);
+  padding: var(--e3) var(--e4);
+  border-radius: var(--radio);
+  background: var(--card2);
+}
+
+.sin-mapeo p {
+  margin: 0 0 var(--e2);
+  font-size: 14px;
+}
+
+.tbl-deptos td.barra-celda {
+  width: 22%;
+  min-width: 80px;
+}
+
+.barra {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.tabla-alta {
+  max-height: 460px;
+  overflow-y: auto;
+  border: 1px solid var(--hair);
+  border-radius: var(--radio);
+}
+
+.tabla-alta thead th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 1;
+}
+
+.etiquetas {
+  gap: var(--e1);
+}
+
+.num-corto {
+  width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.importar-confirmar {
+  max-width: 820px;
+}
+
+.importar-confirmar fieldset {
+  margin: var(--e5) 0;
+  padding: 0;
+  border: 0;
+}
+
+.importar-confirmar legend {
+  margin-bottom: var(--e2);
+  font-weight: 650;
+}
+
+.importar-confirmar fieldset > p {
+  margin: 0 0 var(--e2);
+  font-size: 14px;
+}
+
+.opciones-modo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--e3);
+}
+
+.opciones-modo legend {
+  grid-column: 1 / -1;
+}
+
+.opcion {
+  display: flex;
+  gap: var(--e3);
+  align-items: flex-start;
+  padding: var(--e3) var(--e4);
+  border: 1px solid var(--line);
+  border-radius: var(--radio);
+  background: var(--card);
+  cursor: pointer;
+}
+
+.opcion > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.opcion strong {
+  font-size: 15px;
+}
+
+.opcion.elegida {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.opcion:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1200px) {
+  .importar-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .importar-aside {
+    position: static;
+    order: -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .opciones-modo {
+    grid-template-columns: 1fr;
+  }
+
+  .importar-archivo {
+    flex-direction: column;
+    padding: var(--e5);
+  }
+}
+
+/* En tablas editables la papelera no lleva borde: el rojo queda en el icono. */
+.acciones-fila .btn-peligro:not(:hover):not(:focus-visible) {
+  border-color: transparent;
+}
+
+.importar-confirmar input.pin {
+  max-width: 260px;
+}
+
+/* Monto con ¢ fijo a la izquierda: el número es un valor real, no un ejemplo gris. */
+.monto-campo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.monto-campo > span {
+  position: absolute;
+  left: var(--e3);
+  color: var(--muted);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.monto-campo input.precio {
+  padding-left: calc(var(--e3) + 16px);
+  font-weight: 650;
+}
+
+/* Barra del catálogo: cuántos hay y cómo se ordenan. */
+.catalogo-barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2) var(--e4);
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.catalogo-orden {
+  display: inline-flex;
+  gap: var(--e2);
+  align-items: center;
+  font-weight: 600;
+}
+
+.catalogo-orden select {
+  min-height: 40px;
+  font-size: 15px;
+}
+
+.tile-mas {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  gap: var(--e2);
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radio-g);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tile-mas:hover:not(:disabled) {
+  background: var(--card2);
+  border-style: solid;
 }

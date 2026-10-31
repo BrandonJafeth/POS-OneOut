@@ -1,0 +1,169 @@
+# Seguridad del Punto de Venta
+
+Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
+Aplica a la versión 0.1.0, con las migraciones 1 a 5.
+
+## 1. Modelo de amenazas
+
+| Quién | Qué podría intentar | Cómo se frena |
+|---|---|---|
+| Cajero curioso o deshonesto | Darse más descuento o quitar ventas. Sacar efectivo sin rastro. Ver datos de clientes. Cambiar una forma de pago después del cierre. | Rust valida todo con el usuario de la sesión. El tope de descuento y las salidas grandes piden el PIN del dueño en ese momento. Los pagos de un turno cerrado no se pueden modificar (trigger). Todo queda en una bitácora encadenada. |
+| Alguien con acceso a la pantalla (por ejemplo, DevTools en una compilación de desarrollo) | Llamar comandos con otro rol o mandar SQL propio. | El usuario siempre sale de la sesión guardada en Rust. Las escrituras solo pasan por operaciones con nombre (`sentencias.json`), cada una con su permiso. La lectura acepta un solo `SELECT`, en modo solo lectura y sin tablas sensibles. |
+| Ladrón de la computadora o del disco | Leer clientes y ventas copiando `pos.db`. | La base va cifrada con SQLCipher. La clave de 256 bits se guarda protegida con DPAPI y solo sirve para el usuario de Windows de esa máquina. |
+| Alguien que encuentra una memoria USB con el respaldo | Abrir el respaldo o alterarlo. | Va cifrado con AES-256-GCM y la clave sale de la contraseña con Argon2id. GCM detecta cualquier byte alterado, y la restauración además revisa la integridad. |
+| Quien edita el archivo de la base con otra herramienta | Borrar o cambiar registros de la bitácora. | Los triggers impiden `UPDATE`/`DELETE`, y cada fila lleva el hash de la anterior. La verificación (al cerrar caja y en Técnico → Sistema) señala la fila rota. |
+| Adivinar PINs | Probar PINs en la entrada o en una autorización. | Argon2id. Bloqueo progresivo: 4 intentos libres, después 30 s que se duplican hasta 15 min, guardado en la base. La autorización del dueño permite como máximo 5 fallos por minuto. Todo fallo queda en la bitácora. |
+| Contenido malicioso (un nombre de producto importado, etc.) | Ejecutar scripts o navegar fuera de la app. | CSP estricta (sin `unsafe-eval` ni scripts inline). No se permite navegar fuera de la app ni abrir ventanas nuevas. React escapa todo el texto. |
+| Dependencias comprometidas | Código malicioso en una librería. | Lockfiles fijados, `npm audit`, `cargo audit` y `cargo deny` (licencias, fuentes y avisos). |
+
+## 2. Controles implementados
+
+### Aplicación de escritorio (Tauri)
+- **Capacidades mínimas**: solo `core:event:default` y `core:app:default` (`src-tauri/capabilities/default.json`). No hay shell, sistema de archivos, diálogos, HTTP ni updater.
+- **CSP** (`tauri.conf.json`): `default-src 'self'`, `script-src 'self'` (sin `unsafe-eval` y sin scripts inline), `object-src`/`frame-src`/`form-action`/`base-uri` en `'none'`.
+  - `connect-src` permite solo `ipc:` y `http://ipc.localhost`. Son los canales internos de Tauri para hablar con Rust; sin ellos los comandos no funcionan. **No hay ningún otro destino de red.**
+  - La CSP de desarrollo (`devCsp`) solo agrega lo que necesita Vite.
+- **Navegación**: la ventana se crea en Rust con `on_navigation` y solo acepta `tauri://`, `http://tauri.localhost` y `blob:` (las descargas de la app). `on_new_window` lo niega todo. Además `main.tsx` anula `window.open`, los enlaces externos y soltar archivos sobre la ventana.
+- **DevTools**: apagado en la compilación release (`devtools(cfg!(debug_assertions))`).
+- **Sin `console.log`** con datos del negocio: verificado con búsqueda en `src/`.
+- `freezePrototype: true`.
+
+### Lógica de negocio en Rust
+Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.rs`.
+- **Sesión**: vive en Rust (`sesion.rs`). Cada comando toma el usuario de ahí, nunca de un parámetro, y vence por inactividad (`sesion_inactividad_min`, 10 min por defecto).
+  - La pantalla también se bloquea sola al vencer el plazo.
+- **Permisos**: tabla fija en `permisos.rs`. `src/lib/permisos.ts` es una copia que solo sirve para mostrar u ocultar botones.
+  - El técnico no vende, no toca la caja y no ve clientes.
+- **Dinero**: en colones enteros (`i64`) y en una sola transacción `BEGIN IMMEDIATE`. Rust vuelve a calcular totales, IVA, descuentos y vuelto (`calculo.rs`). El precio de un producto sale de la base, no de la pantalla.
+  - **Autorización de descuento**: el PIN del dueño genera un token de un solo uso, válido para esa venta y ese porcentaje durante 30 minutos. Antes la pantalla mandaba el id del dueño y se le creía.
+- **SQL parametrizado**: no se concatena SQL con datos. Hay dos lugares que arman SQL con texto, y en ambos el texto sale de constantes del código:
+  - `negocio.rs` toma los nombres de columna de una lista fija.
+  - `caja.rs`/`ventas.rs` solo concatenan cláusulas constantes.
+- **La pantalla no puede pedir SQL arbitrario**:
+  - `bd_lote` solo acepta ids de `src/db/sentencias.json`, cada uno con su permiso.
+  - `bd_leer` acepta un solo `SELECT`/`WITH`, en un pool `read_only` con `query_only`. Quedan fuera `usuarios`, `clientes`, `bitacora`, `ventas_espera`, `cuentas`, `abonos`, `PRAGMA`, `ATTACH`, `sqlite_master` y las palabras de escritura.
+- **Validación de entradas**: texto con largo máximo y sin caracteres de control (`util::texto`). Hay rangos para montos y cantidades, y el conteo de caja solo acepta las denominaciones configuradas.
+
+### PIN y acceso
+- Argon2id (`pin.rs`). El PIN mínimo es de 6 dígitos para dueño y técnico y de 4 para cajero, configurable. Se rechazan los PIN con el mismo dígito repetido.
+- Hay que cambiar el PIN en la primera entrada si lo puso otra persona o si es más corto que el mínimo. Hasta hacerlo, Rust responde `DEBE_CAMBIAR_PIN` a todo.
+- La entrada no revela si un usuario existe: "no existe", "inactivo" y "PIN incorrecto" dan la misma respuesta.
+- Las acciones sensibles piden el PIN cada vez y no guardan la autorización. Son: reabrir caja, salida grande, anular, corregir un pago de un turno cerrado, anonimizar y restaurar.
+- El técnico entra por una entrada oculta (Ctrl+Alt+T); no aparece en la lista.
+
+### Datos en disco
+- La base `pos.db` y los respaldos quedan en la carpeta de la app: `%APPDATA%\cr.puntodeventa.pos`.
+- **SQLCipher**: se evaluó contra cifrar solo los respaldos y se eligió SQLCipher. La clave de 32 bytes es aleatoria y se guarda en `pos.clave`, protegida con DPAPI. No está en el código ni en el repositorio.
+  - Una base vieja sin cifrar se convierte sola al primer arranque con `sqlcipher_export`. La copia en claro se borra cuando la cifrada ya existe.
+- WAL activo y `quick_check` al arrancar y cada 6 horas. Un fallo queda en la bitácora.
+- Antes de cada migración se copia la base a `respaldos-automaticos\`. Esa copia también va cifrada, porque es el archivo cifrado.
+- **Respaldos sin copias en claro**:
+  - La base se exporta a una base en memoria y se serializa (`sqlite3_serialize`). Se cifra con AES-256-GCM y Argon2id, y recién entonces se escribe.
+  - La restauración descifra, revisa la integridad y la versión, y escribe `pos.db.nuevo` ya cifrado. Ese archivo se activa al reiniciar y la base anterior queda guardada.
+- Los archivos temporales y el registro no llevan datos personales ni PIN. No hay archivo de log de la app.
+
+### Bitácora
+- Solo se puede agregar. Hay triggers contra `UPDATE`/`DELETE` y contra insertar sin hash.
+- Cadena SHA-256: cada fila guarda el hash de la anterior. Se escribe dentro de `BEGIN IMMEDIATE` para que la cadena no se bifurque.
+- `verificar()` corre en cada cierre de caja. Si la cadena está rota, el reporte Z lo imprime y queda la entrada `bitacora.alterada`.
+- No guarda datos personales: solo ids, acciones y nombres de campos.
+
+### Caja
+- Hay un solo turno abierto por caja (índice único). Sin un turno abierto de hoy no se cobra.
+- Los pagos y los montos de una venta de un turno cerrado no se pueden cambiar (triggers). Una corrección posterior queda como `caja_ajustes` en el turno actual, la hace solo el dueño con PIN, y una devolución de efectivo entra como salida.
+
+### Exportaciones e impresión
+- El CSV de clientes antepone `'` a las celdas que empiezan con `= + - @`, tabulador o retorno, para evitar fórmulas.
+  - El PDF no ejecuta fórmulas: el texto va escapado como cadena PDF.
+- ESC/POS: el texto se codifica a la code page y los caracteres de control se reemplazan por `?`. Un nombre de producto no puede cortar el papel, abrir la gaveta ni reiniciar la impresora (hay una prueba para esto).
+
+### Cadena de suministro
+- `package-lock.json` y `Cargo.lock` están fijados. Se quitó `tauri-plugin-sql`, que ya no se usa.
+- `npm audit`: 0 vulnerabilidades. `cargo deny check`: advisories, bans, licenses y sources en ok.
+- `cargo audit`: sin hallazgos aplicables. Hay 3 excepciones justificadas en `src-tauri/.cargo/audit.toml`:
+  - `rsa`: viene por el driver MySQL opcional de sqlx, que no se compila.
+  - `glib` y `proc-macro-error`: son dependencias de Linux.
+  - Se verificó con `cargo tree -i <crate> --target all`.
+- Compilación release: LTO, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
+- Instalador **sin firmar**. Cada entrega se publica con su SHA-256 (ver la sección 6).
+
+## 3. Lo que NO cubre
+
+- **Un administrador de Windows o malware que corre como el mismo usuario**. Ese atacante puede pedirle a DPAPI la clave de la base, leer la memoria del proceso o registrar teclas. El cifrado protege el archivo si se lo llevan, no una máquina comprometida.
+- **Quien conoce el PIN del dueño**. Puede hacer todo lo que hace el dueño; la bitácora solo deja el rastro.
+- **Fraude físico** (no registrar una venta y quedarse el dinero). Solo se detecta con el arqueo diario y la revisión de diferencias.
+- **Borrar todo el archivo de la base**. La bitácora no puede protegerse de eso; lo que lo cubre son los respaldos guardados fuera de la computadora.
+- **Facturación electrónica de Hacienda**. Se hace en otro sistema; aquí solo se marca como hecha.
+- **El instalador no está firmado** con certificado de código. Windows SmartScreen va a avisar. Verifique el SHA-256.
+- **Lectura de catálogo**: `bd_leer` todavía permite a la pantalla leer las tablas no sensibles (productos, ventas sin datos de cliente, config). Pasar esas lecturas a comandos tipados es trabajo pendiente.
+- **Un solo puesto**: no hay red ni sincronización. El módulo de nube existe pero no está activo.
+
+## 4. Recomendaciones para cada negocio
+
+1. **Usuario de Windows con contraseña** y bloqueo de pantalla. Nadie debe usar la cuenta de administrador para vender.
+2. **BitLocker** encendido en el disco: suma protección a la de SQLCipher.
+3. **Respaldo semanal** (Administración → Respaldo). Copie el archivo `.posbak` a una memoria USB que se guarde **fuera del local**. Anote la contraseña en un lugar separado.
+4. **Si cambia de computadora o de usuario de Windows**: haga primero un respaldo. La base nueva no abre sin la clave DPAPI del usuario anterior.
+5. **PIN**: cada persona tiene el suyo, sin compartirlo, y se cambia si alguien se va del negocio. El dueño usa 6 dígitos o más.
+6. **Revise las diferencias de caja** cada día (Caja → Turnos, marca "Revisar"), y en Técnico → Sistema use "Verificar ahora" de la bitácora una vez al mes.
+7. **Actualice Windows** y no instale programas que no conoce en la computadora de la caja.
+8. Verifique el **SHA-256** del instalador antes de instalar (sección 6).
+
+## 5. Pruebas automáticas de seguridad
+
+| Requisito | Prueba |
+|---|---|
+| El cajero no puede ejecutar comandos del dueño | `caja::tests::abrir_movimientos_y_cerrar` (reabrir), `ventas::tests::turno_cerrado_pagos_inmutables_y_ajustes`, `usuarios::tests::cajero_no_administra_usuarios`, `config::tests::permisos_por_clave`, `clientes::tests::*`, `bd::tests::lote_solo_por_nombre_y_con_permiso` |
+| Bloqueo de PIN | `usuarios::tests::bloqueo_progresivo_y_bitacora` |
+| Se detecta una fila alterada de la bitácora | `bd::tests::bitacora_detecta_fila_alterada_y_no_se_edita_por_sql`, `tests/base.test.ts` (triggers) |
+| Un respaldo alterado no se restaura | `respaldo::tests::respaldo_real_ida_y_vuelta_y_alterado_no_restaura`, `respaldo::tests_disco::base_vieja_se_cifra_y_el_respaldo_restaura_cifrado` |
+| Sin solicitudes de red | La CSP solo permite `ipc:`, `on_navigation` y `on_new_window` bloquean, y no hay capacidad HTTP (revisión de configuración; ver la lista de la sección 7). |
+| La pantalla no puede pedir SQL arbitrario | `bd::tests::lectura_solo_select_y_sin_tablas_sensibles`, `bd::tests::lote_solo_por_nombre_y_con_permiso`, `tests/base.test.ts` |
+| Precio o descuento manipulados en la pantalla | `ventas::tests::cobro_exige_turno_y_valida_precio_y_descuento` |
+| ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
+
+Cómo correrlas:
+- Rust: `cd src-tauri && cargo test --lib` (28 pruebas, con SQLCipher). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (98 pruebas).
+
+## 6. Compilar y verificar una entrega
+
+```
+# Requisitos: Rust (MSVC), Node 22+, Strawberry Perl (para compilar OpenSSL de SQLCipher)
+set PATH=C:\Strawberry\perl\bin;%PATH%
+npm ci
+cd src-tauri && cargo audit && cargo deny check && cd ..
+npm audit
+npm run tauri build
+certutil -hashfile src-tauri\target\release\bundle\nsis\<instalador>.exe SHA256
+```
+
+Publique el SHA-256 junto al instalador. Quien instala lo compara con `certutil -hashfile <archivo> SHA256`.
+
+Compilación del 30-oct-2026 (versión 0.1.0):
+
+| Archivo | SHA-256 |
+|---|---|
+| `Punto de Venta_0.1.0_x64-setup.exe` | `ce41c160c966caa7094db6fa79ddf0dad9e478060ce0f65757ab37ff1e0bc962` |
+| `Punto de Venta_0.1.0_x64_en-US.msi` | `93861dac8c6bc1a2f8491dc1be0ccd20e6ab57b7edff3489b277b6f2afab7292` |
+
+Cualquier cambio en el código produce otro hash: recalcúlelo en cada entrega.
+
+## 7. Lista de verificación final
+
+- [x] Sin shell, sistema de archivos, HTTP ni updater en las capacidades
+- [x] CSP estricta (sin `unsafe-eval` ni scripts inline; red solo `ipc:`)
+- [x] Sin navegación externa ni ventanas nuevas; DevTools apagado en release
+- [x] Sin `console.log` con datos del negocio
+- [x] Dinero y permisos validados en Rust, con enteros y en una sola transacción
+- [x] SQL parametrizado; la pantalla no manda SQL de escritura
+- [x] PIN con Argon2id, mínimo 6 para dueño y técnico, bloqueo progresivo en bitácora, sin revelar usuarios, cambio obligatorio, sesión con vencimiento
+- [x] Base cifrada con SQLCipher y clave en DPAPI; WAL; revisión de integridad periódica; copia antes de migrar
+- [x] Respaldos AES-256-GCM con Argon2id, sin copia en claro; los alterados se rechazan
+- [x] Bitácora solo-añadir con cadena de hashes, verificada al cerrar caja
+- [x] Triggers contra cambios en pagos de turnos cerrados
+- [x] CSV sin fórmulas; ESC/POS sin caracteres de control
+- [x] `npm audit`, `cargo audit`, `cargo deny` limpios; lockfiles fijados; dependencia sin uso quitada
+- [x] Release con LTO y `strip`; SHA-256 documentado
+- [ ] Firma de código del instalador (requiere comprar un certificado)
+- [ ] Pasar las lecturas de catálogo de `bd_leer` a comandos tipados

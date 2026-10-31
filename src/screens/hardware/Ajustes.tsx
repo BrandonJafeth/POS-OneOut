@@ -9,6 +9,7 @@ interface Props {
 /** Ajustes del tiquete, compartidos por Impresora y Sin hardware (mismos bytes en ambas). */
 export default function Ajustes({ settings, onSettings }: Props) {
   const set = (patch: Partial<TicketSettings>) => onSettings({ ...settings, ...patch });
+  
   return (
     <div className="row">
       <label>

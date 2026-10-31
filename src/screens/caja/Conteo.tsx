@@ -1,14 +1,25 @@
-// Conteo de billetes y monedas con − / + y total en vivo (apertura y cierre de caja).
+// Conteo del efectivo (apertura y cierre de caja). Dos formas:
+//  - "Escribir el total": un solo monto, lo más rápido.
+//  - "Contar billetes y monedas": − / + por denominación, con total en vivo.
 import { Minus, Plus } from "lucide-react";
-import { totalConteo, type Conteo } from "../../db/caja";
+import { useEffect, useRef } from "react";
+import { totalConteo, type ConteoEntrada } from "../../db/caja";
+import { leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 
-export default function ConteoDinero(p: { denominaciones: number[]; valor: Conteo; onCambio(c: Conteo): void; etiquetaTotal?: string }) {
-  const poner = (d: number, n: number) => p.onCambio({ ...p.valor, [String(d)]: Math.max(0, Math.min(100_000, Math.floor(n) || 0)) });
+export default function ConteoDinero(p: { denominaciones: number[]; valor: ConteoEntrada; onCambio(c: ConteoEntrada): void; etiquetaTotal?: string }) {
+  const porTotal = p.valor.total !== null;
+  const totalRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (porTotal) totalRef.current?.focus();
+  }, [porTotal]);
+
+  const poner = (d: number, n: number) =>
+    p.onCambio({ total: null, cantidades: { ...p.valor.cantidades, [String(d)]: Math.max(0, Math.min(100_000, Math.floor(n) || 0)) } });
   const billetes = p.denominaciones.filter((d) => d >= 1000);
   const monedas = p.denominaciones.filter((d) => d < 1000);
   const fila = (d: number) => {
-    const n = p.valor[String(d)] ?? 0;
+    const n = p.valor.cantidades[String(d)] ?? 0;
     return (
       <li key={d} className="conteo-fila">
         <span className="conteo-den">{monto(d)}</span>
@@ -32,18 +43,44 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
       </li>
     );
   };
+
   return (
     <div className="conteo">
-      <div className="conteo-columnas">
-        <section>
-          <h3>Billetes</h3>
-          <ul>{billetes.map(fila)}</ul>
-        </section>
-        <section>
-          <h3>Monedas</h3>
-          <ul>{monedas.map(fila)}</ul>
-        </section>
+      <div className="segmento" role="group" aria-label="Forma de contar">
+        <button type="button" aria-pressed={porTotal} onClick={() => p.onCambio({ cantidades: {}, total: totalConteo(p.valor) })}>
+          Escribir el total
+        </button>
+        <button type="button" aria-pressed={!porTotal} onClick={() => p.onCambio({ cantidades: {}, total: null })}>
+          Contar billetes y monedas
+        </button>
       </div>
+
+      {porTotal ? (
+        <label className="campo conteo-directo">
+          <span className="campo-etiqueta">{p.etiquetaTotal ?? "Total contado"}</span>
+          <input
+            ref={totalRef}
+            className="precio big"
+            inputMode="numeric"
+            placeholder="¢0"
+            value={p.valor.total ? String(p.valor.total) : ""}
+            onChange={(e) => p.onCambio({ cantidades: {}, total: leerMontoEntero(e.target.value) ?? 0 })}
+            onFocus={(e) => e.target.select()}
+          />
+        </label>
+      ) : (
+        <div className="conteo-columnas">
+          <section>
+            <h3>Billetes</h3>
+            <ul>{billetes.map(fila)}</ul>
+          </section>
+          <section>
+            <h3>Monedas</h3>
+            <ul>{monedas.map(fila)}</ul>
+          </section>
+        </div>
+      )}
+
       <div className="conteo-total" aria-live="polite">
         <span>{p.etiquetaTotal ?? "Total contado"}</span>
         <strong>{monto(totalConteo(p.valor))}</strong>

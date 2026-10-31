@@ -1,5 +1,6 @@
 // Configuración clave → valor JSON. Lo que cambia entre negocios vive aquí, no en el código.
 import type { Actor } from "../tipos";
+import { REGLAS_DEFECTO, type ReglasImportacion } from "../lib/importar/reglas";
 import { invocar } from "../lib/invocar";
 import { db } from "./conexion";
 
@@ -17,8 +18,11 @@ export interface ConfigApp {
   impresora_sin_modo_chino: boolean;
   impresora_barras: "A" | "B";
   impresora_cortador: boolean;
-  /** Categoría de la web → id de departamento. */
-  importacion_mapeo_categorias: Record<string, string>;
+  /** Importación de la web: categoría → departamento (en orden de prioridad), palabras y favoritos. */
+  importacion_reglas: ReglasImportacion;
+  /** Tasa de IVA (%) y CAByS que reciben los productos importados. */
+  producto_tasa_iva_defecto: number;
+  producto_cabys_defecto: string;
   /** Departamento para lo que no tiene uno asignado (importación sin mapeo). */
   departamento_defecto: string;
   /** Meses sin saldos ni movimientos tras los que se sugiere anonimizar un cliente. */
@@ -68,13 +72,15 @@ export const CONFIG_DEFECTO: ConfigApp = {
   impresora_sin_modo_chino: true,
   impresora_barras: "B",
   impresora_cortador: false,
-  importacion_mapeo_categorias: {},
+  importacion_reglas: REGLAS_DEFECTO,
+  producto_tasa_iva_defecto: 13,
+  producto_cabys_defecto: "",
   departamento_defecto: "00000000000000000000000D12",
   retencion_clientes_meses: 36,
   aviso_privacidad_en_tiquete: false,
   redondeo_total: 5,
   descuento_max_pct: { cajero: 10, dueno: 100, tecnico: 100 },
-  denominaciones_rapidas: [1000, 2000, 5000, 10000, 20000, 50000],
+  denominaciones_rapidas: [1000, 2000, 5000, 10000, 20000],
   abrir_gaveta_efectivo: true,
   texto_no_factura: "Este tiquete no es una factura electrónica",
   avisar_espera_al_cerrar: true,
@@ -84,7 +90,7 @@ export const CONFIG_DEFECTO: ConfigApp = {
   caja_umbral_diferencia: 1000,
   caja_salida_max_sin_pin: 20000,
   caja_cierre_ciego: false,
-  caja_denominaciones: [50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
+  caja_denominaciones: [20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
   caja_motivos: { salida: ["Retiro de dinero", "Gasto menor", "Pago a proveedor", "Adelanto"], entrada: ["Ingreso de cambio", "Otro ingreso"] },
   pin_min_dueno: 6,
   pin_min_cajero: 4,

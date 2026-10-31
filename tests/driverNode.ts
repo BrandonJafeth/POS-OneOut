@@ -20,7 +20,7 @@ const REGISTRO = JSON.parse(readFileSync(fileURLToPath(new URL("../src/db/senten
 >;
 
 const PROHIBIDAS = [
-  "usuarios", "clientes", "bitacora", "pin_hash", "insert", "update", "delete", "drop", "create", "alter", "replace",
+  "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
   "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
 ];
 

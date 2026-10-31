@@ -29,6 +29,7 @@ function aProducto(f: Record<string, unknown>): Producto {
     tasaIva: f.tasa_iva == null ? 13 : Number(f.tasa_iva),
     exento: bool(f.exento),
     favorito: bool(f.favorito),
+    revisar: bool(f.revisar),
     actualizadoEn: String(f.actualizado_en),
   };
 }
@@ -42,9 +43,31 @@ function like(s: string): string {
   return s.replace(/[\\%_]/g, (c) => "\\" + c);
 }
 
+export type OrdenProductos = "nombre" | "nombre_desc" | "precio" | "precio_desc";
+
+const ORDEN_SQL: Record<OrdenProductos, string> = {
+  nombre: "p.nombre_busqueda",
+  nombre_desc: "p.nombre_busqueda DESC",
+  precio: "p.precio, p.nombre_busqueda",
+  precio_desc: "p.precio DESC, p.nombre_busqueda",
+};
+
+export const ORDENES_PRODUCTOS: Record<OrdenProductos, string> = {
+  nombre: "Nombre A–Z",
+  nombre_desc: "Nombre Z–A",
+  precio: "Menor precio",
+  precio_desc: "Mayor precio",
+};
+
 export interface FiltroProductos {
   texto?: string;
   soloFavoritos?: boolean;
+  /** Sin ningún código de barras (para completarlos escaneando). */
+  sinBarras?: boolean;
+  /** Marcados para revisión por la importación. */
+  paraRevisar?: boolean;
+  /** Orden de la lista (por defecto A–Z). Al buscar, lo que coincide exacto por código va primero igual. */
+  orden?: OrdenProductos;
   departamentoId?: string;
   incluirInactivos?: boolean;
   limite?: number;
@@ -61,15 +84,18 @@ export async function buscarProductos(f: FiltroProductos = {}): Promise<{ filas:
   if (!f.incluirInactivos) where.push("p.activo = 1");
   if (f.departamentoId) where.push("p.departamento_id = ?"), params.push(f.departamentoId);
   if (f.soloFavoritos) where.push("p.favorito = 1");
+  if (f.sinBarras) where.push("NOT EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.tipo = 'barras')");
+  if (f.paraRevisar) where.push("p.revisar = 1");
   const texto = (f.texto ?? "").trim();
-  let orden = "p.nombre_busqueda";
+  const base = ORDEN_SQL[f.orden ?? "nombre"] ?? ORDEN_SQL.nombre;
+  let orden = base;
   const ordenParams: string[] = [];
   if (texto) {
     const palabras = normalizar(texto).split(" ").filter(Boolean);
     const porNombre = palabras.map(() => "p.nombre_busqueda LIKE ? ESCAPE '\\'").join(" AND ");
     where.push(`((${porNombre}) OR EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.codigo LIKE ? ESCAPE '\\'))`);
     params.push(...palabras.map((w) => `%${like(w)}%`), `${like(texto)}%`);
-    orden = "EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.codigo = ?) DESC, p.nombre_busqueda";
+    orden = `EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.codigo = ?) DESC, ${base}`;
     ordenParams.push(texto);
   }
   const w = where.join(" AND ");

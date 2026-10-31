@@ -17,6 +17,11 @@ export default function CambiarPinObligatorio(p: { usuario: Usuario; onListo(): 
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const min = pinMinimo(p.usuario.rol);
+
+  const motivo = p.usuario.pinCorto
+    ? `Su PIN actual tiene menos de ${min} dígitos, que es el mínimo requerido para su rol. Escoja uno nuevo.`
+    : "Por seguridad, debe cambiar el PIN temporal que le asignaron antes de continuar.";
+
   return (
     <main className="centro">
       <form
@@ -37,7 +42,7 @@ export default function CambiarPinObligatorio(p: { usuario: Usuario; onListo(): 
       >
         <h1>Cambie su PIN</h1>
         <p className="muted">
-          Hola, <strong>{p.usuario.nombre}</strong>. Antes de seguir, ponga un PIN que solo usted sepa.
+          Hola, <strong>{p.usuario.nombre}</strong>. {motivo}
         </p>
         <Field label="PIN nuevo" ayuda={`De ${min} a 12 números, que no sean todos iguales.`}>
           <input className="pin" type="password" inputMode="numeric" autoComplete="off" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />

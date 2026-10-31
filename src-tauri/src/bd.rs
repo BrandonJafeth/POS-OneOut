@@ -30,6 +30,8 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (3, "venta", include_str!("../../src/db/migraciones/0003_venta.sql")),
     (4, "favoritos_iva", include_str!("../../src/db/migraciones/0004_favoritos_iva.sql")),
     (5, "caja_seguridad", include_str!("../../src/db/migraciones/0005_caja_seguridad.sql")),
+    (6, "sin_50000", include_str!("../../src/db/migraciones/0006_sin_50000.sql")),
+    (7, "importacion_web", include_str!("../../src/db/migraciones/0007_importacion_web.sql")),
 ];
 
 #[derive(Debug)]
@@ -152,17 +154,17 @@ impl Bd {
                 out.push(Value::from(1));
                 continue;
             }
-            let st = self.registro.get(&op.id).ok_or_else(|| format!("Operación desconocida: {}", op.id))?;
+            let st = self.registro.get(&op.id).ok_or_else(|| format!("{}Operación desconocida: {}", crate::util::TECNICO, op.id))?;
             actor.exigir(&st.permiso, "hacer este cambio")?;
             let mut q = sqlx::query(&st.sql);
             for p in &op.params {
                 q = bind(q, p);
             }
             if st.devuelve {
-                let filas = q.fetch_all(&mut *tx).await.map_err(|err| format!("Paso {} ({}): {err}", i + 1, op.id))?;
+                let filas = q.fetch_all(&mut *tx).await.map_err(|err| format!("{}Paso {} ({}): {err}", crate::util::TECNICO, i + 1, op.id))?;
                 out.push(Value::Array(filas.iter().map(|f| Value::Object(fila_json(f))).collect()));
             } else {
-                let r = q.execute(&mut *tx).await.map_err(|err| format!("Paso {} ({}): {err}", i + 1, op.id))?;
+                let r = q.execute(&mut *tx).await.map_err(|err| format!("{}Paso {} ({}): {err}", crate::util::TECNICO, i + 1, op.id))?;
                 out.push(Value::from(r.rows_affected()));
             }
         }
@@ -250,7 +252,7 @@ async fn cifrar_existente(ruta: &Path, clave: &[u8; 32]) -> Res<()> {
 pub fn validar_lectura(sql: &str) -> Res<()> {
     let t = sql.trim().trim_end_matches(';').trim();
     if t.contains(';') {
-        return Err("Lectura rechazada: una sola consulta".into());
+        return Err(format!("{}Lectura rechazada: una sola consulta", crate::util::TECNICO));
     }
     let palabras: Vec<String> = t
         .to_lowercase()
@@ -260,14 +262,15 @@ pub fn validar_lectura(sql: &str) -> Res<()> {
         .collect();
     match palabras.first().map(String::as_str) {
         Some("select") | Some("with") => {}
-        _ => return Err("Lectura rechazada: solo SELECT".into()),
+        _ => return Err(format!("{}Lectura rechazada: solo SELECT", crate::util::TECNICO)),
     }
     const PROHIBIDAS: &[&str] = &[
-        "usuarios", "clientes", "bitacora", "pin_hash", "insert", "update", "delete", "drop", "create", "alter", "replace",
+        // ventas_espera guarda el cliente de la venta (nombre, teléfono); cuentas/abonos, notas del apartado.
+        "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
         "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
     ];
     if let Some(p) = palabras.iter().find(|w| PROHIBIDAS.contains(&w.as_str())) {
-        return Err(format!("Lectura rechazada: «{p}» no está permitido desde la pantalla"));
+        return Err(format!("{}Lectura rechazada: «{p}» no está permitido desde la pantalla", crate::util::TECNICO));
     }
     Ok(())
 }
@@ -327,6 +330,7 @@ mod tests {
             "SELECT pin_hash FROM usuarios",
             "SELECT * FROM clientes",
             "SELECT * FROM bitacora",
+            "SELECT datos FROM ventas_espera",
             "PRAGMA key = 'x'",
             "ATTACH DATABASE 'x' AS y",
             "UPDATE config SET valor = '100' WHERE clave = 'descuento_max_pct'",

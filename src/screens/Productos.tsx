@@ -13,7 +13,7 @@ import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
 import CodigoNuevo from "./productos/CodigoNuevo";
-import Importar from "./productos/Importar";
+import Importar, { type FiltroProductosImportados } from "./productos/Importar";
 import ProductoEditor from "./productos/ProductoEditor";
 
 const POR_PAGINA = 50;
@@ -27,6 +27,7 @@ export default function Productos() {
   const [texto, setTexto] = useState("");
   const [depto, setDepto] = useState("");
   const [inactivos, setInactivos] = useState(false);
+  const [mostrar, setMostrar] = useState<"" | FiltroProductosImportados>("");
   const [filas, setFilas] = useState<ProductoLista[]>([]);
   const [total, setTotal] = useState(0);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
@@ -47,6 +48,8 @@ export default function Productos() {
           texto,
           departamentoId: depto || undefined,
           incluirInactivos: inactivos,
+          sinBarras: mostrar === "sinBarras",
+          paraRevisar: mostrar === "revisar",
           limite: POR_PAGINA,
           desplazamiento: mas ? filas.length : 0,
         });
@@ -57,14 +60,14 @@ export default function Productos() {
         setError(textoError(e));
       }
     },
-    [texto, depto, inactivos, filas],
+    [texto, depto, inactivos, mostrar, filas],
   );
 
   // Búsqueda instantánea (con una pausa mínima para no consultar en cada tecla del lector).
   useEffect(() => {
     const t = setTimeout(() => void cargar(), 100);
     return () => clearTimeout(t);
-  }, [texto, depto, inactivos]);
+  }, [texto, depto, inactivos, mostrar]);
 
   async function abrirPorCodigo(codigo: string) {
     setError("");
@@ -102,7 +105,17 @@ export default function Productos() {
     }
   }
 
-  if (importando) return <Importar onSalir={() => (setImportando(false), void cargar())} />;
+  if (importando)
+    return (
+      <Importar
+        onSalir={(filtro) => {
+          setImportando(false);
+          // Mismo filtro = el efecto no corre: se recarga a mano.
+          if ((filtro ?? "") === mostrar) void cargar();
+          else setMostrar(filtro ?? "");
+        }}
+      />
+    );
 
   return (
     <div className="screen">
@@ -136,6 +149,13 @@ export default function Productos() {
             ))}
           </select>
         </Field>
+        <Field label="Mostrar">
+          <select value={mostrar} onChange={(e) => setMostrar(e.target.value as typeof mostrar)}>
+            <option value="">Todos</option>
+            <option value="sinBarras">Sin código de barras</option>
+            <option value="revisar">Para revisar (importados)</option>
+          </select>
+        </Field>
         <label className="check" style={{ marginTop: 28 }}>
           <input type="checkbox" checked={inactivos} onChange={(e) => setInactivos(e.target.checked)} /> Ver inactivos
         </label>
@@ -145,8 +165,8 @@ export default function Productos() {
         {total === 0 ? (
           <EmptyState
             icono={PackageSearch}
-            titulo={texto || depto ? "No hay productos que coincidan" : "Todavía no hay productos"}
-            texto={texto || depto ? "Revise lo escrito o elija otro departamento." : "Cree uno con «Nuevo producto» o impórtelos desde la web."}
+            titulo={texto || depto || mostrar ? "No hay productos que coincidan" : "Todavía no hay productos"}
+            texto={texto || depto || mostrar ? "Revise lo escrito o cambie los filtros." : "Cree uno con «Nuevo producto» o impórtelos desde la web."}
           />
         ) : (
         <>

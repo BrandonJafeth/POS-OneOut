@@ -77,5 +77,5 @@ pub fn administrables(rol: Rol) -> &'static [Rol] {
 }
 
 pub fn sin_permiso(que: &str) -> String {
-    format!("No tiene permiso para {que}")
+    format!("No tiene permiso para {que}. Si lo necesita, pídaselo al dueño o al administrador.")
 }

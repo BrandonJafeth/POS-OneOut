@@ -44,3 +44,17 @@ export function leerCsv(texto: string, separador?: Separador): { separador: Sepa
   // Las líneas totalmente vacías no cuentan como filas.
   return { separador: sep, filas: filas.filter((f) => f.some((x) => x.trim() !== "")) };
 }
+
+/**
+ * Celda para un CSV que alguien abrirá en Excel. Inyección de fórmulas: Excel ejecuta una celda
+ * que empieza con = + - @ (o tab/CR); se le antepone ' para que quede como texto.
+ */
+export function celdaSegura(s: string): string {
+  const t = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+  return /[",;\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+/** CSV con BOM (para que Excel muestre bien las tildes), celdas neutralizadas y CRLF. */
+export function csvSeguro(filas: string[][]): Uint8Array {
+  return new TextEncoder().encode("﻿" + filas.map((f) => f.map(celdaSegura).join(",")).join("\r\n") + "\r\n");
+}

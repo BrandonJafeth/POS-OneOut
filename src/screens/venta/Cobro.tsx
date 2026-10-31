@@ -1,10 +1,12 @@
 // Cobro. Lo común en un toque: elegir la forma y Enter. El pago mixto se abre con "Dividir pago".
+// El monto viene ESCRITO con el total (no como texto gris de ejemplo): se ve que hay un valor,
+// y como queda seleccionado, escribir otro número lo reemplaza.
 import { AlertTriangle, Banknote, CheckCircle2, CreditCard, Landmark, Plus, Smartphone, Trash2, Wallet, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Modal from "../../components/Modal";
 import Mensaje, { textoError } from "../../components/Mensaje";
-import { leerMontoEntero } from "../../lib/texto";
+import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
@@ -28,25 +30,40 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
   const { config } = useSesion();
   const efectivo = p.formas.find((f) => f.daVuelto) ?? p.formas[0];
   const clave = useRef(1);
-  const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: "" }] : []);
+  const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: conMiles(String(p.total)) }] : []);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const primerMonto = useRef<HTMLInputElement>(null);
-  useEffect(() => primerMonto.current?.focus(), [filas[0]?.formaPagoId]);
+  useEffect(() => {
+    primerMonto.current?.focus();
+    primerMonto.current?.select();
+  }, [filas[0]?.formaPagoId]);
 
-  const pagos: PagoEntrada[] = filas.map((f) => ({ ...f, monto: leerMontoEntero(f.texto) ?? 0 }));
-  // Una sola fila en blanco = pago exacto: el caso más común sin escribir nada.
-  const pagosEfectivos = pagos.length === 1 && !filas[0].texto ? [{ ...pagos[0], monto: p.total }] : pagos.filter((x) => x.monto > 0);
-  const r = useMemo(() => calcularPagos(p.total, pagosEfectivos, p.formas), [p.total, JSON.stringify(pagosEfectivos), p.formas]);
   const forma = (id: string) => p.formas.find((f) => f.id === id)!;
-  const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
   const mixto = filas.length > 1;
+  // Pago dividido: si la fila de efectivo se deja en blanco, cubre lo que falte (lo más común:
+  // se escribe cuánto va en tarjeta/SINPE y el resto es efectivo).
+  const filaAuto = mixto ? filas.find((f) => forma(f.formaPagoId)?.daVuelto && !f.texto.trim()) : undefined;
+  const otrosMontos = filas.filter((f) => f !== filaAuto).reduce((s, f) => s + (leerMontoEntero(f.texto) ?? 0), 0);
+  const restoEfectivo = Math.max(0, p.total - otrosMontos);
+  const pagos: PagoEntrada[] = filas.map((f) => ({ ...f, monto: f === filaAuto ? restoEfectivo : (leerMontoEntero(f.texto) ?? 0) }));
+  // Un monto borrado cuenta como 0 (se ve "Falta"): nunca se cobra un campo vacío como exacto.
+  const pagosEfectivos = pagos.filter((x) => x.monto > 0);
+  const r = useMemo(() => calcularPagos(p.total, pagosEfectivos, p.formas), [p.total, JSON.stringify(pagosEfectivos), p.formas]);
+  const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
+  const nuevaFila = useRef<HTMLInputElement>(null);
 
+  /** Agrega otra forma de pago. Si todavía no hay efectivo, la nueva es efectivo (cubre lo que falte);
+   *  si ya hay, se agrega la siguiente forma sin monto, para escribir cuánto va ahí. */
   function dividir() {
-    const yaPagado = pagos.reduce((s, x) => s + x.monto, 0) || 0;
-    const otra = p.formas.find((f) => !filas.some((x) => x.formaPagoId === f.id)) ?? p.formas[0];
-    const primera = filas[0].texto ? filas : [{ ...filas[0], texto: "" }];
-    setFilas([...primera, { clave: clave.current++, formaPagoId: otra.id, texto: String(Math.max(0, p.total - yaPagado) || "") }]);
+    const hayEfectivo = filas.some((f) => forma(f.formaPagoId)?.daVuelto);
+    const otra = hayEfectivo
+      ? (p.formas.find((f) => !f.daVuelto && !filas.some((x) => x.formaPagoId === f.id)) ?? p.formas.find((f) => !f.daVuelto) ?? p.formas[0])
+      : (efectivo ?? p.formas[0]);
+    // Al dividir, el efectivo que tenía el total queda en blanco: cubre lo que falte.
+    const previas = filas.map((f) => (forma(f.formaPagoId)?.daVuelto && leerMontoEntero(f.texto) === p.total ? { ...f, texto: "" } : f));
+    setFilas([...previas, { clave: clave.current++, formaPagoId: otra.id, texto: "" }]);
+    setTimeout(() => nuevaFila.current?.focus(), 0);
   }
 
   async function confirmar() {
@@ -95,7 +112,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
   };
 
   return (
-    <Modal titulo="Cobrar" onCerrar={p.onCerrar} ancho={620}>
+    <Modal titulo="Cobrar" onCerrar={p.onCerrar} ancho={680}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -121,25 +138,37 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                     aria-checked={filas[0].formaPagoId === f.id}
                     aria-pressed={filas[0].formaPagoId === f.id}
                     className="forma"
-                    onClick={() => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: "" }])}
+                    onClick={() => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(p.total)) }])}
                   >
                     <Icono size={20} aria-hidden /> {f.nombre}
                   </button>
                 );
               })}
             </div>
-            <div className="row abajo">
-              <Field label={forma(filas[0].formaPagoId)?.daVuelto ? "Recibido (¢)" : "Monto (¢)"} className="sin-margen">
-                <input
-                  ref={primerMonto}
-                  className="precio big"
-                  inputMode="numeric"
-                  placeholder={monto(p.total)}
-                  value={filas[0].texto}
-                  onChange={(e) => set(filas[0].clave, { texto: e.target.value })}
-                />
+            <div className="cobro-campos">
+              <Field
+                label={forma(filas[0].formaPagoId)?.daVuelto ? "Recibido" : "Monto"}
+                ayuda={
+                  !filas[0].texto
+                    ? "Escriba el monto."
+                    : forma(filas[0].formaPagoId)?.daVuelto
+                      ? "Lo que le entregó el cliente. Escriba otro número para cambiarlo."
+                      : "Escriba otro número para cambiarlo."
+                }
+              >
+                <span className="monto-campo">
+                  <span aria-hidden>¢</span>
+                  <input
+                    ref={primerMonto}
+                    className="precio"
+                    inputMode="numeric"
+                    value={filas[0].texto}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => set(filas[0].clave, { texto: conMiles(e.target.value) })}
+                  />
+                </span>
               </Field>
-              {extras(filas[0])}
+              <div className="cobro-extras">{extras(filas[0])}</div>
             </div>
           </>
         )}
@@ -148,9 +177,9 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
           filas.map((f, i) => {
             const Icono = ICONO_FORMA[forma(f.formaPagoId)?.tipo ?? "otro"];
             return (
-              <div key={f.clave} className="fila-pago">
-                <Field label="Forma" className="sin-margen">
-                  <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+              <div key={f.clave} className="fila-pago cobro-campos">
+                <Field label="Forma">
+                  <span className="cobro-forma">
                     <Icono size={20} aria-hidden />
                     <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value })}>
                       {p.formas.map((x) => (
@@ -161,10 +190,23 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                     </select>
                   </span>
                 </Field>
-                <Field label="Monto (¢)" className="sin-margen">
-                  <input ref={i === 0 ? primerMonto : undefined} className="precio" inputMode="numeric" value={f.texto} onChange={(e) => set(f.clave, { texto: e.target.value })} />
+                <Field
+                  label={forma(f.formaPagoId)?.daVuelto ? "Recibido" : "Monto"}
+                  ayuda={f === filaAuto ? `Vacío: cubre lo que falta (${monto(restoEfectivo)})` : !f.texto ? "Escriba el monto." : undefined}
+                >
+                  <span className="monto-campo">
+                    <span aria-hidden>¢</span>
+                    <input
+                      ref={i === 0 ? primerMonto : i === filas.length - 1 ? nuevaFila : undefined}
+                      className="precio"
+                      inputMode="numeric"
+                      value={f.texto}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => set(f.clave, { texto: conMiles(e.target.value) })}
+                    />
+                  </span>
                 </Field>
-                {extras(f)}
+                <div className="cobro-extras">{extras(f)}</div>
                 <Button variante="fantasma" icono={Trash2} aria-label="Quitar este pago" onClick={() => setFilas(filas.filter((x) => x.clave !== f.clave))} />
               </div>
             );
@@ -173,7 +215,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
         {filaEfectivo && (
           <div className="billetes" role="group" aria-label="Montos rápidos en efectivo">
             {sugerenciasEfectivo(Math.max(0, faltaSinEfectivo), config.denominaciones_rapidas).map((d) => (
-              <button type="button" key={d} onClick={() => set(filaEfectivo.clave, { texto: String(d) })}>
+              <button type="button" key={d} onClick={() => set(filaEfectivo.clave, { texto: conMiles(String(d)) })}>
                 {d === faltaSinEfectivo ? "Exacto" : monto(d)}
               </button>
             ))}

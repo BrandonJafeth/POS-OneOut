@@ -18,3 +18,21 @@ describe("bloqueo de PIN (lo que muestra la pantalla)", () => {
     expect([pinMinimo("cajero"), pinMinimo("dueno"), pinMinimo("tecnico")]).toEqual([4, 6, 6]);
   });
 });
+
+describe("mensajes de error para el usuario", async () => {
+  const { textoError, mostrarDetalleTecnico, MENSAJE_GENERAL } = await import("../src/components/Mensaje");
+
+  it("los de negocio pasan tal cual; los técnicos se cambian por uno general", () => {
+    expect(textoError(new Error("Todavía faltan ¢500 por pagar."))).toBe("Todavía faltan ¢500 por pagar.");
+    expect(textoError(new Error("ERROR_TECNICO: error returned from database: (code: 1) no such column: x"))).toBe(MENSAJE_GENERAL);
+    expect(textoError(new TypeError("Cannot read properties of undefined"))).toBe(MENSAJE_GENERAL);
+    expect(textoError(new Error("ERROR_TECNICO: database is locked"))).toContain("Espere unos segundos");
+    expect(textoError(new Error("ERROR_TECNICO: turno cerrado: el pago no se puede modificar"))).toContain("ya se cerró");
+  });
+
+  it("el técnico ve además el detalle", () => {
+    mostrarDetalleTecnico(true);
+    expect(textoError(new Error("ERROR_TECNICO: no such column: x"))).toContain("Detalle técnico: no such column: x");
+    mostrarDetalleTecnico(false);
+  });
+});

@@ -26,3 +26,9 @@ export function diaLocal(d = new Date()): string {
   const z = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
 }
+
+/** Solo las cifras, con punto de miles mientras se escribe: "3500" → "3.500", "¢3 500" → "3.500". */
+export function conMiles(s: string): string {
+  const d = s.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  return d.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}

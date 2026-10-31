@@ -159,12 +159,17 @@ pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
 }
 
 /// Revisa un respaldo ya descifrado: integridad SQLite y versión de esquema conocida.
-async fn revisar(datos: &[u8]) -> Res<SqlitePool> {
+/// `ancla`: archivo vacío para abrir la conexión. No puede ser "sqlite::memory:": sqlx la abre con
+/// la marca de memoria y SQLite la hereda en el ATTACH, así pos.db.nuevo nunca se escribiría al disco.
+/// El ancla no recibe datos (sqlite3_deserialize reemplaza "main" en memoria) y se borra al terminar.
+async fn revisar(datos: &[u8], ancla: Option<&Path>) -> Res<SqlitePool> {
     if !datos.starts_with(CABECERA_SQLITE) {
         return Err("El respaldo no es una base válida".into());
     }
-    // create_if_missing: el ATTACH/VACUUM INTO del final crea pos.db.nuevo con los permisos de esta conexión.
-    let opts = SqliteConnectOptions::from_str("sqlite::memory:").map_err(e)?.create_if_missing(true);
+    let opts = match ancla {
+        Some(p) => SqliteConnectOptions::new().filename(p).create_if_missing(true),
+        None => SqliteConnectOptions::from_str("sqlite::memory:").map_err(e)?,
+    };
     let pool = SqlitePoolOptions::new().max_connections(1).min_connections(1).idle_timeout(None).max_lifetime(None).connect_with(opts).await.map_err(e)?;
     {
         let mut c = pool.acquire().await.map_err(e)?;
@@ -190,7 +195,25 @@ pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena
         return Err("Archivo demasiado grande".into());
     }
     let datos = descifrar(archivo, contrasena)?;
-    let mem = revisar(&datos).await?;
+    let ancla = bd.dir.as_ref().ok_or("Sin carpeta de datos")?.join("pos.db.revisando");
+    let _ = std::fs::remove_file(&ancla);
+    let r = restaurar_en(bd, &datos, &ancla, clave).await;
+    borrar_ancla(&ancla);
+    r?;
+    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.restaurar", "respaldo", None, &json!({"bytes": datos.len()})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
+}
+
+fn borrar_ancla(ancla: &Path) {
+    for ext in ["", "-journal", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{ext}", ancla.to_string_lossy()));
+    }
+}
+
+async fn restaurar_en(bd: &Bd, datos: &[u8], ancla: &Path, clave: Option<&[u8; 32]>) -> Res<()> {
+    let mem = revisar(datos, Some(ancla)).await?;
     let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
     let nuevo = dir.join("pos.db.nuevo");
     let _ = std::fs::remove_file(&nuevo);
@@ -208,10 +231,23 @@ pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena
         (true, None) => return Err("Falta la clave de la base".into()),
     }
     mem.close().await;
-    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.restaurar", "respaldo", None, &json!({"bytes": datos.len()})).await?;
-    tx.commit().await.map_err(e)?;
     Ok(())
+}
+
+/// Renombrar con reintentos: en Windows el antivirus suele tener abierto un archivo recién
+/// escrito por unos instantes ("os error 32").
+fn renombrar(de: impl AsRef<Path>, a: impl AsRef<Path>) -> Res<()> {
+    let mut ultimo = None;
+    for _ in 0..20 {
+        match std::fs::rename(de.as_ref(), a.as_ref()) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                ultimo = Some(err);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+    }
+    Err(e(ultimo.map(|x| x.to_string()).unwrap_or_default()))
 }
 
 /// Al arrancar, antes de abrir la base: si hay una restauración pendiente, la activa.
@@ -226,16 +262,16 @@ pub fn aplicar_restauracion_pendiente(dir: &Path) -> Res<bool> {
         let carpeta = dir.join("respaldos-automaticos");
         std::fs::create_dir_all(&carpeta).map_err(e)?;
         let archivo = carpeta.join(format!("pos-antes-restaurar-{}.db", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-        std::fs::rename(&actual, &archivo).map_err(e)?;
+        renombrar(&actual, &archivo)?;
         // El WAL va con su base (puede tener lo último que se escribió).
         for ext in ["-wal", "-shm"] {
             let de = PathBuf::from(format!("{}{ext}", actual.to_string_lossy()));
             if de.exists() {
-                std::fs::rename(&de, format!("{}{ext}", archivo.to_string_lossy())).map_err(e)?;
+                renombrar(&de, format!("{}{ext}", archivo.to_string_lossy()))?;
             }
         }
     }
-    std::fs::rename(&nuevo, &actual).map_err(e)?;
+    renombrar(&nuevo, &actual)?;
     Ok(true)
 }
 
@@ -268,7 +304,7 @@ mod tests {
         let archivo = cifrar(&claro, "contrasena-larga").unwrap();
         assert!(!archivo.windows(10).any(|w| w == b"Lapiz azul" || w == "Lápiz az".as_bytes()));
         // Íntegro: se descifra, se carga y tiene el producto.
-        let mem = revisar(&descifrar(&archivo, "contrasena-larga").unwrap()).await.unwrap();
+        let mem = revisar(&descifrar(&archivo, "contrasena-larga").unwrap(), None).await.unwrap();
         let n: String = sqlx::query_scalar("SELECT nombre FROM productos WHERE id = 'P1'").fetch_one(&mem).await.unwrap();
         assert_eq!(n, "Lápiz azul");
         // Un solo byte cambiado en cualquier parte: no se restaura.
@@ -278,8 +314,8 @@ mod tests {
             assert!(descifrar(&malo, "contrasena-larga").is_err(), "byte {pos}");
         }
         // Bytes que no son una base del POS: rechazados aunque se descifren.
-        assert!(revisar(b"SQLite format 3\0basura").await.is_err());
-        assert!(revisar(b"no es sqlite").await.is_err());
+        assert!(revisar(b"SQLite format 3\0basura", None).await.is_err());
+        assert!(revisar(b"no es sqlite", None).await.is_err());
     }
 
     #[test]
@@ -290,5 +326,70 @@ mod tests {
         c[ultimo] ^= 1;
         assert!(descifrar(&c, "contrasena-larga").is_err());
         assert!(descifrar(b"basura", "contrasena-larga").is_err());
+    }
+}
+
+/// De punta a punta con archivos reales y SQLCipher: base vieja en claro → cifrada; respaldo →
+/// restauración (archivo nuevo también cifrado); respaldo alterado o clave equivocada → rechazo.
+#[cfg(all(test, feature = "cifrado"))]
+mod tests_disco {
+    use super::*;
+    use crate::permisos::Rol;
+
+    async fn cerrar(bd: Bd) {
+        bd.pool.close().await;
+        bd.lectura.close().await;
+    }
+
+    fn en_claro(p: &Path) -> bool {
+        std::fs::read(p).map(|b| b.starts_with(CABECERA_SQLITE)).unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn base_vieja_se_cifra_y_el_respaldo_restaura_cifrado() {
+        let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
+        let clave = [7u8; 32];
+        // 1. Una base de una versión anterior, sin cifrar, con datos.
+        let bd = Bd::abrir(&dir, None).await.unwrap();
+        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('P1', 'Lápiz', 'lapiz', '00000000000000000000000D01', 350)").execute(&bd.pool).await.unwrap();
+        cerrar(bd).await;
+        assert!(en_claro(&dir.join("pos.db")));
+
+        // 2. Al abrir con clave se convierte: el archivo ya no es legible y los datos siguen.
+        let bd = Bd::abrir(&dir, Some(clave)).await.unwrap();
+        assert!(bd.cifrada);
+        assert!(!en_claro(&dir.join("pos.db")));
+        let n: String = sqlx::query_scalar("SELECT nombre FROM productos WHERE id = 'P1'").fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(n, "Lápiz");
+
+        // 3. Respaldo y restauración: el archivo restaurado también queda cifrado.
+        let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
+        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
+        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
+        let archivo = std::fs::read(&ruta).unwrap();
+        assert!(!archivo.windows(5).any(|w| w == &"Lápiz".as_bytes()[..5]));
+        let mut malo = archivo.clone();
+        let medio = malo.len() / 2;
+        malo[medio] ^= 1;
+        assert!(restaurar(&bd, &dueno, "246813", &malo, "contrasena-larga", Some(&clave)).await.is_err());
+        assert!(restaurar(&bd, &dueno, "000000", &archivo, "contrasena-larga", Some(&clave)).await.is_err());
+        assert!(!dir.join("pos.db.nuevo").exists());
+        restaurar(&bd, &dueno, "246813", &archivo, "contrasena-larga", Some(&clave)).await.unwrap();
+        assert!(dir.join("pos.db.nuevo").exists());
+        assert!(!en_claro(&dir.join("pos.db.nuevo")));
+        cerrar(bd).await;
+
+        // 4. Al reiniciar se activa la restauración y abre con la misma clave.
+        assert!(aplicar_restauracion_pendiente(&dir).unwrap());
+        let bd = Bd::abrir(&dir, Some(clave)).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM productos WHERE id = 'P1'").fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(n, 1);
+        cerrar(bd).await;
+
+        // 5. Con otra clave (otro usuario de Windows / otra máquina) no abre.
+        assert!(Bd::abrir(&dir, Some([9u8; 32])).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -129,6 +129,9 @@ describe("reporte Z", () => {
       recibidoEfectivo: 5000, vueltos: 2000, ventasEfectivo: 3000, entradas: 0, salidas: 5000, efectivoEsperado: 25000,
       movimientos: [{ id: "M1", tipo: "salida", monto: 5000, categoria: "Pago a proveedor", motivo: "", usuario: "Luis", autorizadoPor: null, fecha: "2026-10-29T18:00:00Z" }],
       ajustes: [],
+      pagosElectronicos: [
+        { fecha: "2026-10-29T16:05:00Z", ventaNumero: "67795", forma: "Tarjeta", tipo: "tarjeta", monto: 5000, ultimos4: "4321", banco: null, referencia: null },
+      ],
     },
   });
 
@@ -138,6 +141,9 @@ describe("reporte Z", () => {
     for (const s of ["CIERRE DE CAJA (Z)", "Efectivo (2)", "¢3.000", "Tarjeta (1)", "¢5.000", "Esperado", "¢25.000", "Contado", "¢24.000", "Faltante", "-¢1.000", "Pago a proveedor", "Faltan mil"])
       expect(t).toContain(s);
     expect(t).not.toContain("COPIA");
+    // Detalle de tarjeta para cuadrar con el cierre del datáfono.
+    expect(t).toContain("DETALLE TARJETA/SINPE/TRANSF.");
+    expect(t).toMatch(/67795 \*\*\*\*4321/);
     expect(lineasTexto(reporteZ(neg, detalle(true), DEFAULT_SETTINGS, { copia: true }).bytes).join("\n")).toContain("*** COPIA ***");
   });
 
@@ -146,5 +152,7 @@ describe("reporte Z", () => {
     expect(t).toContain("Contado");
     expect(t).not.toContain("Esperado");
     expect(t).not.toContain("Faltante");
+    // La tarjeta no es efectivo: también sale en cierre ciego.
+    expect(t).toContain("****4321");
   });
 });

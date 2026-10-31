@@ -20,6 +20,10 @@ pub struct Usuario {
     pub rol: Rol,
     pub activo: bool,
     pub debe_cambiar_pin: bool,
+    /// true si debe_cambiar_pin se activo por PIN mas corto que el minimo del rol;
+    /// false si fue porque otro usuario asigno el PIN. Solo valido justo tras iniciar_sesion.
+    #[serde(default)]
+    pub pin_corto: bool,
 }
 
 fn a_usuario(f: &sqlx::sqlite::SqliteRow) -> Usuario {
@@ -29,6 +33,7 @@ fn a_usuario(f: &sqlx::sqlite::SqliteRow) -> Usuario {
         rol: Rol::desde(&f.get::<String, _>("rol")).unwrap_or(Rol::Cajero),
         activo: f.get::<i64, _>("activo") == 1,
         debe_cambiar_pin: f.try_get::<i64, _>("debe_cambiar_pin").unwrap_or(0) == 1,
+        pin_corto: false,
     }
 }
 
@@ -211,7 +216,8 @@ pub async fn iniciar_sesion(pool: &SqlitePool, id: &str, p: &str, ahora_ms: i64)
             .execute(pool)
             .await
             .map_err(e)?;
-        let usuario = obtener(pool, id).await?.ok_or("Usuario no encontrado")?.0;
+        let mut usuario = obtener(pool, id).await?.ok_or("Usuario no encontrado")?.0;
+        usuario.pin_corto = corto; // para que el frontend explique el motivo
         return Ok(Login::Ok { usuario });
     }
     let n = intentos + 1;
@@ -258,6 +264,35 @@ pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, p: &str, contexto: &s
         return Err(sin_permiso(contexto));
     }
     autorizar_dueno(pool, p, contexto, &a.id).await
+}
+
+/// Para acciones grandes del dueño o el técnico (importar el catálogo): el usuario de la sesión
+/// vuelve a escribir SU PIN. Mismo freno que autorizar_dueno: cada fallo a la bitácora, 5 por minuto.
+pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<()> {
+    if a.rol == Rol::Cajero {
+        return Err(sin_permiso(contexto));
+    }
+    let desde = chrono::Utc::now() - chrono::Duration::seconds(60);
+    let recientes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
+        .bind(desde.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(e)?;
+    if recientes >= 5 {
+        return Err("Demasiados PIN incorrectos. Espere un minuto.".into());
+    }
+    let hash: Option<String> = sqlx::query_scalar("SELECT pin_hash FROM usuarios WHERE id = ? AND activo = 1 AND eliminado_en IS NULL")
+        .bind(&a.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(e)?;
+    if hash.is_some_and(|h| pin::verificar(p, &h)) {
+        return Ok(());
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "autorizacion.fallida", "usuario", Some(&a.id), &json!({"contexto": contexto})).await?;
+    tx.commit().await.map_err(e)?;
+    Err("PIN incorrecto".into())
 }
 
 #[cfg(test)]

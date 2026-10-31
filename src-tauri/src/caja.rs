@@ -2,6 +2,9 @@
 //
 // Reglas (las decide Rust, no la pantalla):
 // - Un solo turno abierto por caja (además lo garantiza un índice único en la base).
+// - El turno es de quien lo abrió: otro cajero no vende, no mueve efectivo ni corrige en él
+//   (no responde por la gaveta de otro). El dueño sí puede, y queda a su nombre en el reporte.
+//   Cambio de turno: el cajero que se va cierra con su conteo; el que llega abre con el suyo.
 // - Sin turno abierto de HOY no se vende; si quedó abierto uno de un día anterior, primero se cierra.
 // - Efectivo esperado = fondo + cobrado en efectivo (ya sin vuelto) + entradas − salidas.
 // - Diferencia = contado − esperado. Desde el umbral exige nota y queda para revisión del dueño.
@@ -90,12 +93,33 @@ pub async fn turno_abierto(c: &mut SqliteConnection, caja_id: &str) -> Res<Optio
     Ok(f.as_ref().map(a_turno))
 }
 
-/// El turno donde se puede vender ahora: abierto y de hoy.
-pub async fn turno_para_vender(c: &mut SqliteConnection, caja_id: &str) -> Res<Turno> {
+/// ¿Puede este usuario operar (vender, mover efectivo, corregir) en este turno? El dueño de la
+/// gaveta (quien lo abrió) o el dueño del negocio.
+pub fn puede_operar(a: &Actor, t: &Turno) -> Res<()> {
+    if t.usuario_apertura_id == a.id || puede(a.rol, "caja.admin") {
+        return Ok(());
+    }
+    Err(format!(
+        "La caja la tiene abierta {} desde las {}. Cada cajero responde por su propio turno: {} debe cerrarla con su conteo (o el dueño) y después usted abre la suya.",
+        t.usuario_apertura,
+        hora_local(&t.abierto_en),
+        t.usuario_apertura
+    ))
+}
+
+fn hora_local(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string()).unwrap_or_default()
+}
+
+/// El turno donde este usuario puede vender ahora: abierto, de hoy y suyo (o es el dueño).
+pub async fn turno_para_vender(c: &mut SqliteConnection, caja_id: &str, a: &Actor) -> Res<Turno> {
     match turno_abierto(c, caja_id).await? {
         None => Err("La caja está cerrada: ábrala para vender".into()),
-        Some(t) if t.dia != dia_local() => Err("Quedó abierta la caja de un día anterior: ciérrela antes de vender".into()),
-        Some(t) => Ok(t),
+        Some(t) if t.dia != dia_local() => Err(format!("Quedó abierta la caja del {} ({}): hay que cerrarla con su conteo antes de vender hoy.", t.dia, t.usuario_apertura)),
+        Some(t) => {
+            puede_operar(a, &t)?;
+            Ok(t)
+        }
     }
 }
 
@@ -105,7 +129,11 @@ pub async fn turno_para_vender(c: &mut SqliteConnection, caja_id: &str) -> Res<T
 #[serde(rename_all = "camelCase")]
 pub struct Conteo {
     /// denominación (como texto, viene de JSON) → cantidad de billetes/monedas
+    #[serde(default)]
     pub cantidades: BTreeMap<String, i64>,
+    /// Total escrito de una vez, sin detallar billetes y monedas. Se usa si no hay cantidades.
+    #[serde(default)]
+    pub total: Option<i64>,
 }
 
 pub async fn denominaciones(pool: &SqlitePool) -> Vec<i64> {
@@ -113,20 +141,28 @@ pub async fn denominaciones(pool: &SqlitePool) -> Vec<i64> {
         .await
         .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).filter(|n| *n > 0).collect::<Vec<_>>()))
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| vec![50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5])
+        .unwrap_or_else(|| vec![20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5])
 }
 
 /// Total del conteo, validado contra las denominaciones configuradas. Devuelve (total, JSON limpio).
 pub fn total_conteo(c: &Conteo, validas: &[i64]) -> Res<(i64, Value)> {
+    if c.cantidades.values().all(|n| *n == 0) {
+        if let Some(t) = c.total {
+            if !(0..=100_000_000).contains(&t) {
+                return Err("El total contado no es válido".into());
+            }
+            return Ok((t, json!({ "total": t })));
+        }
+    }
     let mut total = 0i64;
     let mut limpio = serde_json::Map::new();
     for (k, n) in &c.cantidades {
         let d: i64 = k.parse().map_err(|_| "Denominación inválida".to_string())?;
         if !validas.contains(&d) {
-            return Err(format!("¢{d} no es una denominación configurada"));
+            return Err(format!("No se reconoce el billete o la moneda de ¢{d}. Si todavía circula, el administrador lo puede agregar en la configuración."));
         }
         if !(0..=100_000).contains(n) {
-            return Err("Cantidad inválida en el conteo".into());
+            return Err("Revise el conteo: cada cantidad debe ser un número entero, sin decimales.".into());
         }
         if *n > 0 {
             total += d * n;
@@ -175,7 +211,13 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
     let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     if let Some(t) = turno_abierto(&mut tx, caja_id).await? {
-        return Err(if t.dia == dia_local() { "La caja ya está abierta".into() } else { "Quedó abierta la caja de un día anterior: ciérrela primero".into() });
+        return Err(if t.dia != dia_local() {
+            format!("Quedó abierta la caja del {} ({}): ciérrela primero con su conteo.", t.dia, t.usuario_apertura)
+        } else if t.usuario_apertura_id == a.id {
+            "Su caja ya está abierta.".into()
+        } else {
+            format!("La caja ya la tiene abierta {}. Debe cerrarla con su conteo (o el dueño) antes de abrir la suya.", t.usuario_apertura)
+        });
     }
     sqlx::query(
         "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en)
@@ -257,7 +299,7 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
         return Err("Tipo de movimiento inválido".into());
     }
     if !(1..=100_000_000).contains(&m.monto) {
-        return Err("Monto inválido".into());
+        return Err("Escriba un monto mayor que cero, en colones y sin decimales.".into());
     }
     let categoria = texto(&m.categoria, 60, "motivo", true)?;
     let nota = texto(&m.nota, 200, "nota", false)?;
@@ -275,7 +317,8 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
         None
     };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja está cerrada")?;
+    let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja está cerrada: ábrala primero.")?;
+    puede_operar(a, &t)?;
     if m.tipo == "salida" {
         let r = resumen(&mut tx, &t).await?;
         if m.monto > r.efectivo_esperado {
@@ -333,6 +376,38 @@ pub struct Resumen {
     pub efectivo_esperado: i64,
     pub movimientos: Vec<Movimiento>,
     pub ajustes: Vec<AjusteResumen>,
+    /// Cada pago con tarjeta, SINPE o transferencia, para revisarlo contra el cierre del datáfono
+    /// y los comprobantes. No es efectivo, así que también lo ve el cajero en cierre ciego.
+    pub pagos_electronicos: Vec<PagoElectronico>,
+    /// Quién vendió en este turno (si el dueño ayudó en la caja de un cajero, se ve aquí).
+    pub por_usuario: Vec<PorUsuario>,
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PorUsuario {
+    pub usuario: String,
+    pub ventas: i64,
+    pub total: i64,
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PagoElectronico {
+    pub fecha: String,
+    pub venta_numero: String,
+    pub forma: String,
+    pub tipo: String,
+    pub monto: i64,
+    pub ultimos4: Option<String>,
+    pub banco: Option<String>,
+    pub referencia: Option<String>,
+}
+
+/// Una diferencia de caja pide nota y revisión si NO es cero y llega al umbral
+/// (con umbral 0, cualquier diferencia; un cierre que cuadra nunca).
+pub fn fuera_de_umbral(diferencia: i64, umbral: i64) -> bool {
+    diferencia != 0 && diferencia.abs() >= umbral
 }
 
 pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
@@ -427,6 +502,39 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
             fecha: a.get("fecha"),
         })
         .collect();
+    let pe = sqlx::query(
+        "SELECT v.fecha, v.numero, f.nombre AS forma, f.tipo, p.monto, p.ultimos4, b.nombre AS banco, p.referencia
+         FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id JOIN formas_pago f ON f.id = p.forma_pago_id
+         LEFT JOIN bancos b ON b.id = p.banco_id
+         WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL AND p.eliminado_en IS NULL AND f.da_vuelto = 0
+         ORDER BY f.orden, f.nombre, v.fecha",
+    )
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    r.pagos_electronicos = pe
+        .iter()
+        .map(|p| PagoElectronico {
+            fecha: p.get("fecha"),
+            venta_numero: p.get("numero"),
+            forma: p.get("forma"),
+            tipo: p.get("tipo"),
+            monto: p.get("monto"),
+            ultimos4: p.get("ultimos4"),
+            banco: p.get("banco"),
+            referencia: p.get("referencia"),
+        })
+        .collect();
+    let pu = sqlx::query(
+        "SELECT u.nombre, COUNT(*) AS n, COALESCE(SUM(v.total), 0) AS total FROM ventas v JOIN usuarios u ON u.id = v.usuario_id
+         WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL GROUP BY u.id ORDER BY total DESC",
+    )
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    r.por_usuario = pu.iter().map(|f| PorUsuario { usuario: f.get("nombre"), ventas: f.get("n"), total: f.get("total") }).collect();
     // Los ajustes no cambian el efectivo de este turno: una devolución en efectivo entra como salida.
     r.efectivo_esperado = r.fondo + r.ventas_efectivo + r.entradas - r.salidas;
     Ok(r)
@@ -442,7 +550,8 @@ fn ocultar_esperado(r: &mut Resumen) {
     r.ventas_efectivo = 0;
     r.recibido_efectivo = 0;
     r.vueltos = 0;
-    r.por_forma.clear();
+    r.por_forma.retain(|f| !f.da_vuelto);
+    r.por_usuario.iter_mut().for_each(|u| u.total = 0);
     r.total_ventas = 0;
 }
 
@@ -469,10 +578,8 @@ pub async fn detalle(pool: &SqlitePool, a: &Actor, turno_id: &str) -> Res<Detall
     a.exigir("caja", "ver la caja")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let mut t = turno(&mut c, turno_id).await?.ok_or("Turno no encontrado")?;
-    // El turno abierto lo ve cualquiera con caja (es la caja de hoy); los cerrados, el suyo o el dueño.
-    if t.estado == "cerrado" {
-        puede_ver(a, &t)?;
-    }
+    // Cada cajero ve solo sus turnos (abiertos o cerrados); el dueño, todos.
+    puede_ver(a, &t)?;
     let congelado: Option<String> = sqlx::query_scalar("SELECT totales FROM caja_turnos WHERE id = ?").bind(turno_id).fetch_one(&mut *c).await.map_err(e)?;
     let (mut r, bitacora_ok) = match (t.estado.as_str(), congelado.and_then(|s| serde_json::from_str::<Value>(&s).ok())) {
         ("cerrado", Some(v)) => (resumen_de_json(&v), v.get("bitacoraOk").and_then(|b| b.as_bool())),
@@ -520,6 +627,23 @@ fn resumen_de_json(v: &Value) -> Resumen {
             .iter()
             .map(|a| AjusteResumen { id: s(a, "id"), tipo: s(a, "tipo"), venta_numero: s(a, "ventaNumero"), monto: i(a, "monto"), motivo: s(a, "motivo"), antes: a.get("antes").cloned().unwrap_or(Value::Null), despues: a.get("despues").cloned().unwrap_or(Value::Null), usuario: s(a, "usuario"), fecha: s(a, "fecha") })
             .collect(),
+        por_usuario: v
+            .get("porUsuario")
+            .and_then(|x| x.as_array())
+            .map(|l| l.iter().map(|u| PorUsuario { usuario: s(u, "usuario"), ventas: i(u, "ventas"), total: i(u, "total") }).collect())
+            .unwrap_or_default(),
+        pagos_electronicos: v
+            .get("pagosElectronicos")
+            .and_then(|x| x.as_array())
+            .map(|l| {
+                l.iter()
+                    .map(|p| {
+                        let o = |k: &str| p.get(k).and_then(|x| x.as_str()).map(String::from);
+                        PagoElectronico { fecha: s(p, "fecha"), venta_numero: s(p, "ventaNumero"), forma: s(p, "forma"), tipo: s(p, "tipo"), monto: i(p, "monto"), ultimos4: o("ultimos4"), banco: o("banco"), referencia: o("referencia") }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -545,8 +669,13 @@ pub async fn necesita_nota(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: 
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
     let mut c = pool.acquire().await.map_err(e)?;
     let t = turno_abierto(&mut c, caja_id).await?.ok_or("La caja no está abierta")?;
+    puede_operar(a, &t)?;
     let r = resumen(&mut c, &t).await?;
-    Ok((contado - r.efectivo_esperado).abs() >= umbral)
+    drop(c);
+    if !ve_esperado(pool, a).await {
+        return Ok(false);
+    }
+    Ok(fuera_de_umbral(contado - r.efectivo_esperado, umbral))
 }
 
 pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo, nota: &str) -> Res<ResultadoCierre> {
@@ -554,17 +683,20 @@ pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo
     let (contado, detalle_conteo) = total_conteo(conteo, &denominaciones(pool).await)?;
     let nota = texto(nota, 500, "nota", false)?;
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
+    // En cierre ciego el cajero no ve lo esperado: no se le pide explicar la diferencia (la revisa el dueño).
+    // (Se lee antes de la transacción: dentro, la conexión está ocupada.)
+    let ciego = !ve_esperado(pool, a).await;
     // La bitácora se verifica en cada cierre: si alguien la alteró, queda dicho en el reporte.
     let ver = bitacora::verificar(pool).await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja no está abierta")?;
     if t.usuario_apertura_id != a.id && !puede(a.rol, "caja.admin") {
-        return Err("Solo quien abrió la caja o el dueño la pueden cerrar".into());
+        return Err(format!("Esta caja es de {}: la cierra {} con su conteo, o el dueño si {} ya no está.", t.usuario_apertura, t.usuario_apertura, t.usuario_apertura));
     }
     let r = resumen(&mut tx, &t).await?;
     let diferencia = contado - r.efectivo_esperado;
-    let requiere_revision = diferencia.abs() >= umbral;
-    if requiere_revision && nota.chars().count() < 5 {
+    let requiere_revision = fuera_de_umbral(diferencia, umbral);
+    if requiere_revision && !ciego && nota.chars().count() < 5 {
         return Err("NOTA_REQUERIDA: el conteo no coincide; escriba qué pasó".into());
     }
     let esperas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas_espera WHERE caja_id = ? AND eliminado_en IS NULL").bind(caja_id).fetch_one(&mut *tx).await.map_err(e)?;
@@ -628,18 +760,28 @@ pub async fn reabrir(pool: &SqlitePool, a: &Actor, turno_id: &str, pin: &str, mo
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
     if t.estado != "cerrado" {
-        return Err("Ese turno no está cerrado".into());
+        return Err("Esa caja ya está abierta: no hace falta reabrirla.".into());
     }
     if t.dia != dia_local() {
-        return Err("Solo se puede reabrir un turno del mismo día".into());
+        return Err("Solo se puede reabrir la caja del mismo día. Lo de días anteriores se corrige con un ajuste del dueño en la caja de hoy.".into());
     }
     if turno_abierto(&mut tx, &t.caja_id).await?.is_some() {
-        return Err("Ya hay otro turno abierto en esta caja".into());
+        return Err("Ya hay otra caja abierta hoy. Ciérrela primero y después reabra esta.".into());
+    }
+    let posteriores: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM caja_turnos WHERE caja_id = ? AND abierto_en > ? AND eliminado_en IS NULL")
+        .bind(&t.caja_id)
+        .bind(&t.abierto_en)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(e)?;
+    if posteriores > 0 {
+        return Err("Después de esta caja ya se abrió otra: reabrirla mezclaría las ventas de los dos turnos. Corrija lo que haga falta con un ajuste en la caja actual.".into());
     }
     let antes = json!({"cerradoEn": t.cerrado_en, "esperado": t.esperado, "contado": t.contado, "diferencia": t.diferencia, "conteo": t.conteo_final, "nota": t.nota_cierre});
     sqlx::query(
         "UPDATE caja_turnos SET estado = 'abierto', cerrado_en = NULL, usuario_cierre_id = NULL, monto_esperado = NULL, monto_contado = NULL,
-           conteo_final = NULL, diferencia = NULL, totales = NULL, nota_cierre = NULL, diferencia_revisada_por = NULL, actualizado_en = ? WHERE id = ?",
+           conteo_final = NULL, diferencia = NULL, totales = NULL, nota_cierre = NULL, diferencia_revisada_por = NULL, reimpresiones = 0,
+           actualizado_en = ? WHERE id = ?",
     )
     .bind(ahora_iso())
     .bind(turno_id)
@@ -720,7 +862,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
             .fetch_one(pool)
             .await
             .map_err(e)?;
-        let pendiente = t.revisada_por.is_none() && t.diferencia.is_some_and(|d| d.abs() >= umbral);
+        let pendiente = t.revisada_por.is_none() && t.diferencia.is_some_and(|d| fuera_de_umbral(d, umbral));
         if !ve {
             t.esperado = None;
             t.diferencia = None;
@@ -736,7 +878,7 @@ pub mod tests {
     use crate::usuarios::tests::base_con_usuarios;
 
     pub fn conteo(pares: &[(i64, i64)]) -> Conteo {
-        Conteo { cantidades: pares.iter().map(|(d, n)| (d.to_string(), *n)).collect() }
+        Conteo { cantidades: pares.iter().map(|(d, n)| (d.to_string(), *n)).collect(), total: None }
     }
 
     #[tokio::test]
@@ -747,6 +889,8 @@ pub mod tests {
         assert!(abrir(p, &tec, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap_err().contains("permiso"));
         // Denominación que no existe: rechazada.
         assert!(abrir(p, &cajero, CAJA_1, &conteo(&[(3000, 1)])).await.is_err());
+        // Ya no circula: la migración 6 lo quitó de la lista.
+        assert!(abrir(p, &cajero, CAJA_1, &conteo(&[(50000, 1)])).await.unwrap_err().contains("50000"));
         let t = abrir(p, &cajero, CAJA_1, &conteo(&[(10000, 2), (1000, 5), (500, 4)])).await.unwrap();
         assert_eq!(t.fondo, 27000);
         // Solo un turno abierto por caja.
@@ -779,6 +923,8 @@ pub mod tests {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'caja.diferencia'").fetch_one(p).await.unwrap();
         assert_eq!(n, 1);
 
+        // Se imprime el Z de este cierre (el original).
+        assert!(!imprimir_z(p, &cajero, &t.id).await.unwrap().1);
         // Reabrir: solo el dueño, con PIN y motivo, mismo día.
         assert!(reabrir(p, &cajero, &t.id, "246813", "contó mal").await.unwrap_err().contains("permiso"));
         assert!(reabrir(p, &dueno, &t.id, "000000", "contó mal").await.is_err());
@@ -787,7 +933,7 @@ pub mod tests {
         assert_eq!(r.diferencia, Some(0));
         assert!(!r.requiere_revision);
 
-        // Z: original y luego COPIA.
+        // Z del cierre nuevo: el primero sale como original (no COPIA del cierre anterior), luego COPIA.
         assert!(!imprimir_z(p, &cajero, &t.id).await.unwrap().1);
         assert!(imprimir_z(p, &cajero, &t.id).await.unwrap().1);
     }
@@ -801,7 +947,13 @@ pub mod tests {
         let d = detalle(p, &cajero, &t.id).await.unwrap();
         assert!(!d.ve_esperado);
         assert_eq!(d.resumen.efectivo_esperado, 0);
-        let r = cerrar(p, &cajero, CAJA_1, &conteo(&[(5000, 1)]), "").await.unwrap();
+        // Cierre ciego: el cajero no ve lo esperado, así que no se le pide nota aunque falte dinero;
+        // igual queda para revisión del dueño. Cierre escribiendo el total de una vez.
+        let mal = Conteo { cantidades: Default::default(), total: Some(1000) };
+        assert!(!necesita_nota(p, &cajero, CAJA_1, &mal).await.unwrap());
+        let total = Conteo { cantidades: Default::default(), total: Some(5000) };
+        let r = cerrar(p, &cajero, CAJA_1, &total, "").await.unwrap();
+        assert_eq!(r.contado, 5000);
         assert_eq!(r.diferencia, None);
         assert_eq!(detalle(p, &dueno, &t.id).await.unwrap().turno.diferencia, Some(0));
         // Turno de ayer: no se reabre.
@@ -809,5 +961,41 @@ pub mod tests {
         assert!(reabrir(p, &dueno, &t.id, "246813", "Quiero reabrir").await.unwrap_err().contains("mismo día"));
         // El cajero solo ve sus turnos en el historial.
         assert_eq!(listar(p, &cajero, CAJA_1, "1999-01-01", "2999-01-01").await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn umbral_cero_no_marca_un_cierre_que_cuadra() {
+        assert!(!fuera_de_umbral(0, 0));
+        assert!(fuera_de_umbral(-5, 0));
+        assert!(!fuera_de_umbral(-999, 1000));
+        assert!(fuera_de_umbral(1000, 1000));
+    }
+
+    #[tokio::test]
+    async fn cada_cajero_su_turno_y_reabrir_solo_el_ultimo() {
+        let (bd, tec, dueno, luis) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let m = usuarios::crear(p, &tec, "María", Rol::Cajero, "1357").await.unwrap();
+        let maria = Actor { id: m.id, rol: Rol::Cajero, nombre: "María".into() };
+        let t1 = abrir(p, &luis, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+        // María no abre encima, no mueve efectivo, no cierra ni ve el turno de Luis.
+        assert!(abrir(p, &maria, CAJA_1, &conteo(&[])).await.unwrap_err().contains("Luis"));
+        let entrada = NuevoMovimiento { tipo: "entrada".into(), monto: 3000, categoria: "Ingreso de cambio".into(), nota: String::new() };
+        assert!(movimiento(p, &maria, CAJA_1, &entrada, None).await.unwrap_err().contains("Luis"));
+        assert!(cerrar(p, &maria, CAJA_1, &conteo(&[(1000, 5)]), "").await.unwrap_err().contains("Luis"));
+        assert!(necesita_nota(p, &maria, CAJA_1, &conteo(&[])).await.is_err());
+        assert!(detalle(p, &maria, &t1.id).await.unwrap_err().contains("permiso"));
+        // El dueño sí puede (queda a su nombre).
+        movimiento(p, &dueno, CAJA_1, &entrada, None).await.unwrap();
+        // Cambio de turno: Luis cierra con su conteo, María abre el suyo.
+        assert_eq!(cerrar(p, &luis, CAJA_1, &conteo(&[(1000, 8)]), "").await.unwrap().diferencia, Some(0));
+        let t2 = abrir(p, &maria, CAJA_1, &conteo(&[(1000, 8)])).await.unwrap();
+        // Reabrir el de Luis mientras María trabaja: no.
+        assert!(reabrir(p, &dueno, &t1.id, "246813", "Contó mal los billetes").await.unwrap_err().contains("abierta"));
+        cerrar(p, &maria, CAJA_1, &conteo(&[(1000, 8)]), "").await.unwrap();
+        // Ni siquiera con la de María cerrada: ya hubo un turno después y se mezclarían las ventas.
+        assert!(reabrir(p, &dueno, &t1.id, "246813", "Contó mal los billetes").await.unwrap_err().contains("Después"));
+        // El último sí.
+        reabrir(p, &dueno, &t2.id, "246813", "Contó mal los billetes").await.unwrap();
     }
 }

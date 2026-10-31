@@ -24,7 +24,7 @@ pub async fn booleano(pool: &SqlitePool, clave: &str, defecto: bool) -> bool {
 fn permiso_de(clave: &str) -> &'static [&'static str] {
     match clave {
         "tema" => &[],                                            // cualquier usuario con sesión
-        "importacion_mapeo_categorias" => &["productos.importar"],
+        c if c.starts_with("importacion_") => &["productos.importar"],
         c if c.starts_with("caja_") => &["caja.admin", "config.tecnica"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }

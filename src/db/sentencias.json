@@ -6,7 +6,7 @@
   },
   "producto.editar": {
     "permiso": "productos",
-    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?, cabys = ?, tasa_iva = ?, exento = ?, actualizado_en = ? WHERE id = ?"
+    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?, cabys = ?, tasa_iva = ?, exento = ?, revisar = 0, actualizado_en = ? WHERE id = ?"
   },
   "producto.eliminar": {
     "permiso": "productos",
@@ -60,13 +60,5 @@
   "banco.guardar": {
     "permiso": "config.tecnica",
     "sql": "INSERT INTO bancos (id, nombre, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en"
-  },
-  "importacion.crear": {
-    "permiso": "productos.importar",
-    "sql": "INSERT INTO productos (id, web_id, nombre, nombre_busqueda, departamento_id, precio, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (web_id) DO UPDATE SET nombre = excluded.nombre, nombre_busqueda = excluded.nombre_busqueda, precio = excluded.precio, actualizado_en = excluded.actualizado_en"
-  },
-  "importacion.actualizar": {
-    "permiso": "productos.importar",
-    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, precio = ?, actualizado_en = ? WHERE id = ?"
   }
 }

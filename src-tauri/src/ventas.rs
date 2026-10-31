@@ -148,10 +148,19 @@ pub async fn autorizar_descuento(pool: &SqlitePool, a: &Actor, espera_id: &str, 
     Ok(AutorizacionEmitida { dueno_id: dueno, pct, token })
 }
 
-fn tomar_autorizacion(token: &str, espera_id: &str, pct: f64) -> Option<String> {
-    let mut m = autorizaciones().lock().ok()?;
-    let p = m.remove(token)?;
-    (p.espera_id == espera_id && p.vence > Instant::now() && pct <= p.pct + 1e-9).then_some(p.dueno_id)
+/// Revisa la autorización sin gastarla: si el cobro falla después (un pago mal escrito, etc.)
+/// el dueño no tiene que volver a poner el PIN.
+fn ver_autorizacion(token: &str, espera_id: &str, pct: f64) -> Option<String> {
+    let m = autorizaciones().lock().ok()?;
+    let p = m.get(token)?;
+    (p.espera_id == espera_id && p.vence > Instant::now() && pct <= p.pct + 1e-9).then(|| p.dueno_id.clone())
+}
+
+/// Se gasta recién cuando la venta quedó guardada (un solo uso).
+fn gastar_autorizacion(token: &str) {
+    if let Ok(mut m) = autorizaciones().lock() {
+        m.remove(token);
+    }
 }
 
 // ─────────── Cobro ───────────
@@ -175,7 +184,7 @@ async fn banco_valido(c: &mut SqliteConnection, id: Option<&str>) -> Res<()> {
     if let Some(id) = id.filter(|s| !s.is_empty()) {
         let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM bancos WHERE id = ? AND activo = 1 AND eliminado_en IS NULL").bind(id).fetch_optional(c).await.map_err(e)?;
         if ok.is_none() {
-            return Err("Banco no disponible".into());
+            return Err("Ese banco ya no está en la lista. Elija otro.".into());
         }
     }
     Ok(())
@@ -205,16 +214,25 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
     let paso = config::entero(pool, "redondeo_total", 5).await;
     let tope = tope_descuento(pool, a.rol).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let t = caja::turno_para_vender(&mut tx, caja_id).await?;
+    let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
 
     // Precio, IVA y departamento de un producto salen de la base, no de la pantalla.
     let mut lineas = est.lineas.clone();
     for l in lineas.iter_mut() {
         if let Some(pid) = l.producto_id.as_deref() {
-            let p = sqlx::query("SELECT precio, tasa_iva, exento, departamento_id FROM productos WHERE id = ? AND eliminado_en IS NULL").bind(pid).fetch_optional(&mut *tx).await.map_err(e)?.ok_or_else(|| format!("\"{}\" ya no existe", l.descripcion))?;
+            let p = sqlx::query("SELECT nombre, precio, tasa_iva, exento, departamento_id, activo FROM productos WHERE id = ? AND eliminado_en IS NULL")
+                .bind(pid)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(e)?
+                .ok_or_else(|| format!("\"{}\" ya no existe en el catálogo: quítelo de la venta", l.descripcion))?;
+            if p.get::<i64, _>("activo") != 1 {
+                return Err(format!("\"{}\" está desactivado y ya no se vende: quítelo de la venta", l.descripcion));
+            }
             if p.get::<i64, _>("precio") != l.precio_unitario {
                 return Err(format!("\"{}\": el precio cambió, vuelva a agregarlo", l.descripcion));
             }
+            l.descripcion = p.get("nombre");
             l.tasa_iva = p.get("tasa_iva");
             l.exento = p.get::<i64, _>("exento") == 1;
             l.departamento_id = p.get("departamento_id");
@@ -230,7 +248,7 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
     let mut autorizado_por = None;
     if tot.pct_descuento > tope + 1e-9 {
         let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
-        autorizado_por = Some(tomar_autorizacion(token, espera_id, tot.pct_descuento).ok_or("La autorización del descuento no es válida: pida el PIN otra vez")?);
+        autorizado_por = Some(ver_autorizacion(token, espera_id, tot.pct_descuento).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?);
     }
     if est.requiere_factura && est.cliente.is_none() {
         return Err("Para factura electrónica, elija o cree el cliente".into());
@@ -251,7 +269,7 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
         return Err(rp.errores.join(". "));
     }
     if rp.faltante > 0 {
-        return Err(format!("Falta pagar {}", rp.faltante));
+        return Err(format!("Todavía faltan {} por pagar.", crate::util::colones(rp.faltante)));
     }
     for p in pagos {
         banco_valido(&mut tx, p.banco_id.as_deref()).await?;
@@ -352,6 +370,11 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
     }
     let numero: String = sqlx::query_scalar("SELECT numero FROM ventas WHERE id = ?").bind(&venta_id).fetch_one(&mut *tx).await.map_err(e)?;
     tx.commit().await.map_err(e)?;
+    if autorizado_por.is_some() {
+        if let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
+            gastar_autorizacion(t);
+        }
+    }
     let efectivo: Vec<&str> = fs.iter().filter(|f| f.da_vuelto).map(|f| f.id.as_str()).collect();
     Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo: rp.aplicados.iter().any(|x| efectivo.contains(&x.pago.forma_pago_id.as_str())) })
 }
@@ -369,7 +392,7 @@ fn puede_consultar(a: &Actor) -> Res<()> {
 pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value>> {
     puede_consultar(a)?;
     let Some(f) = sqlx::query(
-        "SELECT v.*, u.nombre AS cajero, c.nombre AS cliente, t.estado AS turno_estado FROM ventas v
+        "SELECT v.*, u.nombre AS cajero, c.nombre AS cliente, t.estado AS turno_estado, t.usuario_apertura_id AS turno_usuario_id FROM ventas v
          JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN clientes c ON c.id = v.cliente_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
          WHERE v.id = ? AND v.eliminado_en IS NULL",
     )
@@ -397,6 +420,8 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
         "turnoId": f.get::<Option<String>, _>("turno_id"),
         // Sin turno (ventas anteriores a los turnos) cuenta como cerrado.
         "turnoAbierto": f.get::<Option<String>, _>("turno_estado").as_deref() == Some("abierto"),
+        // Quién abrió el turno de la venta: solo esa persona (o el dueño) la corrige o anula mientras siga abierto.
+        "turnoUsuarioId": f.get::<Option<String>, _>("turno_usuario_id"),
         "consecutivo": f.get::<i64, _>("consecutivo"),
         "numero": f.get::<String, _>("numero"),
         "dia": f.get::<Option<String>, _>("dia").unwrap_or_else(|| fecha.chars().take(10).collect()),
@@ -534,6 +559,14 @@ pub struct CambioPago {
     pub ultimos4: Option<String>,
 }
 
+/// Caja donde queda un ajuste posterior al cierre: la abierta de hoy (el dueño puede usar la de un cajero).
+async fn turno_para_ajuste(c: &mut SqliteConnection, caja_id: &str, a: &Actor) -> Res<Turno> {
+    if caja::turno_abierto(c, caja_id).await?.is_none() {
+        return Err("Esa venta es de una caja ya cerrada: el ajuste queda en la caja de hoy, así que primero ábrala.".into());
+    }
+    caja::turno_para_vender(c, caja_id, a).await
+}
+
 /// Turno de la venta: Some(abierto) o None (cerrado, o venta anterior a los turnos).
 async fn turno_de_venta(c: &mut SqliteConnection, turno_id: Option<String>) -> Res<Option<Turno>> {
     match turno_id {
@@ -560,12 +593,15 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
             .fetch_optional(&mut *c)
             .await
             .map_err(e)?
-            .ok_or("Pago no encontrado")?;
+            .ok_or("Ese pago ya no existe. Vuelva a abrir la venta.")?;
         let nueva_vuelto: Option<i64> = sqlx::query_scalar("SELECT da_vuelto FROM formas_pago WHERE id = ? AND activo = 1 AND eliminado_en IS NULL").bind(&cambio.forma_pago_id).fetch_optional(&mut *c).await.map_err(e)?;
         (turno_de_venta(&mut c, p.get("turno_id")).await?, nueva_vuelto.is_some_and(|n| n != p.get::<i64, _>("da_vuelto")))
     };
     drop(c);
     let cerrado = turno_previo.is_none();
+    if let Some(t) = &turno_previo {
+        caja::puede_operar(a, t)?;
+    }
     let autorizado = if cerrado {
         Some(usuarios::confirmar_dueno(pool, a, pin, "corregir pago de turno cerrado").await?)
     } else if cambia_efectivo {
@@ -586,13 +622,13 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
     .fetch_optional(&mut *tx)
     .await
     .map_err(e)?
-    .ok_or("Pago no encontrado")?;
+    .ok_or("Ese pago ya no existe. Vuelva a abrir la venta.")?;
     if p.get::<String, _>("estado") != "completada" {
-        return Err("La venta está anulada".into());
+        return Err("Esa venta está anulada: ya no se le puede cambiar la forma de pago.".into());
     }
     let turno_venta = turno_de_venta(&mut tx, p.get("turno_id")).await?;
     if turno_venta.is_none() != cerrado {
-        return Err("La caja cambió mientras tanto: intente de nuevo".into());
+        return Err("Alguien abrió o cerró la caja mientras tanto. Cierre esta ventana y vuelva a intentarlo.".into());
     }
     let fs = formas(&mut tx).await?;
     let nueva = fs.iter().find(|f| f.id == cambio.forma_pago_id).ok_or("Forma de pago no disponible")?;
@@ -614,7 +650,7 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
     let n_u4 = if nueva.pide_ultimos4 { cambio.ultimos4.clone().filter(|s| !s.is_empty()) } else { None };
     let (a_forma, a_banco, a_ref, a_u4): (String, Option<String>, Option<String>, Option<String>) = (p.get("forma_pago_id"), p.get("banco_id"), p.get("referencia"), p.get("ultimos4"));
     if nueva.id == a_forma && n_banco == a_banco && n_ref == a_ref && n_u4 == a_u4 {
-        return Err("No hay cambios".into());
+        return Err("No cambió nada: ese pago ya está registrado con esa forma de pago (y el mismo banco, referencia y últimos 4). Elija otra forma o cambie algún dato.".into());
     }
     let monto: i64 = p.get("monto");
     let venta_id: String = p.get("venta_id");
@@ -668,7 +704,7 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
             .map_err(e)?;
         bitacora::registrar(&mut tx, Some(&a.id), "venta.pago_corregido", "venta", Some(&venta_id), &json!({"pagoId": pago_id, "correccionId": id, "monto": monto, "antes": antes, "despues": despues, "autorizadoPor": autorizado})).await?;
     } else {
-        let actual = caja::turno_para_vender(&mut tx, caja_id).await.map_err(|_| "Para ajustar una venta de un turno cerrado, abra la caja de hoy".to_string())?;
+        let actual = turno_para_ajuste(&mut tx, caja_id, a).await?;
         let id = ulid();
         let mut ant = antes.clone();
         ant["pagoId"] = json!(pago_id);
@@ -706,7 +742,13 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
     let turno_id = turno_id.ok_or("Venta no encontrada")?;
     let cerrado = {
         let mut c = pool.acquire().await.map_err(e)?;
-        turno_de_venta(&mut c, turno_id).await?.is_none()
+        match turno_de_venta(&mut c, turno_id).await? {
+            Some(t) => {
+                caja::puede_operar(a, &t)?;
+                false
+            }
+            None => true,
+        }
     };
     if !cerrado && devolucion_efectivo != 0 {
         return Err("En el turno abierto la anulación ya descuenta el efectivo de la venta".into());
@@ -719,7 +761,7 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         return Err("La venta ya está anulada".into());
     }
     if turno_de_venta(&mut tx, v.get("turno_id")).await?.is_none() != cerrado {
-        return Err("La caja cambió mientras tanto: intente de nuevo".into());
+        return Err("Alguien abrió o cerró la caja mientras tanto. Cierre esta ventana y vuelva a intentarlo.".into());
     }
     let total: i64 = v.get("total");
     let numero: String = v.get("numero");
@@ -735,7 +777,7 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         .map_err(e)?;
     let mut det = json!({"numero": numero, "total": total, "motivo": motivo, "autorizadoPor": dueno});
     if cerrado {
-        let actual = caja::turno_para_vender(&mut tx, caja_id).await.map_err(|_| "Para anular una venta de un turno cerrado, abra la caja de hoy".to_string())?;
+        let actual = turno_para_ajuste(&mut tx, caja_id, a).await?;
         if !(0..=total).contains(&devolucion_efectivo) {
             return Err("La devolución no puede pasar del total de la venta".into());
         }
@@ -868,6 +910,8 @@ mod tests {
         assert!(cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 1000)]).await.unwrap_err().contains("autorización"));
         let aut = autorizar_descuento(p, &cajero, &esp.id, 50.0, "246813").await.unwrap();
         desc.autorizacion = Some(Autorizacion { dueno_id: aut.dueno_id, pct: 50.0, token: Some(aut.token) });
+        // Un cobro que falla (falta dinero) no gasta la autorización.
+        assert!(cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 10)]).await.unwrap_err().contains("faltan"));
         let r = cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 5000)]).await.unwrap();
         assert_eq!(r.vuelto, 4000);
         // Doble clic: la espera ya se cobró.
@@ -899,7 +943,7 @@ mod tests {
         // Cajero: no puede ajustar un turno cerrado.
         assert!(corregir_pago(p, &cajero, CAJA_1, &pago_id, &tarjeta, "Era tarjeta al final", Some("246813")).await.unwrap_err().contains("permiso"));
         // Dueño sin caja abierta hoy: no hay dónde registrar el ajuste.
-        assert!(corregir_pago(p, &dueno, CAJA_1, &pago_id, &tarjeta, "Era tarjeta al final", Some("246813")).await.unwrap_err().contains("abra la caja"));
+        assert!(corregir_pago(p, &dueno, CAJA_1, &pago_id, &tarjeta, "Era tarjeta al final", Some("246813")).await.unwrap_err().contains("primero ábrala"));
         let t2 = abrir(p, &dueno, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
         corregir_pago(p, &dueno, CAJA_1, &pago_id, &tarjeta, "Era tarjeta al final", Some("246813")).await.unwrap();
         // Anular la venta del turno cerrado devolviendo efectivo: ajuste + salida en el turno actual.
@@ -913,5 +957,37 @@ mod tests {
         let d1 = detalle(p, &dueno, &t1.id).await.unwrap();
         assert_eq!(d1.resumen.total_ventas, 5000);
         assert_eq!(d1.resumen.por_forma[0].nombre, "SINPE Móvil");
+        // El detalle de pagos electrónicos queda congelado en el cierre, para cuadrar con los comprobantes.
+        assert_eq!(d1.resumen.pagos_electronicos.len(), 1);
+        assert_eq!(d1.resumen.pagos_electronicos[0].referencia.as_deref(), Some("12345"));
+        assert_eq!(d1.resumen.pagos_electronicos[0].monto, 5000);
+    }
+
+    #[tokio::test]
+    async fn solo_se_vende_en_el_turno_propio_y_productos_activos() {
+        let (bd, tec, dueno, luis) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let m = usuarios::crear(p, &tec, "María", Rol::Cajero, "1357").await.unwrap();
+        let maria = Actor { id: m.id, rol: Rol::Cajero, nombre: "María".into() };
+        let (pid, dep) = producto(p, 1000).await;
+        abrir(p, &luis, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+        let mut e = est(&pid, &dep, 1000, 1, 0);
+        // El nombre del tiquete sale del catálogo, no de la pantalla.
+        e.lineas[0].descripcion = "Nombre inventado".into();
+        let esp = crear_espera(p, &maria, CAJA_1, &e).await.unwrap();
+        assert!(cobrar(p, &maria, CAJA_1, &esp.id, &e, &[pago(EF, 1000)]).await.unwrap_err().contains("Luis"));
+        // El dueño ayuda en la caja de Luis: se puede, y queda a nombre del dueño.
+        let v = cobrar(p, &dueno, CAJA_1, &esp.id, &e, &[pago(EF, 1000)]).await.unwrap();
+        let d: String = sqlx::query_scalar("SELECT descripcion FROM venta_lineas WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
+        assert_eq!(d, "Cuaderno");
+        // María tampoco corrige ni anula ventas del turno abierto de Luis.
+        let pago_id: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
+        let tj = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None };
+        assert!(corregir_pago(p, &maria, CAJA_1, &pago_id, &tj, "Era con tarjeta", Some("246813")).await.unwrap_err().contains("Luis"));
+        assert!(anular(p, &maria, CAJA_1, &v.venta_id, "246813", "Se equivocó", 0).await.unwrap_err().contains("Luis"));
+        // Producto desactivado: no se vende.
+        sqlx::query("UPDATE productos SET activo = 0 WHERE id = ?").bind(&pid).execute(p).await.unwrap();
+        let esp2 = crear_espera(p, &luis, CAJA_1, &e).await.unwrap();
+        assert!(cobrar(p, &luis, CAJA_1, &esp2.id, &e, &[pago(EF, 1000)]).await.unwrap_err().contains("desactivado"));
     }
 }

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
-import { detalleTurno, listarTurnos, marcarRevisada, reabrirCaja, type Detalle, type ResultadoCierre, type TurnoFila } from "../db/caja";
+import { esMiTurno, detalleTurno, listarTurnos, marcarRevisada, reabrirCaja, type Detalle, type ResultadoCierre, type TurnoFila } from "../db/caja";
 import { listarEsperas } from "../db/ventas";
 import { imprimirMovimiento, imprimirZ } from "../lib/caja/imprimir";
 import { diaLocal } from "../lib/texto";
@@ -17,8 +17,9 @@ import EmptyState from "../ui/EmptyState";
 import FilaClic from "../ui/FilaClic";
 import Field from "../ui/Field";
 import { AbrirCaja, CerrarCaja, MovimientoCaja } from "./caja/Dialogos";
+import PagosElectronicos from "./caja/PagosElectronicos";
 
-const hora = (iso: string) => fechaHora(new Date(iso)).slice(-5);
+const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
 const signo = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "") + monto(Math.abs(n));
 
 function haceDias(n: number): string {
@@ -28,7 +29,7 @@ function haceDias(n: number): string {
 }
 
 export default function Caja() {
-  const { caja, recargarCaja, config, puede } = useSesion();
+  const { caja, recargarCaja, config, puede, usuario } = useSesion();
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [dialogo, setDialogo] = useState<null | "abrir" | "entrada" | "salida" | "cerrar">(null);
   const [esperas, setEsperas] = useState(0);
@@ -38,10 +39,11 @@ export default function Caja() {
   const [aviso, setAviso] = useState("");
   const [recarga, setRecarga] = useState(0);
   const turno = caja?.turno ?? null;
+  const ajena = !!turno && !esMiTurno(turno, usuario.id, puede("caja.admin"));
 
   useEffect(() => {
     setDetalle(null);
-    if (turno) detalleTurno(turno.id).then(setDetalle, (e) => setError(textoError(e)));
+    if (turno && !ajena) detalleTurno(turno.id).then(setDetalle, (e) => setError(textoError(e)));
   }, [turno?.id, recarga]);
 
   const refrescar = async () => {
@@ -68,7 +70,17 @@ export default function Caja() {
       {aviso && <Alert tono="ok">{aviso}</Alert>}
 
       <section className="card caja-turno">
-        {!turno ? (
+        {ajena ? (
+          <div className="caja-cabeza">
+            <div>
+              <h2>La caja la tiene abierta {turno.usuarioApertura}</h2>
+              <p className="muted">
+                Desde las {hora(turno.abiertoEn)}. Cada cajero responde por su propio turno: {turno.usuarioApertura} la cierra con su conteo
+                (o el dueño, si ya no está) y después usted abre la suya.
+              </p>
+            </div>
+          </div>
+        ) : !turno ? (
           <div className="caja-cabeza">
             <div>
               <h2>Caja cerrada</h2>
@@ -138,7 +150,7 @@ export default function Caja() {
                     </div>
                   )}
                 </dl>
-                {detalle.veEsperado && r.porForma.length > 0 && (
+                {r.porForma.length > 0 && (
                   <table className="tbl tbl-compacta">
                     <thead>
                       <tr>
@@ -158,6 +170,14 @@ export default function Caja() {
                     </tbody>
                   </table>
                 )}
+                {r.porUsuario.length > 1 && (
+                  <Alert tono="info" titulo="En este turno vendió más de una persona">
+                    {r.porUsuario.map((u) => `${u.usuario}: ${u.ventas} venta(s)${detalle.veEsperado ? ` · ${monto(u.total)}` : ""}`).join(" — ")}
+                  </Alert>
+                )}
+                <h3>Tarjeta, SINPE y transferencias</h3>
+                <p className="muted">Compare con el cierre del datáfono y los comprobantes antes de cerrar la caja.</p>
+                <PagosElectronicos pagos={r.pagosElectronicos} />
                 {r.movimientos.length > 0 && (
                   <>
                     <h3>Movimientos</h3>
@@ -168,6 +188,7 @@ export default function Caja() {
                           <span>
                             {m.categoria}
                             {m.motivo && <span className="muted"> · {m.motivo}</span>}
+                            {turno && m.usuario !== turno.usuarioApertura && <span className="muted"> · {m.usuario}</span>}
                           </span>
                           <span className={m.tipo === "salida" ? "num neg" : "num"}>
                             {m.tipo === "salida" ? "−" : "+"}
@@ -205,6 +226,7 @@ export default function Caja() {
         <CerrarCaja
           estado={caja}
           esperasAbiertas={esperas}
+          pagosElectronicos={r?.pagosElectronicos ?? []}
           onCerrar={() => setDialogo(null)}
           onCerrada={(res) => {
             setDialogo(null);
@@ -369,8 +391,10 @@ function DetalleTurno(p: { turnoId: string; onCerrar(): void; onCambio(): Promis
             )}
           </dl>
           {t.notaCierre && <Alert tono="info" titulo="Nota del cierre">{t.notaCierre}</Alert>}
+          <h3>Tarjeta, SINPE y transferencias</h3>
+          <PagosElectronicos pagos={r.pagosElectronicos ?? []} />
           {d.bitacoraOk === false && <Alert tono="error">Al cerrar, la bitácora no pasó la verificación.</Alert>}
-          {admin && t.diferencia != null && Math.abs(t.diferencia) >= umbral && !t.revisadaPor && (
+          {admin && t.diferencia != null && t.diferencia !== 0 && Math.abs(t.diferencia) >= umbral && !t.revisadaPor && (
             <Alert tono="aviso" titulo="Diferencia por revisar">
               <Button icono={CheckCircle2} onClick={async () => (await marcarRevisada(t.id).catch((e) => setError(textoError(e))), await cargar(), await p.onCambio())}>
                 Marcar como revisada

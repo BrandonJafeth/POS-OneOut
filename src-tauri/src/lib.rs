@@ -5,6 +5,7 @@ mod calculo;
 mod clave;
 mod clientes;
 mod config;
+mod importacion;
 mod negocio;
 mod permisos;
 mod pin;
@@ -490,6 +491,22 @@ async fn app_reiniciar(app: tauri::AppHandle) -> Res<()> {
     app.restart();
 }
 
+// ─────────── Importación de productos ───────────
+
+/// Lee el CSV elegido con <input type="file"> (llega como bytes: la ventana no toca el disco).
+#[tauri::command]
+async fn importacion_leer(st: St<'_>, archivo: Vec<u8>) -> Res<importacion::Tabla> {
+    let a = st.actor().await?;
+    a.exigir("productos.importar", "importar productos")?;
+    importacion::leer(&archivo)
+}
+
+#[tauri::command]
+async fn importacion_aplicar(st: St<'_>, pin: String, pedido: importacion::Pedido) -> Res<importacion::Resultado> {
+    let a = st.actor().await?;
+    importacion::aplicar(st.pool()?, &a, &pin, &pedido).await
+}
+
 // ─────────── Impresora ───────────
 
 /// Nombres de las impresoras instaladas en Windows.
@@ -629,6 +646,8 @@ pub fn run() {
             cliente_retencion,
             respaldo_crear,
             respaldo_restaurar,
+            importacion_leer,
+            importacion_aplicar,
             app_reiniciar,
             list_printers,
             print_raw,

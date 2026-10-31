@@ -1,25 +1,109 @@
 // Plan de importación: compara la fuente con lo que ya hay y decide qué crear, qué actualizar
-// y qué filas tienen errores. Es puro (no toca la base), así la vista previa es exacta y se prueba fácil.
+// y qué filas tienen errores, con el departamento, el código interno y el favorito de cada una.
+// Es puro (no toca la base), así la vista previa es exacta, se recalcula al editar las reglas
+// y se prueba fácil. Rust vuelve a validar todo al aplicar.
 import { normalizar } from "../texto";
 import type { ErrorFila, FuenteImportacion } from "./fuente";
+import { codigoBase, codigoLibre, porCategorias, porPalabras, sugerenciaNombre, type ReglasImportacion } from "./reglas";
+
+export const MAX_NOMBRE = 120;
+const ESTADOS = new Set(["disponible", "agotado"]);
+const TIPOS = new Set(["simple"]);
+const CLAVE = /^[A-Za-z0-9_-]+$/;
 
 export interface ProductoExistente {
   id: string;
   webId: string | null;
+  slug: string | null;
   nombre: string;
   precio: number;
+  activo: boolean;
+  departamentoId: string;
+  favorito: boolean;
+  categoriasOrigen: string | null;
+  /** Ya tiene un código interno (no se le genera otro). */
+  tieneInterno: boolean;
   eliminado: boolean;
 }
 
+export interface DepartamentoPlan {
+  id: string;
+  codigo: string;
+  nombre: string;
+  activo: boolean;
+}
+
+export interface Contexto {
+  existentes: ProductoExistente[];
+  /** Todos los códigos que ya existen (para no repetir códigos internos). */
+  codigos: string[];
+  /** Favoritos que ya hay en el catálogo. */
+  favoritosActuales: number;
+  departamentos: DepartamentoPlan[];
+  departamentoDefecto: string;
+}
+
+export type Respuesta = "mover" | "dejar";
+
+export interface Opciones {
+  reglas: ReglasImportacion;
+  /** Respuesta del dueño a cada regla "preguntar" (por índice en reglas.palabras). */
+  respuestas: Record<number, Respuesta>;
+  /** Filas cuya sugerencia de nombre aceptó el dueño. */
+  sugerenciasAceptadas: ReadonlySet<number>;
+  limitarFavoritos: boolean;
+  /** Reemplazar lo que el dueño editó en el POS (por defecto no). */
+  pisar: { departamento: boolean; favorito: boolean };
+}
+
+export type Via = "categoria" | "regla" | "defecto";
+export type Cambio = "nombre" | "precio" | "activo" | "departamento" | "favorito" | "codigo" | "slug" | "categorias";
+
 export interface ItemPlan {
   fila: number;
+  accion: "crear" | "actualizar";
   webId: string;
+  slug: string;
+  /** Nombre que se guarda (con la sugerencia, si se aceptó). */
   nombre: string;
+  /** Nombre del archivo, ya sin espacios de más. */
+  nombreArchivo: string;
+  sugerencia: string | null;
   precio: number;
+  activo: boolean;
+  destacado: boolean;
+  favorito: boolean;
+  categorias: string[];
+  /** Departamento que dicen las reglas. */
+  departamentoReglas: string;
+  /** Departamento que se guarda (al actualizar, el del POS salvo que se pida reemplazarlo). */
   departamentoId: string;
-  /** Solo en "actualizar": el producto y sus valores actuales. */
+  /** Departamento del paso 1 (categoría), antes de las palabras. */
+  departamentoCategoria: string;
+  via: Via;
+  regla: { indice: number; palabra: string } | null;
+  revisar: boolean;
+  /** Código interno a crear (null si ya tiene uno). */
+  codigo: string | null;
   productoId?: string;
-  antes?: { nombre: string; precio: number };
+  antes?: { nombre: string; precio: number; activo: boolean; departamentoId: string; favorito: boolean };
+  cambios: Cambio[];
+}
+
+export interface ConteoDepartamento {
+  departamentoId: string;
+  categoria: number;
+  regla: number;
+  defecto: number;
+  total: number;
+}
+
+export interface Pregunta {
+  indice: number;
+  palabras: string[];
+  departamentoId: string;
+  respuesta: Respuesta | undefined;
+  items: ItemPlan[];
 }
 
 export interface Plan {
@@ -28,9 +112,22 @@ export interface Plan {
   nuevos: ItemPlan[];
   actualizar: ItemPlan[];
   sinCambios: number;
-  /** web_id de un producto que se eliminó aquí: no se resucita. */
+  /** Productos eliminados en el POS: no se resucitan. */
   omitidos: ErrorFila[];
   errores: ErrorFila[];
+  /** Filas con precio de oferta: se avisa y no se aplica. */
+  avisos: ErrorFila[];
+  /** Todas las filas válidas, con su departamento según las reglas. */
+  validos: ItemPlan[];
+  porDepartamento: ConteoDepartamento[];
+  /** Filas a las que una regla de palabras les cambió el departamento de la categoría. */
+  cambiadosPorRegla: ItemPlan[];
+  preguntas: Pregunta[];
+  /** Preguntas que el dueño todavía no respondió: no se puede confirmar. */
+  pendientes: number;
+  sugerencias: ItemPlan[];
+  favoritos: { destacados: number; marcados: number; cupo: number | null };
+  paraRevisar: number;
 }
 
 /**
@@ -46,22 +143,34 @@ export function leerPrecio(s: string): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-export function categoriasSinMapear(fuente: FuenteImportacion, mapeo: Record<string, string>): string[] {
-  const set = new Set(fuente.filas.map((f) => f.categoria).filter((c) => c && !(c in mapeo)));
-  return [...set].sort((a, b) => a.localeCompare(b, "es"));
-}
+const sinOferta = (s: string) => !s || /^(null|0|-)$/i.test(s.trim());
 
-export function crearPlan(
-  fuente: FuenteImportacion,
-  existentes: ProductoExistente[],
-  mapeo: Record<string, string>,
-  departamentoDefecto: string,
-): Plan {
-  const porWebId = new Map(existentes.filter((e) => e.webId).map((e) => [e.webId!, e]));
-  const porNombre = new Map(existentes.filter((e) => !e.eliminado).map((e) => [normalizar(e.nombre), e]));
-  const plan: Plan = { origen: fuente.origen, total: fuente.filas.length, nuevos: [], actualizar: [], sinCambios: 0, omitidos: [], errores: [] };
-  const vistosNombre = new Map<string, number>();
-  const vistosId = new Map<string, number>();
+export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones): Plan {
+  const { reglas } = op;
+  const deps = new Map(ctx.departamentos.filter((d) => d.activo).map((d) => [d.id, d]));
+  const porWebId = new Map(ctx.existentes.filter((e) => e.webId).map((e) => [e.webId!, e]));
+  const porSlug = new Map(ctx.existentes.filter((e) => e.slug && !e.eliminado).map((e) => [e.slug!, e]));
+  const porNombre = new Map(ctx.existentes.filter((e) => !e.eliminado).map((e) => [normalizar(e.nombre), e]));
+  const plan: Plan = {
+    origen: fuente.origen,
+    total: fuente.filas.length,
+    nuevos: [],
+    actualizar: [],
+    sinCambios: 0,
+    omitidos: [],
+    errores: [],
+    avisos: [],
+    validos: [],
+    porDepartamento: [],
+    cambiadosPorRegla: [],
+    preguntas: reglas.palabras.flatMap((r, indice) => (r.preguntar ? [{ indice, palabras: r.palabras, departamentoId: r.departamentoId, respuesta: op.respuestas[indice], items: [] }] : [])),
+    pendientes: 0,
+    sugerencias: [],
+    favoritos: { destacados: 0, marcados: 0, cupo: null },
+    paraRevisar: 0,
+  };
+  const hay = new Set(fuente.columnas);
+  const vistos = { id: new Map<string, number>(), slug: new Map<string, number>(), nombre: new Map<string, number>() };
 
   for (const f of fuente.filas) {
     const error = (mensaje: string) => plan.errores.push({ fila: f.fila, nombre: f.nombre, mensaje });
@@ -69,8 +178,20 @@ export function crearPlan(
       error("Nombre vacío");
       continue;
     }
+    if (f.nombre.length > MAX_NOMBRE) {
+      error(`Nombre de más de ${MAX_NOMBRE} caracteres`);
+      continue;
+    }
     if (!f.webId) {
       error("Falta el id");
+      continue;
+    }
+    if (f.webId.length > 64 || !CLAVE.test(f.webId)) {
+      error("El id tiene caracteres no válidos");
+      continue;
+    }
+    if (f.slug && (f.slug.length > 160 || !CLAVE.test(f.slug))) {
+      error("El slug tiene caracteres no válidos");
       continue;
     }
     if (!f.precio) {
@@ -82,30 +203,165 @@ export function crearPlan(
       error(`Precio no numérico: "${f.precio}"`);
       continue;
     }
+    if (precio <= 0) {
+      error("El precio debe ser mayor que cero");
+      continue;
+    }
+    if (hay.has("estado") && f.estado && !ESTADOS.has(f.estado)) {
+      error(`Estado no admitido: "${f.estado}"`);
+      continue;
+    }
+    if (hay.has("tipo") && f.tipo && !TIPOS.has(f.tipo)) {
+      error(`Tipo no admitido: "${f.tipo}" (solo "simple")`);
+      continue;
+    }
     const clave = normalizar(f.nombre);
-    if (vistosId.has(f.webId)) {
-      error(`Id repetido (igual que la fila ${vistosId.get(f.webId)})`);
+    const repetido = (
+      [
+        ["id", f.webId, "Id"],
+        ["slug", f.slug, "Slug"],
+        ["nombre", clave, "Nombre"],
+      ] as const
+    ).find(([k, v]) => v && vistos[k].has(v));
+    if (repetido) {
+      error(`${repetido[2]} repetido (igual que la fila ${vistos[repetido[0]].get(repetido[1])})`);
       continue;
     }
-    if (vistosNombre.has(clave)) {
-      error(`Nombre repetido (igual que la fila ${vistosNombre.get(clave)})`);
-      continue;
-    }
-    vistosId.set(f.webId, f.fila);
-    vistosNombre.set(clave, f.fila);
+    vistos.id.set(f.webId, f.fila);
+    if (f.slug) vistos.slug.set(f.slug, f.fila);
+    vistos.nombre.set(clave, f.fila);
 
-    const existente = porWebId.get(f.webId);
-    // Mismo nombre que OTRO producto que ya está en el catálogo: crearía un duplicado.
+    let existente = porWebId.get(f.webId);
+    if (!existente && f.slug) existente = porSlug.get(f.slug);
     const homonimo = porNombre.get(clave);
     if (homonimo && homonimo.id !== existente?.id) {
       error(`Ya existe otro producto con ese nombre ("${homonimo.nombre}")`);
       continue;
     }
-    const item: ItemPlan = { fila: f.fila, webId: f.webId, nombre: f.nombre, precio, departamentoId: mapeo[f.categoria] || departamentoDefecto };
-    if (!existente) plan.nuevos.push(item);
-    else if (existente.eliminado) plan.omitidos.push({ fila: f.fila, nombre: f.nombre, mensaje: "Producto eliminado en el POS; no se vuelve a crear" });
-    else if (existente.nombre === f.nombre && existente.precio === precio) plan.sinCambios++;
-    else plan.actualizar.push({ ...item, productoId: existente.id, antes: { nombre: existente.nombre, precio: existente.precio } });
+    if (existente?.eliminado) {
+      plan.omitidos.push({ fila: f.fila, nombre: f.nombre, mensaje: "Producto eliminado en el POS; no se vuelve a crear" });
+      continue;
+    }
+
+    // Departamento: paso 1 por categoría (prioridad), paso 2 por palabras (sobrescribe).
+    const cat = porCategorias(f.categorias, reglas.categorias);
+    const departamentoCategoria = cat?.departamentoId ?? ctx.departamentoDefecto;
+    let departamento = departamentoCategoria;
+    let via: Via = cat ? "categoria" : "defecto";
+    const regla = porPalabras(f.nombre, reglas.palabras);
+    if (regla) {
+      const r = reglas.palabras[regla.indice];
+      if (!r.preguntar || op.respuestas[regla.indice] === "mover") {
+        departamento = r.departamentoId;
+        via = "regla";
+      }
+    }
+    if (!deps.has(departamento)) {
+      error("El departamento de las reglas no existe o está inactivo; revise el mapeo");
+      continue;
+    }
+
+    const sugerencia = sugerenciaNombre(f.nombre);
+    const nombre = sugerencia && op.sugerenciasAceptadas.has(f.fila) ? sugerencia : f.nombre;
+    const activo = !hay.has("estado") || f.estado !== "agotado";
+    const item: ItemPlan = {
+      fila: f.fila,
+      accion: existente ? "actualizar" : "crear",
+      webId: f.webId,
+      slug: f.slug,
+      nombre,
+      nombreArchivo: f.nombre,
+      sugerencia,
+      precio,
+      activo,
+      destacado: f.destacado,
+      favorito: false,
+      categorias: f.categorias,
+      departamentoReglas: departamento,
+      departamentoId: existente && !op.pisar.departamento ? existente.departamentoId : departamento,
+      departamentoCategoria,
+      via,
+      regla,
+      revisar: via === "defecto",
+      codigo: null,
+      cambios: [],
+    };
+    if (existente) {
+      item.productoId = existente.id;
+      item.antes = { nombre: existente.nombre, precio: existente.precio, activo: existente.activo, departamentoId: existente.departamentoId, favorito: existente.favorito };
+      item.favorito = existente.favorito;
+    }
+    if (!sinOferta(f.precioOferta)) plan.avisos.push({ fila: f.fila, nombre: f.nombre, mensaje: `Trae precio de oferta (${f.precioOferta}); no se aplica` });
+    plan.validos.push(item);
   }
+
+  // Favoritos = destacados, con límite opcional. Sin "reemplazar favorito", solo cuentan los nuevos
+  // y el cupo descuenta los favoritos que ya hay.
+  const candidatos = plan.validos.filter((i) => i.destacado && (i.accion === "crear" || op.pisar.favorito));
+  const orden = {
+    alfabetico: (a: ItemPlan, b: ItemPlan) => a.nombre.localeCompare(b.nombre, "es"),
+    archivo: (a: ItemPlan, b: ItemPlan) => a.fila - b.fila,
+    precio: (a: ItemPlan, b: ItemPlan) => a.precio - b.precio || a.nombre.localeCompare(b.nombre, "es"),
+  }[reglas.criterioFavoritos];
+  const cupo = op.limitarFavoritos ? Math.max(0, reglas.favoritosMax - (op.pisar.favorito ? 0 : ctx.favoritosActuales)) : null;
+  const elegidos = new Set([...candidatos].sort(orden).slice(0, cupo ?? undefined));
+  if (op.pisar.favorito) for (const i of plan.validos) i.favorito = elegidos.has(i);
+  else for (const i of elegidos) i.favorito = true;
+  plan.favoritos = { destacados: plan.validos.filter((i) => i.destacado).length, marcados: elegidos.size, cupo };
+
+  // Códigos internos, en el orden del archivo para que sean estables.
+  const usados = new Set(ctx.codigos.map((c) => c.toLowerCase()));
+  const tieneInterno = new Map(ctx.existentes.map((e) => [e.id, e.tieneInterno]));
+  for (const i of plan.validos) {
+    if (i.productoId && tieneInterno.get(i.productoId)) continue;
+    i.codigo = codigoLibre(codigoBase(deps.get(i.departamentoId)?.codigo ?? "", i.nombre), usados);
+  }
+
+  // Qué cambia en los que ya existen.
+  const porId = new Map(ctx.existentes.map((e) => [e.id, e]));
+  for (const i of plan.validos) {
+    if (i.accion === "crear") {
+      plan.nuevos.push(i);
+      continue;
+    }
+    const e = porId.get(i.productoId!)!;
+    const c: Cambio[] = [];
+    if (e.nombre !== i.nombre) c.push("nombre");
+    if (e.precio !== i.precio) c.push("precio");
+    if (e.activo !== i.activo) c.push("activo");
+    if (e.departamentoId !== i.departamentoId) c.push("departamento");
+    if (e.favorito !== i.favorito) c.push("favorito");
+    if (i.codigo) c.push("codigo");
+    if ((e.slug ?? "") !== i.slug || e.webId !== i.webId) c.push("slug");
+    if ((e.categoriasOrigen ?? "") !== i.categorias.join(" | ")) c.push("categorias");
+    i.cambios = c;
+    if (c.length) plan.actualizar.push(i);
+    else plan.sinCambios++;
+  }
+
+  // Resúmenes para la vista previa.
+  const conteo = new Map<string, ConteoDepartamento>();
+  for (const i of plan.validos) {
+    const k = conteo.get(i.departamentoReglas) ?? { departamentoId: i.departamentoReglas, categoria: 0, regla: 0, defecto: 0, total: 0 };
+    k[i.via]++;
+    k.total++;
+    conteo.set(i.departamentoReglas, k);
+    if (i.via === "regla" && i.departamentoReglas !== i.departamentoCategoria) plan.cambiadosPorRegla.push(i);
+    if (i.sugerencia) plan.sugerencias.push(i);
+    if (i.revisar) plan.paraRevisar++;
+    if (i.regla && reglas.palabras[i.regla.indice].preguntar) plan.preguntas.find((p) => p.indice === i.regla!.indice)?.items.push(i);
+  }
+  const ordenDep = new Map(ctx.departamentos.map((d, n) => [d.id, n]));
+  plan.porDepartamento = [...conteo.values()].sort((a, b) => (ordenDep.get(a.departamentoId) ?? 99) - (ordenDep.get(b.departamentoId) ?? 99));
+  plan.preguntas = plan.preguntas.filter((p) => p.items.length);
+  plan.pendientes = plan.preguntas.filter((p) => !p.respuesta).length;
   return plan;
+}
+
+/** Categorías del archivo que no están en la tabla de mapeo (se muestran para agregarlas). */
+export function categoriasSinMapear(fuente: FuenteImportacion, reglas: ReglasImportacion): string[] {
+  const conocidas = new Set(reglas.categorias.map((r) => normalizar(r.categoria)));
+  const out = new Map<string, string>();
+  for (const f of fuente.filas) for (const c of f.categorias) if (!conocidas.has(normalizar(c))) out.set(normalizar(c), c);
+  return [...out.values()].sort((a, b) => a.localeCompare(b, "es"));
 }
