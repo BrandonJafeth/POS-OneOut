@@ -21,6 +21,7 @@ import { leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
+import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
 import ConteoDinero from "./Conteo";
 import PagosElectronicos from "./PagosElectronicos";
@@ -92,7 +93,7 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
         }}
       >
         <Field label="Monto">
-          <input inputMode="numeric" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="¢0" />
+          <CampoMonto autoFocus valor={texto} onCambio={setTexto} />
         </Field>
         <Field label="Motivo">
           <select value={categoria} onChange={(e) => setCategoria(e.target.value)}>

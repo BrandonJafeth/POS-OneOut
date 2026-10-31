@@ -6,7 +6,7 @@ import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
-import { diaLocal } from "../lib/texto";
+import { conMiles, diaLocal } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { imprimirVenta } from "../lib/venta/imprimir";
 import type { Banco, FormaPago, Venta, VentaPago } from "../tipos";
@@ -14,6 +14,7 @@ import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
+import CampoMonto from "../ui/CampoMonto";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
 
@@ -353,7 +354,7 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
   const { actor } = useSesion();
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
-  const [devolver, setDevolver] = useState(p.efectivo > 0 ? String(p.efectivo) : "");
+  const [devolver, setDevolver] = useState(conMiles(String(Math.max(0, p.efectivo))));
   const [error, setError] = useState("");
   return (
     <Modal titulo={`Anular tiquete ${p.numero}`} onCerrar={p.onCerrar} ancho={420}>
@@ -382,7 +383,7 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
         </Field>
         {!p.turnoAbierto && (
           <Field label="Efectivo que se devuelve ahora" ayuda={`Sale de la caja de hoy como salida. Máximo ${monto(p.total)}; 0 si no se devuelve dinero.`}>
-            <input inputMode="numeric" value={devolver} onChange={(e) => setDevolver(e.target.value.replace(/\D/g, ""))} />
+            <CampoMonto valor={devolver} onCambio={setDevolver} />
           </Field>
         )}
         <Field label="PIN del dueño">

@@ -4,7 +4,8 @@
 import { Minus, Plus } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { totalConteo, type ConteoEntrada } from "../../db/caja";
-import { leerMontoEntero } from "../../lib/texto";
+import { conMiles, leerMontoEntero } from "../../lib/texto";
+import CampoMonto from "../../ui/CampoMonto";
 import { monto } from "../../lib/tickets";
 
 export default function ConteoDinero(p: { denominaciones: number[]; valor: ConteoEntrada; onCambio(c: ConteoEntrada): void; etiquetaTotal?: string }) {
@@ -30,8 +31,7 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
           <input
             inputMode="numeric"
             aria-label={`Cantidad de ${monto(d)}`}
-            value={n ? String(n) : ""}
-            placeholder="0"
+            value={String(n)}
             onChange={(e) => poner(d, Number(e.target.value.replace(/\D/g, "")))}
             onFocus={(e) => e.target.select()}
           />
@@ -58,14 +58,11 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
       {porTotal ? (
         <label className="campo conteo-directo">
           <span className="campo-etiqueta">{p.etiquetaTotal ?? "Total contado"}</span>
-          <input
+          <CampoMonto
             ref={totalRef}
-            className="precio big"
-            inputMode="numeric"
-            placeholder="¢0"
-            value={p.valor.total ? String(p.valor.total) : ""}
-            onChange={(e) => p.onCambio({ cantidades: {}, total: leerMontoEntero(e.target.value) ?? 0 })}
-            onFocus={(e) => e.target.select()}
+            grande
+            valor={conMiles(String(p.valor.total ?? 0))}
+            onCambio={(t) => p.onCambio({ cantidades: {}, total: leerMontoEntero(t) ?? 0 })}
           />
         </label>
       ) : (

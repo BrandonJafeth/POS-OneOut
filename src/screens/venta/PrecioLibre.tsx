@@ -4,6 +4,7 @@ import { leerMontoEntero } from "../../lib/texto";
 import { ulid } from "../../lib/ulid";
 import type { Departamento, LineaEspera } from "../../tipos";
 import Button from "../../ui/Button";
+import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
 
 /** Venta simple (precio libre): monto + departamento con un toque, descripción opcional. */
@@ -37,8 +38,8 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
           });
         }}
       >
-        <Field label="Monto (¢)" error={errores.monto}>
-          <input className="big" autoFocus inputMode="numeric" style={{ fontSize: 28, fontWeight: 650 }} value={monto} onChange={(e) => setMonto(e.target.value)} />
+        <Field label="Monto" error={errores.monto}>
+          <CampoMonto grande autoFocus valor={monto} onCambio={setMonto} />
         </Field>
         <div className="campo">
           <span id="depto-libre">Departamento</span>
@@ -59,8 +60,8 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
           </div>
           {errores.depto && <span className="campo-error">{errores.depto}</span>}
         </div>
-        <Field label="Descripción (opcional)">
-          <input value={descripcion} placeholder={d?.nombre ?? ""} onChange={(e) => setDescripcion(e.target.value)} />
+        <Field label="Descripción (opcional)" ayuda={d ? `Si la deja vacía, en el tiquete sale «${d.nombre}».` : undefined}>
+          <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
         </Field>
         <Button type="submit" variante="primario" tamano="lg" atajo="Enter">
           Agregar

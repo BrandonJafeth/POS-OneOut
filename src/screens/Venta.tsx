@@ -13,7 +13,7 @@ import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { buscarProductos, marcarFavorito, ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
 import { autorizarDescuento, cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
-import { leerMontoEntero } from "../lib/texto";
+import { conMiles, leerMontoEntero } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
@@ -22,6 +22,7 @@ import { imprimirVenta } from "../lib/venta/imprimir";
 import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, ProductoLista, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
+import CampoMonto from "../ui/CampoMonto";
 import { useConfirmar } from "../ui/Confirmar";
 import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
@@ -78,6 +79,7 @@ export default function Venta() {
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
   const buscador = useRef<HTMLInputElement>(null);
+  const grilla = useRef<HTMLDivElement>(null);
 
   const activa = esperas.find((e) => e.id === activaId) ?? null;
   const estado = activa?.estado ?? estadoVacio();
@@ -203,7 +205,7 @@ export default function Venta() {
       if (n !== consulta.current) return;
       setProductos(mas ? [...productos, ...r.filas] : r.filas);
       setTotalCatalogo(r.total);
-      if (!mas) setSel(0);
+      if (!mas) setSel(0), grilla.current?.scrollTo({ top: 0 });
     } catch (e) {
       setError(textoError(e));
     } finally {
@@ -216,6 +218,30 @@ export default function Venta() {
     // Solo al cambiar lo buscado, el filtro o el orden (no al agregar páginas).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [texto, filtro, orden]);
+  // Scroll continuo: cuando el final de la grilla se acerca a la vista, se trae la siguiente tanda.
+  const cargarMas = useRef(() => {});
+  cargarMas.current = () => {
+    if (!cargando && productos.length < totalCatalogo) void cargarCatalogo(true);
+  };
+  // Callback ref: la grilla no existe mientras la caja está cerrada; se observa cuando aparece.
+  const observador = useRef<IntersectionObserver | null>(null);
+  const fin = useRef<HTMLDivElement | null>(null);
+  const finGrilla = useCallback((el: HTMLDivElement | null) => {
+    observador.current?.disconnect();
+    fin.current = el;
+    if (!el) return;
+    observador.current = new IntersectionObserver((e) => e[0]?.isIntersecting && cargarMas.current(), {
+      root: el.parentElement,
+      rootMargin: "0px 0px 600px 0px",
+    });
+    observador.current.observe(el);
+  }, []);
+  // Si después de una tanda el final sigue a la vista, volver a observar hace que avise otra vez.
+  useEffect(() => {
+    if (!fin.current || !observador.current || cargando) return;
+    observador.current.unobserve(fin.current);
+    observador.current.observe(fin.current);
+  }, [productos.length, cargando]);
   const cambiarOrden = (o: OrdenProductos) => {
     setOrden(o);
     try {
@@ -452,7 +478,7 @@ export default function Venta() {
               ? "Cargando…"
               : totalCatalogo === 1
                 ? "1 producto"
-                : `${totalCatalogo.toLocaleString("es-CR")} productos${productos.length < totalCatalogo ? ` · se ven ${productos.length}` : ""}`}
+                : `${totalCatalogo.toLocaleString("es-CR")} productos`}
           </span>
           <label className="catalogo-orden">
             <span>Ordenar</span>
@@ -469,7 +495,7 @@ export default function Venta() {
         {aviso && <Alert tono="aviso">{aviso}</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
 
-        <div className="grilla" aria-busy={cargando}>
+        <div className="grilla" ref={grilla} aria-busy={cargando}>
           {!buscando && (
             <button className="tile tile-libre" onClick={() => setDialogo("libre")} title="Atajo: F4">
               <Banknote size={30} aria-hidden strokeWidth={1.75} />
@@ -503,12 +529,10 @@ export default function Venta() {
               )}
             </div>
           ))}
-          {productos.length < totalCatalogo && (
-            <button className="tile-mas" onClick={() => void cargarCatalogo(true)} disabled={cargando}>
-              <Plus size={20} aria-hidden />
-              {cargando ? "Cargando…" : `Ver ${Math.min(POR_PAGINA, totalCatalogo - productos.length)} más (quedan ${(totalCatalogo - productos.length).toLocaleString("es-CR")})`}
-            </button>
-          )}
+          {/* Marca del final: al verse, carga la siguiente tanda (scroll continuo, sin páginas). */}
+          <div ref={finGrilla} className={productos.length < totalCatalogo ? "grilla-fin" : "grilla-fin oculto"} aria-hidden>
+            {productos.length < totalCatalogo && "Cargando más productos…"}
+          </div>
           {!cargando && productos.length === 0 && (
             <p className="grilla-aviso">
               {buscando
@@ -703,10 +727,10 @@ function LineaTiquete(p: {
 }) {
   const l = p.linea;
   const [modo, setModo] = useState<"¢" | "%">("¢");
-  const [desc, setDesc] = useState(l.descuento ? String(l.descuento) : "");
+  const [desc, setDesc] = useState(conMiles(String(l.descuento)));
   useEffect(() => {
     setModo("¢");
-    setDesc(l.descuento ? String(l.descuento) : "");
+    setDesc(conMiles(String(l.descuento)));
   }, [p.abierta]);
 
   const aplicarDescuento = () => {
@@ -756,23 +780,18 @@ function LineaTiquete(p: {
             Descuento
             <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
               <span className="segmento" role="group" aria-label="Tipo de descuento">
-                <button aria-pressed={modo === "¢"} onClick={() => setModo("¢")}>
+                <button type="button" aria-pressed={modo === "¢"} onClick={() => (setModo("¢"), setDesc("0"))}>
                   ¢
                 </button>
-                <button aria-pressed={modo === "%"} onClick={() => setModo("%")}>
+                <button type="button" aria-pressed={modo === "%"} onClick={() => (setModo("%"), setDesc("0"))}>
                   %
                 </button>
               </span>
-              <input
-                inputMode="decimal"
-                value={desc}
-                autoFocus
-                placeholder="0"
-                onFocus={(e) => e.currentTarget.select()}
-                onChange={(e) => setDesc(e.target.value)}
-                onBlur={aplicarDescuento}
-                onKeyDown={(e) => e.key === "Enter" && aplicarDescuento()}
-              />
+              {modo === "¢" ? (
+                <CampoMonto autoFocus valor={desc} onCambio={setDesc} onBlur={aplicarDescuento} onKeyDown={(e) => e.key === "Enter" && aplicarDescuento()} />
+              ) : (
+                <CampoPorcentaje autoFocus valor={desc} onCambio={setDesc} onBlur={aplicarDescuento} onKeyDown={(e) => e.key === "Enter" && aplicarDescuento()} />
+              )}
             </span>
           </label>
           <span style={{ flex: 1 }} />
@@ -785,6 +804,24 @@ function LineaTiquete(p: {
         </div>
       )}
     </li>
+  );
+}
+
+/** Porcentaje 0–100 con % fijo; igual que CampoMonto: valor real, seleccionado al tocarlo. */
+function CampoPorcentaje({ valor, onCambio, ...rest }: { valor: string; onCambio(t: string): void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  return (
+    <span className="monto-campo porcentaje">
+      <input
+        className="precio"
+        inputMode="decimal"
+        autoComplete="off"
+        value={valor}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => onCambio(e.target.value.replace(/[^\d.,]/g, ""))}
+        {...rest}
+      />
+      <span aria-hidden>%</span>
+    </span>
   );
 }
 
@@ -809,7 +846,7 @@ function CampoNumero(p: { valor: string; etiqueta: string; onListo(v: string): v
 
 function DescuentoTotal(p: { subtotal: number; actual: number; tope: number; onAplicar(d: number): void; onCerrar(): void }) {
   const [modo, setModo] = useState<"¢" | "%">("¢");
-  const [texto, setTexto] = useState(p.actual ? String(p.actual) : "");
+  const [texto, setTexto] = useState(conMiles(String(p.actual)));
   const [error, setError] = useState("");
   const vista = leerDescuento(texto, p.subtotal, modo);
   return (
@@ -824,14 +861,18 @@ function DescuentoTotal(p: { subtotal: number; actual: number; tope: number; onA
         <Field label="Monto" ayuda={modo === "%" && vista !== null ? `= ${monto(vista)} de ${monto(p.subtotal)}` : `Subtotal ${monto(p.subtotal)} · máximo sin autorización ${p.tope} %`} error={error}>
           <span className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
             <span className="segmento" role="group" aria-label="Tipo de descuento">
-              <button type="button" aria-pressed={modo === "¢"} onClick={() => setModo("¢")}>
+              <button type="button" aria-pressed={modo === "¢"} onClick={() => (setModo("¢"), setTexto("0"), setError(""))}>
                 ¢
               </button>
-              <button type="button" aria-pressed={modo === "%"} onClick={() => setModo("%")}>
+              <button type="button" aria-pressed={modo === "%"} onClick={() => (setModo("%"), setTexto("0"), setError(""))}>
                 %
               </button>
             </span>
-            <input autoFocus className="big" inputMode="decimal" style={{ flex: 1 }} value={texto} onChange={(e) => (setTexto(e.target.value), setError(""))} />
+            {modo === "¢" ? (
+              <CampoMonto autoFocus valor={texto} onCambio={(t) => (setTexto(t), setError(""))} />
+            ) : (
+              <CampoPorcentaje autoFocus valor={texto} onCambio={(t) => (setTexto(t), setError(""))} />
+            )}
           </span>
         </Field>
         <div className="fila-botones">

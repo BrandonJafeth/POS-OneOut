@@ -11,6 +11,7 @@ import { monto } from "../../lib/tickets";
 import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
 import Button from "../../ui/Button";
+import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
 
 const ICONO_FORMA: Record<TipoFormaPago, LucideIcon> = {
@@ -156,17 +157,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                       : "Escriba otro número para cambiarlo."
                 }
               >
-                <span className="monto-campo">
-                  <span aria-hidden>¢</span>
-                  <input
-                    ref={primerMonto}
-                    className="precio"
-                    inputMode="numeric"
-                    value={filas[0].texto}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => set(filas[0].clave, { texto: conMiles(e.target.value) })}
-                  />
-                </span>
+                <CampoMonto ref={primerMonto} valor={filas[0].texto} onCambio={(texto) => set(filas[0].clave, { texto })} />
               </Field>
               <div className="cobro-extras">{extras(filas[0])}</div>
             </div>
@@ -194,17 +185,11 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                   label={forma(f.formaPagoId)?.daVuelto ? "Recibido" : "Monto"}
                   ayuda={f === filaAuto ? `Vacío: cubre lo que falta (${monto(restoEfectivo)})` : !f.texto ? "Escriba el monto." : undefined}
                 >
-                  <span className="monto-campo">
-                    <span aria-hidden>¢</span>
-                    <input
-                      ref={i === 0 ? primerMonto : i === filas.length - 1 ? nuevaFila : undefined}
-                      className="precio"
-                      inputMode="numeric"
-                      value={f.texto}
-                      onFocus={(e) => e.target.select()}
-                      onChange={(e) => set(f.clave, { texto: conMiles(e.target.value) })}
-                    />
-                  </span>
+                  <CampoMonto
+                    ref={i === 0 ? primerMonto : i === filas.length - 1 ? nuevaFila : undefined}
+                    valor={f.texto}
+                    onCambio={(texto) => set(f.clave, { texto })}
+                  />
                 </Field>
                 <div className="cobro-extras">{extras(f)}</div>
                 <Button variante="fantasma" icono={Trash2} aria-label="Quitar este pago" onClick={() => setFilas(filas.filter((x) => x.clave !== f.clave))} />

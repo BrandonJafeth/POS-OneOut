@@ -24,6 +24,7 @@ import type { Codigo, Departamento, ProductoConCodigos, TipoCodigo } from "../..
 import Etiqueta from "./Etiqueta";
 import Button from "../../ui/Button";
 import { useConfirmar } from "../../ui/Confirmar";
+import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
 
 interface Props {
@@ -197,14 +198,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             </select>
           </label>
           <label className="campo">
-            Precio (¢)
-            <input
-              className="precio"
-              inputMode="numeric"
-              value={precio}
-              onChange={(e) => setPrecio(e.target.value)}
-              onBlur={() => precioNum !== null && setPrecio(colones(precioNum))}
-            />
+            Precio
+            <CampoMonto valor={precio} onCambio={setPrecio} />
           </label>
         </div>
         <label>

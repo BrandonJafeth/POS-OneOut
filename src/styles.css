@@ -2590,21 +2590,45 @@ button.enlace {
   font-size: 15px;
 }
 
-.tile-mas {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  gap: var(--e2);
-  align-items: center;
-  justify-content: center;
+
+.monto-campo.grande input.precio {
+  width: 220px;
   min-height: 56px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radio-g);
-  background: var(--card);
-  color: var(--text);
-  font-weight: 600;
+  font-size: 28px;
+  padding-left: calc(var(--e3) + 22px);
 }
 
-.tile-mas:hover:not(:disabled) {
-  background: var(--card2);
-  border-style: solid;
+.monto-campo.grande > span {
+  font-size: 22px;
+}
+
+/* Texto de ejemplo: en cursiva y sin peso, para que nunca se confunda con un valor escrito. */
+input::placeholder,
+textarea::placeholder {
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Final de la grilla: dispara la carga de la siguiente tanda. */
+.grilla > .grilla-fin {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.grilla > .grilla-fin.oculto {
+  display: none;
+}
+
+/* Porcentaje: el % va a la derecha. */
+.monto-campo.porcentaje > span {
+  left: auto;
+  right: var(--e3);
+}
+
+.monto-campo.porcentaje input.precio {
+  padding-left: var(--e3);
+  padding-right: calc(var(--e3) + 18px);
 }
