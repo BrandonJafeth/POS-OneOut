@@ -1,19 +1,11 @@
 // Documentos ESC/POS del POS real, armados con lib/escpos.ts y los ayudantes de lib/tickets.ts.
 // Igual que en el prototipo: se generan BYTES y la vista previa interpreta esos mismos bytes.
-import type { ConfigApp } from "../db/config";
+// El formato (columnas, code page, cortador) es el de la impresora asignada a cada documento
+// (db/impresoras.ts → ajustesPara). Rust vuelve a revisar los bytes antes de imprimir.
 import type { Negocio } from "../tipos";
 import { isValidEan13 } from "./ean13";
 import { EscPos } from "./escpos";
-import { COLS, lr, monto, SEP, type Doc, type TicketSettings, wrap } from "./tickets";
-
-export function ajustesImpresora(c: ConfigApp): TicketSettings {
-  return {
-    codePage: c.impresora_code_page,
-    sinModoChino: c.impresora_sin_modo_chino,
-    barras: c.impresora_barras === "A" ? "A" : "B",
-    cortador: c.impresora_cortador,
-  };
-}
+import { columnas, lr, monto, sep, type Doc, type TicketSettings, wrap } from "./tickets";
 
 function nuevo(s: TicketSettings) {
   return new EscPos(s.codePage, { sinModoChino: s.sinModoChino });
@@ -25,17 +17,17 @@ function cerrar(p: EscPos, s: TicketSettings, lineas = 4): Doc {
   return { bytes: p.bytes(), missing: [...p.missing] };
 }
 
-function lineasLibres(texto: string): string[] {
-  return texto.split(/\r?\n/).flatMap((l) => (l.trim() ? wrap(l.trim()) : []));
+function lineasLibres(texto: string, cols: number): string[] {
+  return texto.split(/\r?\n/).flatMap((l) => (l.trim() ? wrap(l.trim(), cols) : []));
 }
 
 /** Encabezado: logo (o nombre comercial si no hay logo) y datos del negocio, centrados. */
-export function escribirEncabezado(p: EscPos, n: Negocio): void {
+export function escribirEncabezado(p: EscPos, n: Negocio, cols = 32): void {
   p.align("center");
   if (n.logo) p.raster(n.logo.ancho, n.logo.alto, n.logo.bits);
   else if (n.nombreComercial.trim()) {
     p.bold(true).size(false, true);
-    wrap(n.nombreComercial.trim()).forEach((l) => p.line(l));
+    wrap(n.nombreComercial.trim(), cols).forEach((l) => p.line(l));
     p.size(false, false).bold(false);
   }
   const datos = [
@@ -46,27 +38,46 @@ export function escribirEncabezado(p: EscPos, n: Negocio): void {
     n.telefono && `Tel. ${n.telefono}`,
     n.correo,
   ].filter(Boolean) as string[];
-  for (const d of datos) wrap(d).forEach((l) => p.line(l));
-  lineasLibres(n.encabezadoExtra).forEach((l) => p.line(l));
+  for (const d of datos) wrap(d, cols).forEach((l) => p.line(l));
+  lineasLibres(n.encabezadoExtra, cols).forEach((l) => p.line(l));
   p.align("left");
 }
 
-export function escribirPie(p: EscPos, n: Negocio): void {
+export function escribirPie(p: EscPos, n: Negocio, cols = 32): void {
   p.align("center");
-  lineasLibres(n.pieTiquete).forEach((l) => p.line(l));
+  lineasLibres(n.pieTiquete, cols).forEach((l) => p.line(l));
   p.align("left");
 }
 
 /** Muestra para "Datos del negocio": encabezado + una línea de ejemplo + pie. */
 export function muestraEncabezado(n: Negocio, s: TicketSettings): Doc {
   const p = nuevo(s);
-  escribirEncabezado(p, n);
-  p.line(SEP);
-  p.line(lr("Tiquete:", "67791"));
+  const c = columnas(s);
+  escribirEncabezado(p, n, c);
+  p.line(sep(c));
+  p.line(lr("Tiquete:", "67791", c));
   p.line("  ... productos ...");  // ASCII: "…" no existe en las tablas de la impresora
-  p.line(lr("TOTAL", monto(1500)));
-  p.line(SEP);
-  escribirPie(p, n);
+  p.line(lr("TOTAL", monto(1500), c));
+  p.line(sep(c));
+  escribirPie(p, n, c);
+  return cerrar(p, s);
+}
+
+/** Hoja de prueba de una impresora: ancho, tildes, ¢, código de barras y corte. */
+export function paginaPrueba(nombre: string, s: TicketSettings & { anchoMm?: number }): Doc {
+  const p = nuevo(s);
+  const c = columnas(s);
+  p.align("center").bold(true).line("PRUEBA DE IMPRESORA").bold(false);
+  wrap(nombre, c).forEach((l) => p.line(l));
+  p.line(`${s.anchoMm ?? 58} mm · ${c} columnas · code page ${s.codePage}`);
+  p.align("left").line(sep(c));
+  p.line("1234567890".repeat(Math.ceil(c / 10)).slice(0, c));
+  p.line(lr("Izquierda", "Derecha", c));
+  p.line("Tildes: áéíóú ñ Ñ ¿ ¡ ü");
+  p.line(lr("Monto", monto(1500), c));
+  p.align("center");
+  p.barcodeEan13("9789968000000", s.barras);
+  p.align("left").line(sep(c));
   return cerrar(p, s);
 }
 
@@ -76,7 +87,7 @@ export function etiquetaProducto(prod: { nombre: string; precio: number }, codig
   const p = nuevo(s);
   for (let i = 0; i < copias; i++) {
     p.align("center");
-    wrap(prod.nombre, COLS).slice(0, 2).forEach((l) => p.line(l));
+    wrap(prod.nombre, columnas(s)).slice(0, 2).forEach((l) => p.line(l));
     p.bold(true).size(true, true).line(monto(prod.precio)).size(false, false).bold(false);
     p.barcodeEan13(codigo, s.barras);
     p.align("left");
@@ -89,9 +100,9 @@ export function etiquetaProducto(prod: { nombre: string; precio: number }, codig
  * Línea corta del aviso de privacidad para el tiquete del apartado (config aviso_privacidad_en_tiquete).
  * El tiquete de apartado se arma en la fase 2; queda lista para usarla ahí.
  */
-export function escribirAvisoCorto(p: EscPos, n: Negocio): void {
+export function escribirAvisoCorto(p: EscPos, n: Negocio, cols = 32): void {
   const contacto = n.telefono ? ` Tel. ${n.telefono}` : "";
   p.align("center");
-  wrap(`Sus datos se usan solo para este apartado. Para verlos, corregirlos o eliminarlos, consúltenos.${contacto}`).forEach((l) => p.line(l));
+  wrap(`Sus datos se usan solo para este apartado. Para verlos, corregirlos o eliminarlos, consúltenos.${contacto}`, cols).forEach((l) => p.line(l));
   p.align("left");
 }

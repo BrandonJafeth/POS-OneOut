@@ -32,6 +32,8 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (5, "caja_seguridad", include_str!("../../src/db/migraciones/0005_caja_seguridad.sql")),
     (6, "sin_50000", include_str!("../../src/db/migraciones/0006_sin_50000.sql")),
     (7, "importacion_web", include_str!("../../src/db/migraciones/0007_importacion_web.sql")),
+    (8, "impresoras", include_str!("../../src/db/migraciones/0008_impresoras.sql")),
+    (9, "turno_compartido_cierre", include_str!("../../src/db/migraciones/0009_turno_compartido_cierre.sql")),
 ];
 
 #[derive(Debug)]
@@ -131,8 +133,12 @@ impl Bd {
     }
 
     /// Una consulta de solo lectura pedida por la pantalla (ver validar_lectura).
-    pub async fn leer(&self, sql: &str, params: &[Value]) -> Res<Vec<Map<String, Value>>> {
+    pub async fn leer(&self, actor: &Actor, sql: &str, params: &[Value]) -> Res<Vec<Map<String, Value>>> {
         validar_lectura(sql)?;
+        // El cajero no recibe ventas por aquí (sumaría los totales del turno abierto): solo por comandos.
+        if actor.rol == crate::permisos::Rol::Cajero {
+            validar_lectura_cajero(sql)?;
+        }
         let mut q = sqlx::query(sql);
         for p in params {
             q = bind(q, p);
@@ -268,10 +274,22 @@ pub fn validar_lectura(sql: &str) -> Res<()> {
         // ventas_espera guarda el cliente de la venta (nombre, teléfono); cuentas/abonos, notas del apartado.
         // Caja y pagos: solo por comandos tipados (cierre ciego, turnos ajenos, últimos 4 dígitos).
         "caja_turnos", "caja_movimientos", "caja_ajustes", "cierres_dia", "venta_pagos", "venta_pago_correcciones", "nombre_tiquete",
+        // Cortes, gaveta e impresoras: solo por comandos.
+        "caja_cortes", "gaveta_aperturas", "impresoras", "impresora_destinos",
         "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
         "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
     ];
     if let Some(p) = palabras.iter().find(|w| PROHIBIDAS.contains(&w.as_str())) {
+        return Err(format!("{}Lectura rechazada: «{p}» no está permitido desde la pantalla", crate::util::TECNICO));
+    }
+    Ok(())
+}
+
+/// Además, para el cajero: nada de ventas ni sus líneas (con eso sumaría lo vendido en el turno
+/// abierto). Sus tiquetes le llegan por venta_listar_dia / venta_obtener, que ya filtran.
+pub fn validar_lectura_cajero(sql: &str) -> Res<()> {
+    let prohibidas = ["ventas", "venta_lineas"];
+    if let Some(p) = sql.to_lowercase().split(|c: char| !(c.is_alphanumeric() || c == '_')).find(|w| prohibidas.contains(w)) {
         return Err(format!("{}Lectura rechazada: «{p}» no está permitido desde la pantalla", crate::util::TECNICO));
     }
     Ok(())
@@ -335,12 +353,20 @@ mod tests {
             "SELECT datos FROM ventas_espera",
             "SELECT monto_esperado, diferencia FROM caja_turnos",
             "SELECT ultimos4 FROM venta_pagos",
+            "SELECT destino FROM impresoras",
+            "SELECT * FROM gaveta_aperturas",
+            "SELECT total FROM caja_cortes",
             "PRAGMA key = 'x'",
             "ATTACH DATABASE 'x' AS y",
             "UPDATE config SET valor = '100' WHERE clave = 'descuento_max_pct'",
             "SELECT * FROM sqlite_master",
         ] {
             assert!(validar_lectura(malo).is_err(), "debió rechazar: {malo}");
+        }
+        // Ventas: el cajero no; el dueño sí (reportes, sincronización futura sin datos personales).
+        for sql in ["SELECT SUM(total) FROM ventas WHERE turno_id = 'x'", "SELECT SUM(l.total) FROM venta_lineas l", "WITH x AS (SELECT total FROM VENTAS) SELECT * FROM x"] {
+            assert!(validar_lectura(sql).is_ok());
+            assert!(validar_lectura_cajero(sql).is_err(), "{sql}");
         }
     }
 

@@ -27,6 +27,8 @@ export interface Departamento {
   nombre: string;
   orden: number;
   activo: boolean;
+  /** Color de la píldora en la venta ("#rrggbb"); null = el de la paleta según el orden. */
+  color: string | null;
 }
 
 export type TipoCodigo = "barras" | "interno" | "manual";
@@ -215,6 +217,8 @@ export interface FormaPago {
 export interface Banco {
   id: string;
   nombre: string;
+  /** Lo que sale en el tiquete ("BCR"). Vacío = el nombre. */
+  abreviatura: string;
   orden: number;
   activo: boolean;
 }
@@ -250,7 +254,9 @@ export interface EstadoEspera {
 export interface VentaEspera {
   id: string;
   numero: number;
+  /** Quién empezó la venta (cualquiera del turno la retoma). */
   usuarioId: string;
+  usuario: string;
   estado: EstadoEspera;
   actualizadoEn: string;
 }
@@ -305,7 +311,13 @@ export interface Venta {
   fecha: string;
   dia: string;
   usuarioId: string;
+  /** Quién la cobró. */
   cajero: string;
+  /** Quién empezó la venta en espera (si fue otra persona). */
+  esperaCreadaPor: string | null;
+  anuladaPor: string | null;
+  /** Ya salió el tiquete original (los siguientes son COPIA). */
+  impreso: boolean;
   clienteId: string | null;
   cliente: string | null;
   nombreTiquete: string | null;

@@ -5,7 +5,21 @@ use crate::permisos::{puede, sin_permiso};
 use crate::sesion::Actor;
 use crate::util::{ahora_iso, e, Res};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
+
+/// Lo mismo que valor(), pero con la conexión de una transacción ya abierta.
+pub async fn valor_con(c: &mut SqliteConnection, clave: &str) -> Option<Value> {
+    let s: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE clave = ?").bind(clave).fetch_optional(c).await.ok().flatten();
+    s.and_then(|v| serde_json::from_str(&v).ok())
+}
+
+pub async fn booleano_con(c: &mut SqliteConnection, clave: &str, defecto: bool) -> bool {
+    valor_con(c, clave).await.and_then(|v| v.as_bool()).unwrap_or(defecto)
+}
+
+pub async fn entero_con(c: &mut SqliteConnection, clave: &str, defecto: i64) -> i64 {
+    valor_con(c, clave).await.and_then(|v| v.as_i64()).unwrap_or(defecto)
+}
 
 pub async fn valor(pool: &SqlitePool, clave: &str) -> Option<Value> {
     let s: Option<String> = sqlx::query_scalar("SELECT valor FROM config WHERE clave = ?").bind(clave).fetch_optional(pool).await.ok().flatten();
@@ -76,6 +90,15 @@ mod tests {
         guardar(&bd.pool, &dueno, "caja_umbral_diferencia", &json!(2000)).await.unwrap();
         assert!(guardar(&bd.pool, &dueno, "pin_min_dueno", &json!(4)).await.is_err());
         guardar(&bd.pool, &tec, "escaner_debounce_ms", &json!(250)).await.unwrap();
+        // Turno compartido, casillas del Z y "no venta": dueño y técnico, nunca el cajero.
+        for clave in ["caja_turno_compartido", "caja_z_detalle_completo", "caja_z_por_departamento", "caja_no_venta_umbral", "caja_quitar_linea_bitacora"] {
+            assert!(guardar(&bd.pool, &cajero, clave, &json!(false)).await.unwrap_err().contains("permiso"), "{clave}");
+            guardar(&bd.pool, &dueno, clave, &json!(true)).await.unwrap();
+            guardar(&bd.pool, &tec, clave, &json!(false)).await.unwrap();
+        }
+        // Valores que siembra la migración 9.
+        assert!(!booleano(&bd.pool, "caja_z_por_departamento", true).await);
+        assert_eq!(valor(&bd.pool, "caja_no_venta_motivos").await, Some(json!(["Cambio de billetes", "Devolución", "Otro"])));
         assert_eq!(entero(&bd.pool, "caja_umbral_diferencia", 0).await, 2000);
     }
 }

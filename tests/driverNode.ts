@@ -19,7 +19,11 @@ const REGISTRO = JSON.parse(readFileSync(fileURLToPath(new URL("../src/db/senten
   { sql: string; permiso: Permiso; devuelve?: boolean }
 >;
 
+// Misma lista que bd.rs (caja, pagos, gaveta e impresoras solo salen por comandos; ventas, además,
+// nunca para el cajero: validar_lectura_cajero).
 const PROHIBIDAS = [
+  "caja_turnos", "caja_movimientos", "caja_ajustes", "cierres_dia", "venta_pagos", "venta_pago_correcciones", "nombre_tiquete",
+  "caja_cortes", "gaveta_aperturas", "impresoras", "impresora_destinos",
   "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
   "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
 ];
@@ -63,6 +67,7 @@ export function baseDePrueba(opc: { rol?: Rol; usuarioId?: string } = {}): { dri
   const driver: Driver = {
     select: async (sql, params = []) => {
       validarLectura(sql);
+      if (rol === "cajero" && /\b(ventas|venta_lineas)\b/i.test(sql)) throw new Error("Lectura rechazada: ventas no está permitido para el cajero");
       return sqlite.prepare(sql).all(...params.map(p)) as Record<string, unknown>[];
     },
     lote: async (ops) => {

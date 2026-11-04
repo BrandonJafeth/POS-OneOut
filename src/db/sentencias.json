@@ -45,6 +45,10 @@
     "permiso": "departamentos",
     "sql": "UPDATE departamentos SET nombre = ?, orden = ?, activo = ?, actualizado_en = ? WHERE id = ?"
   },
+  "departamento.color": {
+    "permiso": "departamentos",
+    "sql": "UPDATE departamentos SET color = ?, actualizado_en = ? WHERE id = ?"
+  },
   "departamento.cambiar_codigo": {
     "permiso": "departamentos.estructura",
     "sql": "UPDATE departamentos SET codigo = ?, actualizado_en = ? WHERE id = ?"
@@ -59,6 +63,6 @@
   },
   "banco.guardar": {
     "permiso": "config.tecnica",
-    "sql": "INSERT INTO bancos (id, nombre, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en"
+    "sql": "INSERT INTO bancos (id, nombre, abreviatura, orden, activo, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, abreviatura = excluded.abreviatura, orden = excluded.orden, activo = excluded.activo, actualizado_en = excluded.actualizado_en"
   }
 }

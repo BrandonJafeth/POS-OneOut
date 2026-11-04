@@ -1,11 +1,34 @@
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
-import { crearDepartamento, editarDepartamento, listarDepartamentos, moverDepartamento } from "../db/departamentos";
+import { colorDepartamento, crearDepartamento, editarDepartamento, listarDepartamentos, moverDepartamento } from "../db/departamentos";
 import type { Departamento } from "../tipos";
+import { colorDe, PALETA_DEPARTAMENTOS, textoSobre } from "../ui/departamentos";
 import { useToast } from "../ui/Toast";
 
-/** Lista editable. El dueño cambia nombre, orden y activo; el técnico además crea y cambia códigos. */
+/** Color de la píldora: los 12 de la paleta o uno propio. El texto (blanco o negro) se elige solo. */
+function ColorDepto(p: { d: Departamento; posicion: number; onCambio(c: string | null): void }) {
+  const actual = colorDe(p.d, p.posicion);
+  const dePaleta = PALETA_DEPARTAMENTOS.find((x) => x.color === actual);
+  return (
+    <div className="depto-color">
+      <span className="depto-muestra" style={{ background: actual, color: textoSobre(actual) }}>
+        {p.d.nombre}
+      </span>
+      <select aria-label={`Color de ${p.d.nombre}`} value={dePaleta ? actual : "propio"} onChange={(e) => e.target.value !== "propio" && p.onCambio(e.target.value)}>
+        {PALETA_DEPARTAMENTOS.map((x) => (
+          <option key={x.color} value={x.color}>
+            {x.nombre}
+          </option>
+        ))}
+        <option value="propio">Otro color…</option>
+      </select>
+      <input type="color" aria-label={`Elegir otro color para ${p.d.nombre}`} value={actual} onChange={(e) => p.onCambio(e.target.value)} />
+    </div>
+  );
+}
+
+/** Lista editable. El dueño cambia nombre, orden, color y activo; el técnico además crea y cambia códigos. */
 export default function Departamentos({ embebido = false }: { embebido?: boolean }) {
   const { actor, puede } = useSesion();
   const estructura = puede("departamentos.estructura");
@@ -43,6 +66,7 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
             <tr>
               <th>Código</th>
               <th>Nombre</th>
+              <th>Color en la venta</th>
               <th>Estado</th>
               <th />
             </tr>
@@ -59,6 +83,9 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
                   </td>
                   <td>
                     <input aria-label={`Nombre de ${d.nombre}`} value={e.nombre} onChange={(x) => set({ nombre: x.target.value })} />
+                  </td>
+                  <td>
+                    <ColorDepto d={d} posicion={i} onCambio={(c) => void hacer(() => colorDepartamento(actor, d.id, c), "Color guardado.")} />
                   </td>
                   <td>{d.activo ? "Activo" : "Inactivo"}</td>
                   <td className="acciones">

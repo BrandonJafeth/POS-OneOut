@@ -44,6 +44,7 @@ const DUENO: &[&str] = &[
     "clientes",
     "respaldo",
     "facturas",
+    "impresoras",
 ];
 // El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
 const TECNICO: &[&str] = &[
@@ -56,6 +57,7 @@ const TECNICO: &[&str] = &[
     "negocio.legal",
     "config.tecnica",
     "reportes",
+    "impresoras",
 ];
 
 pub fn puede(rol: Rol, permiso: &str) -> bool {

@@ -2,13 +2,13 @@ import { isTauri } from "@tauri-apps/api/core";
 import {
   FileText,
   Landmark,
-  LogOut,
   Moon,
   Package,
   ReceiptText,
   Settings2,
   ShoppingCart,
   Sun,
+  UserRoundCog,
   Users,
   Wrench,
   type LucideIcon,
@@ -61,7 +61,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas"] },
 ];
 const AVANZADO: Seccion[] = [
-  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios", "negocio", "departamentos", "respaldo"] },
+  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios", "negocio", "departamentos", "respaldo", "impresoras"] },
   { id: "config", texto: "Técnico", icono: Wrench, permisos: ["config.tecnica"] },
 ];
 
@@ -125,7 +125,11 @@ export default function App() {
     aplicarTema(c.tema, c.color_acento);
     setConfig(c);
   }, []);
-  const salir = useCallback(() => {
+  // Cambio de usuario: se cierra la sesión en Rust (el turno de caja sigue abierto) y se vuelve a
+  // la lista de usuarios. Al entrar el siguiente, toda la pantalla se arma de cero según su rol:
+  // no queda nada a la vista del anterior (ni totales, ni avisos, ni diálogos).
+  const salir = useCallback((aviso = "") => {
+    setAvisoLogin(aviso);
     void cerrarSesion()
       .catch(() => undefined)
       .then(() => cargarSistema())
@@ -172,16 +176,18 @@ export default function App() {
         <Login nombreNegocio={nombreNegocio} onEntrar={(u, m) => entrar(u, m).catch((e) => setFase({ f: "error", mensaje: textoError(e) }))} />
       </>
     );
-  else contenido = <Dentro usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
+  else contenido = <Dentro key={fase.usuario.id} usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
 
+  // La clave por usuario desmonta avisos y confirmaciones del usuario anterior al cambiar de usuario.
+  const clave = fase.f === "dentro" ? fase.usuario.id : "fuera";
   return (
-    <ConfirmarProvider>
+    <ConfirmarProvider key={clave}>
       <ToastProvider>{contenido}</ToastProvider>
     </ConfirmarProvider>
   );
 }
 
-function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(): void }) {
+function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(aviso?: string): void }) {
   const usaCaja = puede(p.usuario.rol, "caja");
   const [caja, setCaja] = useState<EstadoCaja | null>(null);
   const recargarCaja = useCallback(async () => {
@@ -216,7 +222,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
       }
     };
     const t = setInterval(() => {
-      if (Date.now() - ultimo.current > p.minutos * 60_000) p.salir();
+      if (Date.now() - ultimo.current > p.minutos * 60_000) p.salir("La sesión se cerró por inactividad.");
     }, 15_000);
     window.addEventListener("keydown", actividad, true);
     window.addEventListener("pointerdown", actividad, true);
@@ -272,15 +278,12 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
         <aside className="lateral" aria-label="Menú">
           <div className="lateral-marca">{p.nombreNegocio || "Punto de venta"}</div>
           {usaCaja && caja && (
-            <button
-              className={caja.turno && !caja.deOtroDia && (caja.turno.usuarioAperturaId === p.usuario.id || puede(p.usuario.rol, "caja.admin")) ? "caja-indicador abierta" : "caja-indicador"}
-              onClick={() => setPagina("caja")}
-            >
+            <button className={caja.turno && !caja.deOtroDia && caja.puedeUsar ? "caja-indicador abierta" : "caja-indicador"} onClick={() => setPagina("caja")}>
               <span className="punto" aria-hidden />
               {caja.turno
                 ? caja.deOtroDia
                   ? `Caja abierta desde el ${caja.turno.dia}`
-                  : caja.turno.usuarioAperturaId === p.usuario.id
+                  : caja.puedeUsar
                     ? `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
                     : `Caja de ${caja.turno.usuarioApertura.split(" ")[0]} · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
                 : "Caja cerrada"}
@@ -300,8 +303,13 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
             <Button icono={p.config.tema === "oscuro" ? Sun : Moon} className="nav-item" onClick={cambiarTema}>
               {p.config.tema === "oscuro" ? "Tema claro" : "Tema oscuro"}
             </Button>
-            <Button icono={LogOut} className="nav-item" onClick={p.salir}>
-              Salir
+            <Button
+              icono={UserRoundCog}
+              className="nav-item"
+              title="Entra otra persona con su PIN. La caja sigue abierta."
+              onClick={() => p.salir(caja?.turno ? "La caja sigue abierta. ¿Quién entra?" : "")}
+            >
+              Cambiar usuario
             </Button>
           </div>
         </aside>

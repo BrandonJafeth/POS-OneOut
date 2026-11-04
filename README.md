@@ -35,12 +35,28 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 - Ventas en espera: se guardan en SQLite en cada cambio (tabla `ventas_espera`).
 - Consecutivo: `prefijo de la caja + número`, tomado dentro de la transacción del cobro (`BEGIN IMMEDIATE`): sin saltos ni repetidos.
 - Total redondeado al múltiplo de `redondeo_total` (₡5 por defecto, al más cercano). Descuento por rol: `descuento_max_pct`; si se pasa, PIN de dueño.
-- Corrección de forma de pago: solo el día de la venta y antes de "Cerrar el día"; de/hacia efectivo pide PIN de dueño.
+- Pago dividido: el tiquete (y la COPIA, y el detalle en pantalla) trae una línea por pago con forma, banco (abreviatura, p. ej. BCR), referencia y monto; si hubo efectivo, el recibido y el vuelto.
+- Anular o cambiar la forma de pago de una venta cobrada: solo el dueño, con su PIN y motivo. El cajero puede quitar líneas antes de cobrar; desde `caja_quitar_linea_bitacora` colones queda en la bitácora.
 - El POS no emite facturas electrónicas: "Pendientes de factura" lista las que se deben hacer en el sistema externo.
+
+## Caja (turno, cierre Z, gaveta)
+
+- El turno es de la caja: con `caja_turno_compartido` (por defecto sí), cualquier cajero o dueño vende en el turno abierto; cada venta, pago, movimiento, corte y apertura de gaveta guarda quién la hizo. **Cambiar usuario** (menú lateral) cierra la sesión sin cerrar el turno y la pantalla se arma de cero según el rol del que entra.
+- Con el turno abierto, el cajero no recibe ningún total de ventas (Rust no se los manda: ni en Caja, ni en Mis turnos, ni en Ventas del día, ni por `bd_leer`). Su conteo de cierre es ciego y por billetes y monedas; al confirmarlo queda bloqueado (trigger) y recién ahí ve el Z completo. Solo el dueño reabre (PIN y motivo).
+- Cierre Z (`src/lib/caja/reporteZ.ts`): formas de pago, efectivo (esperado = fondo + contado + entradas − salidas − vueltos), descuentos, anulaciones, aperturas sin venta, cortes, ventas por usuario, por departamento, detalle de tarjeta/SINPE/transferencia, movimientos, conteo y firmas. Casillas al cerrar: detalle completo y un tiquete por departamento (valores por defecto en Administración → Caja y cierre). El reparto por departamento es exacto (`src-tauri/src/desglose.rs`); si algo no cuadra, no se imprime. PDF carta con logo para el dueño. Reimprimir = COPIA con PIN del dueño.
+- Corte (dueño): acumulado sin cerrar y, si quiere, retiro con PIN. Queda en la bitácora y en el Z.
+- Gaveta: solo con una venta en efectivo (una vez), una "No venta" con motivo o una orden del dueño con PIN. Ningún trabajo de impresión puede abrirla (lista blanca ESC/POS en `src-tauri/src/escpos.rs`).
+
+## Impresoras
+
+- Administración → Impresoras (dueño y técnico): varias impresoras (Windows, puerto serial o USB directo, elegidas de lo que detecta el sistema), 58/80 mm y columnas, code page, cortador y gaveta (una sola). Cada documento (tiquete, cierre y reportes, movimientos, etiquetas) va solo a la impresora asignada; "Imprimir prueba" por impresora.
+- Si una impresora no responde, se avisa en palabras simples y la venta queda guardada para reimprimir.
+- La migración 8 pasó la impresora única de `config` a la tabla `impresoras` con los cuatro documentos asignados.
 
 ## Interfaz
 
 - Componentes en `src/ui/`: `Button` (icono lucide + texto + atajo, ≥ 44 px), `Card`, `Badge`, `Alert`, `Modal` (foco atrapado, Esc), `EmptyState`, `Field` (etiqueta visible), `Confirmar`, `FilaClic` (filas con teclado).
+- Departamentos en la venta: píldoras de 44 px con el color de cada departamento (`src/ui/departamentos.ts`, paleta de 12; texto blanco o negro según el contraste). Se cambian en Administración → Departamentos.
 - Colores: `src/ui/tema.ts` (claro y oscuro). `tests/tema.test.ts` verifica contraste WCAG 2.1 AA de cada combinación: si se cambia un color y no cumple, la prueba falla.
 - Tema por equipo: clave `tema` en config (botón en el menú lateral).
 
@@ -53,7 +69,8 @@ src/lib/         lógica pura: ulid, csv, importar/, logo1bit, impresion, permis
 src/screens/     pantallas; hardware/ = prototipo
 src/tipos.ts     tipos compartidos
 tests/           pruebas vitest
-src-tauri/src/   lib.rs (comandos), db.rs (migraciones + sql_lote), pin.rs (Argon2id), printer.rs
+src-tauri/src/   lib.rs (comandos), bd.rs (migraciones + lote), pin.rs (Argon2id), printer.rs (spooler, serial, USB),
+                 impresoras.rs, escpos.rs (lista blanca), gaveta.rs, caja.rs, desglose.rs (reparto del Z), ventas.rs
 ```
 
 ---

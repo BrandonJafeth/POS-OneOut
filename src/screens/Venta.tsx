@@ -3,7 +3,7 @@
 // Atajos: F2 nueva venta en espera · F3 buscar · F4 venta simple (precio libre) · F7 cliente ·
 // F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · ↑↓ elegir.
 // "3*código" agrega 3 unidades.
-import { Banknote, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
+import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
@@ -18,7 +18,7 @@ import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
 import { bruto, calcularTotales, estadoVacio, importeLinea, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
-import { imprimirVenta } from "../lib/venta/imprimir";
+import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
 import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, ProductoLista, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
@@ -28,10 +28,10 @@ import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
-import { AbrirCaja } from "./caja/Dialogos";
-import { esMiTurno } from "../db/caja";
+import { AbrirCaja, NoVenta } from "./caja/Dialogos";
+import { colorDe, textoSobre } from "../ui/departamentos";
 
-type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | null;
+type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | null;
 const FAVORITOS = "★";
 const POR_PAGINA = 60;
 
@@ -75,7 +75,7 @@ export default function Venta() {
   const [lineaSel, setLineaSel] = useState<string | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [pendiente, setPendiente] = useState<EstadoEspera | null>(null); // cambio que espera PIN de dueño
-  const [cobrada, setCobrada] = useState<(ResultadoCobro & { errorImpresion?: string }) | null>(null);
+  const [cobrada, setCobrada] = useState<(ResultadoCobro & { errorImpresion?: string; errorGaveta?: string }) | null>(null);
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
   const buscador = useRef<HTMLInputElement>(null);
@@ -338,19 +338,28 @@ export default function Venta() {
   };
 
   // ── Cobro
+  // La venta ya quedó guardada al cobrar: si la impresora o la gaveta fallan, se avisa y se sigue.
   async function cobrar(pagos: PagoEntrada[]) {
     if (!activa) return;
     const r = await cobrarVenta(actor, activa.id, estado, pagos);
     let errorImpresion: string | undefined;
+    let errorGaveta: string | undefined;
     if (config.imprime_tiquete) {
       try {
-        await imprimirVenta(actor, r.ventaId, config, { abrirGaveta: r.hayEfectivo && config.abrir_gaveta_efectivo });
+        await imprimirVenta(r.ventaId, config);
       } catch (e) {
         errorImpresion = textoError(e);
       }
     }
+    if (r.abrirGaveta) {
+      try {
+        await abrirGavetaVenta(r.ventaId);
+      } catch (e) {
+        errorGaveta = textoError(e);
+      }
+    }
     setDialogo(null);
-    setCobrada({ ...r, errorImpresion });
+    setCobrada({ ...r, errorImpresion, errorGaveta });
     // La venta cobrada sale de las pestañas; las demás quedan como estaban.
     const resto = esperasRef.current.filter((e) => e.id !== activa.id);
     if (!resto.length) resto.push(await crearEspera(actor, estadoVacio()));
@@ -361,10 +370,20 @@ export default function Venta() {
   async function reimprimir() {
     if (!cobrada) return;
     try {
-      await imprimirVenta(actor, cobrada.ventaId, config, { abrirGaveta: cobrada.hayEfectivo && config.abrir_gaveta_efectivo });
+      await imprimirVenta(cobrada.ventaId, config);
       setCobrada({ ...cobrada, errorImpresion: undefined });
     } catch (e) {
       setCobrada({ ...cobrada, errorImpresion: textoError(e) });
+    }
+  }
+
+  async function reintentarGaveta() {
+    if (!cobrada) return;
+    try {
+      await abrirGavetaVenta(cobrada.ventaId);
+      setCobrada({ ...cobrada, errorGaveta: undefined });
+    } catch (e) {
+      setCobrada({ ...cobrada, errorGaveta: textoError(e) });
     }
   }
 
@@ -417,8 +436,9 @@ export default function Venta() {
   const articulos = estado.lineas.reduce((s, l) => s + l.cantidad, 0);
   const puedeFavoritos = puede("productos");
 
-  // Sin caja abierta de hoy, o con la caja de otro cajero, no se vende (Rust también lo rechaza al cobrar).
-  const ajena = !!caja?.turno && !esMiTurno(caja.turno, usuario.id, puede("caja.admin"));
+  // Sin caja abierta de hoy, o con un turno que este usuario no puede usar (turno por persona), no se
+  // vende (Rust también lo rechaza al cobrar). Con turno compartido, cualquiera vende en el abierto.
+  const ajena = !!caja?.turno && !caja.puedeUsar;
   if (caja && (!caja.turno || caja.deOtroDia || ajena))
     return (
       <div className="screen centro">
@@ -427,8 +447,8 @@ export default function Venta() {
             <>
               <h1>La caja la tiene abierta {caja.turno?.usuarioApertura}</h1>
               <p className="muted">
-                Cada cajero responde por su propio turno. {caja.turno?.usuarioApertura} debe cerrar su caja con el conteo (o el dueño, si ya
-                no está) y después usted abre la suya.
+                En este negocio cada persona usa su propio turno. {caja.turno?.usuarioApertura} debe cerrar su caja con el conteo (o el dueño)
+                y después usted abre la suya.
               </p>
             </>
           ) : caja.deOtroDia ? (
@@ -479,15 +499,28 @@ export default function Venta() {
           </label>
         </div>
 
-        <div className="deptos" role="group" aria-label="Filtrar">
-          <button className="tab" aria-pressed={!buscando && filtro === FAVORITOS} onClick={() => (setFiltro(FAVORITOS), setTexto(""), alBuscador())}>
-            <Star size={16} aria-hidden /> Favoritos
+        {/* Píldoras: cada departamento con su color (texto blanco o negro según el contraste). La elegida
+            se marca también con un borde grueso y un ✓, no solo con el color. */}
+        <div className="deptos" role="group" aria-label="Filtrar por departamento">
+          <button className="pildora pildora-fav" aria-pressed={!buscando && filtro === FAVORITOS} onClick={() => (setFiltro(FAVORITOS), setTexto(""), alBuscador())}>
+            {!buscando && filtro === FAVORITOS ? <Check size={18} aria-hidden strokeWidth={3} /> : <Star size={18} aria-hidden />} Favoritos
           </button>
-          {departamentos.map((d) => (
-            <button key={d.id} className="tab" aria-pressed={!buscando && filtro === d.id} onClick={() => (setFiltro(d.id), setTexto(""), alBuscador())}>
-              {d.nombre}
-            </button>
-          ))}
+          {departamentos.map((d, i) => {
+            const fondo = colorDe(d, i);
+            const activo = !buscando && filtro === d.id;
+            return (
+              <button
+                key={d.id}
+                className="pildora"
+                style={{ background: fondo, color: textoSobre(fondo) }}
+                aria-pressed={activo}
+                onClick={() => (setFiltro(d.id), setTexto(""), alBuscador())}
+              >
+                {activo && <Check size={18} aria-hidden strokeWidth={3} />}
+                {d.nombre}
+              </button>
+            );
+          })}
         </div>
 
         <div className="catalogo-barra">
@@ -498,6 +531,12 @@ export default function Venta() {
                 ? "1 producto"
                 : `${totalCatalogo.toLocaleString("es-CR")} productos`}
           </span>
+          <span style={{ flex: 1 }} />
+          {caja?.puedeUsar && (
+            <Button variante="fantasma" icono={Inbox} onClick={() => setDialogo("noventa")} title="Abrir la gaveta sin vender (cambio de billetes…). Queda anotado.">
+              No venta
+            </Button>
+          )}
           <label className="catalogo-orden">
             <span>Ordenar</span>
             <select value={orden} onChange={(e) => (cambiarOrden(e.target.value as OrdenProductos), alBuscador())}>
@@ -578,7 +617,8 @@ export default function Venta() {
                 title={i < 9 ? `Ctrl+${i + 1}` : undefined}
               >
                 Venta {e.numero}
-                {e.id !== activaId && e.estado.lineas.length > 0 && <span className="muted">· {monto(calcularTotales(e.estado, config.redondeo_total).total)}</span>}
+                {e.usuarioId !== usuario.id && <span className="muted"> · {e.usuario.split(" ")[0]}</span>}
+                {e.id !== activaId && e.estado.lineas.length > 0 && <span className="muted"> · {monto(calcularTotales(e.estado, config.redondeo_total).total)}</span>}
               </button>
               {(esperas.length > 1 || e.estado.lineas.length > 0) && (
                 <button className="pestana-cerrar" onClick={() => descartar(e)} aria-label={`Descartar venta ${e.numero}`} title="Descartar">
@@ -673,6 +713,9 @@ export default function Venta() {
           onAplicar={(d) => (setDialogo(null), actualizarConTope({ ...actual(), descuentoTotal: d }))}
         />
       )}
+      {dialogo === "noventa" && caja && (
+        <NoVenta motivos={caja.noVentaMotivos} onCerrar={() => (setDialogo(null), alBuscador())} onListo={() => (setDialogo(null), toast.ok("Gaveta abierta. Quedó anotado."), alBuscador())} />
+      )}
       {dialogo === "cobro" && <Cobro total={t.total} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
       {pendiente && (
         <PinDueno
@@ -694,13 +737,20 @@ export default function Venta() {
               <Banknote size={24} aria-hidden /> Vuelto <strong>{monto(cobrada.vuelto)}</strong>
             </div>
           )}
+          {cobrada.errorGaveta && (
+            <>
+              <Alert tono="aviso" titulo="La gaveta no abrió">
+                {cobrada.errorGaveta}
+              </Alert>
+              <Button icono={Inbox} onClick={reintentarGaveta}>
+                Reintentar abrir la gaveta
+              </Button>
+            </>
+          )}
           {cobrada.errorImpresion ? (
             <>
               <Alert tono="error" titulo="No se imprimió el tiquete">
-                {/impresora elegida/.test(cobrada.errorImpresion)
-                  ? `${cobrada.errorImpresion}.`
-                  : `${cobrada.errorImpresion}. Revise que la impresora esté encendida y con papel.`}{" "}
-                La venta sí quedó guardada.
+                {cobrada.errorImpresion} La venta sí quedó guardada: puede reintentar ahora o reimprimirla después desde Ventas del día.
               </Alert>
               <Button icono={Printer} onClick={reimprimir}>
                 Reintentar impresión

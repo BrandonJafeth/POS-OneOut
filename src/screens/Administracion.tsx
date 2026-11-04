@@ -1,27 +1,32 @@
 // Administración (dueño/técnico): fuera del flujo del cajero. Tarjetas grandes → subpantalla.
-import { ArrowLeft, Building2, DatabaseBackup, FolderTree, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Building2, DatabaseBackup, FolderTree, Landmark, Printer, UserCog, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSesion } from "../app/sesion";
 import type { Permiso } from "../lib/permisos";
 import Button from "../ui/Button";
+import ConfigCaja from "./ConfigCaja";
 import Departamentos from "./Departamentos";
+import Impresoras from "./Impresoras";
 import Negocio from "./Negocio";
 import Respaldo from "./Respaldo";
 import Usuarios from "./Usuarios";
 
-type Sub = "usuarios" | "departamentos" | "negocio" | "respaldo";
+type Sub = "usuarios" | "departamentos" | "negocio" | "impresoras" | "caja" | "respaldo";
 
-const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; permiso: Permiso; pantalla: ReactNode }[] = [
-  { id: "usuarios", texto: "Usuarios", detalle: "Cajeros, PIN y accesos", icono: UserCog, permiso: "usuarios", pantalla: <Usuarios /> },
-  { id: "departamentos", texto: "Departamentos", detalle: "Nombres y orden de los departamentos", icono: FolderTree, permiso: "departamentos", pantalla: <Departamentos /> },
-  { id: "negocio", texto: "Datos del negocio", detalle: "Teléfono, logo, pie del tiquete y aviso de privacidad", icono: Building2, permiso: "negocio", pantalla: <Negocio /> },
-  { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permiso: "respaldo", pantalla: <Respaldo /> },
+// permisos: basta uno.
+const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; permisos: Permiso[]; pantalla: ReactNode }[] = [
+  { id: "usuarios", texto: "Usuarios", detalle: "Cajeros, PIN y accesos", icono: UserCog, permisos: ["usuarios"], pantalla: <Usuarios /> },
+  { id: "departamentos", texto: "Departamentos", detalle: "Nombres, orden y color en la venta", icono: FolderTree, permisos: ["departamentos"], pantalla: <Departamentos /> },
+  { id: "negocio", texto: "Datos del negocio", detalle: "Teléfono, logo, pie del tiquete y aviso de privacidad", icono: Building2, permisos: ["negocio"], pantalla: <Negocio /> },
+  { id: "impresoras", texto: "Impresoras", detalle: "Tiquetes, cierres, etiquetas y gaveta", icono: Printer, permisos: ["impresoras"], pantalla: <Impresoras /> },
+  { id: "caja", texto: "Caja y cierre", detalle: "Turno compartido, cierre Z y no venta", icono: Landmark, permisos: ["caja.admin", "config.tecnica"], pantalla: <ConfigCaja /> },
+  { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permisos: ["respaldo"], pantalla: <Respaldo /> },
 ];
 
 export default function Administracion() {
   const { puede } = useSesion();
   const [sub, setSub] = useState<Sub | null>(null);
-  const accesos = ACCESOS.filter((a) => puede(a.permiso));
+  const accesos = ACCESOS.filter((a) => a.permisos.some((x) => puede(x)));
   const actual = accesos.find((a) => a.id === sub);
 
   if (actual)

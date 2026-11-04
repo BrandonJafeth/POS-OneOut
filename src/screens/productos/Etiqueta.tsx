@@ -1,30 +1,33 @@
-import { useMemo, useState } from "react";
-import { useSesion } from "../../app/sesion";
+import { useEffect, useMemo, useState } from "react";
 import Modal from "../../components/Modal";
 import Mensaje, { textoError } from "../../components/Mensaje";
 import Papel from "../../components/Papel";
-import { ajustesImpresora, etiquetaProducto } from "../../lib/impresion";
-import { printRaw } from "../../lib/printerApi";
+import { aSettings, ajustesDe, imprimirDocumento, type AjustesImpresora } from "../../db/impresoras";
+import { etiquetaProducto } from "../../lib/impresion";
 import { interpret } from "../../lib/preview";
+import { DEFAULT_SETTINGS } from "../../lib/tickets";
 import { useToast } from "../../ui/Toast";
 
-/** Vista previa e impresión de la etiqueta (nombre, precio, EAN-13) en la POS-58. */
+/** Vista previa e impresión de la etiqueta (nombre, precio, EAN-13) en la impresora de etiquetas. */
 export default function Etiqueta(p: { producto: { nombre: string; precio: number }; codigo: string; onCerrar(): void }) {
-  const { config } = useSesion();
   const [copias, setCopias] = useState(1);
   const [error, setError] = useState("");
   const toast = useToast();
   const [ocupado, setOcupado] = useState(false);
-  const ajustes = ajustesImpresora(config);
-  const muestra = useMemo(() => interpret(etiquetaProducto(p.producto, p.codigo, ajustes).bytes), [p.producto, p.codigo, config]);
+  const [impresora, setImpresora] = useState<AjustesImpresora | null | undefined>(undefined);
+  useEffect(() => {
+    ajustesDe("etiqueta").then(setImpresora, (e) => setError(textoError(e)));
+  }, []);
+  const ajustes = impresora ? aSettings(impresora) : DEFAULT_SETTINGS;
+  const muestra = useMemo(() => interpret(etiquetaProducto(p.producto, p.codigo, ajustes).bytes), [p.producto, p.codigo, impresora]);
 
   async function imprimir() {
     setError("");
-    if (!config.impresora_nombre) return setError("No hay impresora elegida. El técnico la elige en Técnico → Hardware.");
+    if (!impresora) return setError("No hay impresora para etiquetas. El dueño o el técnico la asigna en Administración → Impresoras.");
     setOcupado(true);
     try {
-      await printRaw(config.impresora_nombre, etiquetaProducto(p.producto, p.codigo, ajustes, copias).bytes);
-      toast.ok(`Enviado a ${config.impresora_nombre}.`);
+      const nombre = await imprimirDocumento("etiqueta", etiquetaProducto(p.producto, p.codigo, ajustes, copias).bytes);
+      toast.ok(`Enviado a ${nombre}.`);
     } catch (e) {
       setError(textoError(e));
     } finally {

@@ -18,7 +18,8 @@ export type Permiso =
   | "clientes.basico" // buscar/crear cliente en la venta: solo nombre, teléfono y cédula
   | "clientes" // lista completa, datos del cliente, exportar, anonimizar
   | "respaldo" // el respaldo lleva datos de clientes
-  | "facturas"; // pendientes de factura electrónica (muestra datos del cliente)
+  | "facturas" // pendientes de factura electrónica (muestra datos del cliente)
+  | "impresoras"; // impresoras, a cuál va cada documento y la gaveta
 
 // Copia de src-tauri/src/permisos.rs: Rust es quien decide; aquí solo se usa para mostrar u ocultar.
 // Ley 8968: el técnico administra el sistema pero NO ve datos de clientes (ni el respaldo).
@@ -39,6 +40,7 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "clientes",
     "respaldo",
     "facturas",
+    "impresoras",
   ],
   tecnico: [
     "productos",
@@ -50,6 +52,7 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "negocio.legal",
     "config.tecnica",
     "reportes",
+    "impresoras",
   ],
 };
 

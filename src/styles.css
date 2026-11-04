@@ -1203,8 +1203,9 @@ details.fiscal summary {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 15px;
-  line-height: 1.3;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.28;
   padding-right: 22px;
 }
 
@@ -1216,8 +1217,8 @@ details.fiscal summary {
 }
 
 .tile-precio {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 750;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1416,8 +1417,8 @@ details.fiscal summary {
 }
 
 .linea-nombre {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -1876,21 +1877,65 @@ mark {
   border-color: var(--accent);
 }
 
-.deptos .tab {
-  min-height: 40px;
-  padding: 2px var(--e3);
-  font-size: 14px;
+/* Píldoras de departamento: cada una con su color (texto blanco o negro, siempre ≥ 4,5:1). La
+   elegida se marca con borde grueso y ✓, no solo con el color. Nunca menos de 44 px ni de 16 px. */
+.deptos {
+  gap: var(--e2);
 }
 
-@media (max-width: 1200px) {
+.pildora {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.pildora:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.pildora[aria-pressed="true"] {
+  border-color: var(--text);
+  font-weight: 750;
+  padding: 0 16px 0 12px;
+}
+
+.pildora-fav {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.pildora-fav[aria-pressed="true"] {
+  border: 3px solid var(--text);
+}
+
+.pildora-fav svg {
+  color: var(--warn);
+}
+
+.pildora-fav[aria-pressed="true"] svg {
+  color: currentColor;
+}
+
+@media (max-width: 1440px) {
   .deptos {
-    gap: 2px;
+    gap: 6px;
   }
 
-  .deptos .tab {
-    min-height: 34px;
-    padding: 0 var(--e2);
-    font-size: 13px;
+  .pildora {
+    padding: 0 12px;
+  }
+
+  .pildora[aria-pressed="true"] {
+    padding: 0 10px 0 8px;
   }
 }
 
@@ -2983,4 +3028,173 @@ button.toast-cerrar:hover {
   .toast {
     animation: none;
   }
+}
+
+
+/* ───────── Departamentos: color ───────── */
+.depto-color {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  flex-wrap: wrap;
+}
+
+.depto-muestra {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 650;
+  font-size: 15px;
+}
+
+.depto-color input[type="color"] {
+  width: 44px;
+  height: 44px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radio);
+  background: var(--card);
+}
+
+/* ───────── Impresoras y caja ───────── */
+.destinos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--e3) var(--e5);
+}
+
+.casillas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e2);
+  margin: var(--e3) 0;
+}
+
+.casillas label,
+.casillas-z label {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  min-height: 44px;
+}
+
+.casillas input[type="checkbox"],
+.casillas-z input[type="checkbox"],
+.opcion input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.casillas-z {
+  margin: var(--e4) 0 0;
+  padding: var(--e2) var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio);
+}
+
+.casillas-z legend {
+  padding: 0 var(--e1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.opcion {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e3);
+  padding: var(--e2) 0;
+  cursor: pointer;
+}
+
+.opcion input {
+  margin-top: 2px;
+}
+
+.opcion > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opcion .ayuda {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 70ch;
+}
+
+.motivos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2);
+  margin: var(--e3) 0;
+}
+
+.motivo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e2);
+  min-height: 44px;
+  padding: 0 var(--e4);
+  border: 1px solid var(--line);
+  border-radius: var(--radio);
+  background: var(--card);
+  cursor: pointer;
+}
+
+.motivo.activo {
+  border: 2px solid var(--accent);
+  background: var(--accent-bg);
+  font-weight: 650;
+}
+
+/* Cierre Z en pantalla */
+.vista-z h3 {
+  margin-top: var(--e5);
+}
+
+.vista-z-columnas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--e3) var(--e5);
+}
+
+.vista-z tr.total td,
+.tbl tr.total td {
+  font-weight: 700;
+  border-top: 1px solid var(--line);
+}
+
+.codigo-pago {
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.nota-pie {
+  font-size: 13px;
+  margin: var(--e1) 0 0;
+}
+
+.total-general {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.vista-z .electronicos summary {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--e3);
+  align-items: center;
+}
+
+.conteo-z {
+  max-width: 360px;
+}
+
+td.linea-producto {
+  font-weight: 650;
 }

@@ -44,3 +44,32 @@ describe("color del negocio parecido al rojo de error", () => {
     for (const a of alternativasAError("#c62828")) expect(pareceError(a.color)).toBe(false);
   });
 });
+
+describe("colores de departamento", () => {
+  it("los 12 de la paleta son distintos y su texto (blanco o negro) cumple 4,5:1", async () => {
+    const { PALETA_DEPARTAMENTOS, textoSobre } = await import("../src/ui/departamentos");
+    expect(PALETA_DEPARTAMENTOS).toHaveLength(12);
+    expect(new Set(PALETA_DEPARTAMENTOS.map((x) => x.color)).size).toBe(12);
+    const fallas = PALETA_DEPARTAMENTOS.map((x) => ({ ...x, r: contraste(textoSobre(x.color), x.color) })).filter((x) => x.r < 4.5);
+    expect(fallas).toEqual([]);
+  });
+
+  it("cualquier color que elija el negocio también cumple (texto blanco o negro)", async () => {
+    const { textoSobre } = await import("../src/ui/departamentos");
+    let semilla = 7;
+    const azar = () => ((semilla = (semilla * 1103515245 + 12345) % 2 ** 31), semilla / 2 ** 31);
+    for (let i = 0; i < 2000; i++) {
+      const c = "#" + Array.from({ length: 3 }, () => Math.floor(azar() * 256).toString(16).padStart(2, "0")).join("");
+      expect(contraste(textoSobre(c), c)).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const c of ["#777777", "#767676", "#808080", "#00ff00", "#ff0000", "#0000ff"]) expect(contraste(textoSobre(c), c)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("sin color guardado, cada departamento toma el de la paleta según su posición", async () => {
+    const { colorDe, PALETA_DEPARTAMENTOS } = await import("../src/ui/departamentos");
+    expect(colorDe({ color: null }, 0)).toBe(PALETA_DEPARTAMENTOS[0].color);
+    expect(colorDe({ color: null }, 13)).toBe(PALETA_DEPARTAMENTOS[1].color);
+    expect(colorDe({ color: "#ABCDEF" }, 3)).toBe("#abcdef");
+    expect(colorDe({ color: "rojo" }, 2)).toBe(PALETA_DEPARTAMENTOS[2].color);
+  });
+});

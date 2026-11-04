@@ -1,5 +1,6 @@
-// Turnos de caja: apertura con conteo, entradas/salidas, cierre con arqueo, reapertura e historial.
-// Las reglas viven en Rust (src-tauri/src/caja.rs); aquí solo se llama y se tipa.
+// Turnos de caja: apertura con conteo, entradas/salidas, cortes, cierre con arqueo, reapertura,
+// historial y gaveta. Las reglas viven en Rust (src-tauri/src/caja.rs, gaveta.rs); aquí solo se
+// llama y se tipa. Con el turno abierto, Rust no le manda al cajero ningún total de ventas.
 import { invocar } from "../lib/invocar";
 
 /** Conteo guardado: denominación (en texto) → cantidad, o { total } si se escribió el total de una vez. */
@@ -18,6 +19,7 @@ export const CONTEO_VACIO: ConteoEntrada = { cantidades: {}, total: 0 };
 export interface Turno {
   id: string;
   cajaId: string;
+  caja: string;
   estado: "abierto" | "cerrado";
   dia: string;
   abiertoEn: string;
@@ -29,7 +31,7 @@ export interface Turno {
   fondo: number;
   conteoInicial: Conteo | null;
   conteoFinal: Conteo | null;
-  /** null en cierre ciego para el cajero */
+  /** null mientras el turno está abierto */
   esperado: number | null;
   contado: number | null;
   diferencia: number | null;
@@ -42,11 +44,22 @@ export interface EstadoCaja {
   turno: Turno | null;
   /** Quedó abierta la caja de un día anterior: hay que cerrarla antes de vender. */
   deOtroDia: boolean;
-  cierreCiego: boolean;
+  /** Otros usuarios pueden vender en el turno abierto (config caja_turno_compartido). */
+  compartido: boolean;
+  /** Este usuario puede vender y mover efectivo en el turno abierto. */
+  puedeUsar: boolean;
+  puedeCerrar: boolean;
   denominaciones: number[];
   motivos: { salida: string[]; entrada: string[] };
   salidaMaxSinPin: number;
   umbralDiferencia: number;
+  noVentaMotivos: string[];
+  noVentaUmbral: number;
+  /** Aperturas de gaveta sin venta en el turno abierto. */
+  noVentas: number;
+  /** Valores por defecto de las casillas del cierre Z. */
+  zDetalleCompleto: boolean;
+  zPorDepartamento: boolean;
 }
 
 export interface Movimiento {
@@ -64,6 +77,8 @@ export interface PorForma {
   formaPagoId: string;
   nombre: string;
   tipo: string;
+  /** Co, Ta, De… (como en el cierre del sistema anterior). */
+  codigo: string;
   daVuelto: boolean;
   pagos: number;
   monto: number;
@@ -92,6 +107,60 @@ export interface PagoElectronico {
   referencia: string | null;
 }
 
+export interface FormaMonto {
+  forma: string;
+  codigo: string;
+  monto: number;
+}
+
+/** Una línea del detalle: mismo producto, precio y forma de pago, agrupados ("IMPRESIONES A COLOR x42"). */
+export interface FilaDesglose {
+  /** Co, Ta, De… o Mx (venta pagada con varias formas). */
+  codigo: string;
+  producto: string;
+  cantidad: number;
+  precio: number;
+  monto: number;
+  efectivo: number;
+}
+
+export interface DepartamentoDesglose {
+  departamentoId: string;
+  nombre: string;
+  cantidad: number;
+  monto: number;
+  efectivo: number;
+  porForma: FormaMonto[];
+  filas: FilaDesglose[];
+}
+
+export interface Desglose {
+  departamentos: DepartamentoDesglose[];
+  cantidad: number;
+  total: number;
+  efectivo: number;
+  ventasDescuadradas: string[];
+}
+
+export interface NoVenta {
+  fecha: string;
+  usuario: string;
+  causa: "no_venta" | "dueno";
+  motivo: string;
+  nota: string | null;
+  autorizadoPor: string | null;
+}
+
+export interface CorteResumen {
+  id: string;
+  fecha: string;
+  usuario: string;
+  ventas: number;
+  total: number;
+  efectivoEsperado: number;
+  retiro: number;
+}
+
 export interface Resumen {
   fondo: number;
   ventas: number;
@@ -110,16 +179,49 @@ export interface Resumen {
   ajustes: Ajuste[];
   /** Cada pago con tarjeta, SINPE o transferencia (para cuadrar con el datáfono y los comprobantes). */
   pagosElectronicos: PagoElectronico[];
-  /** Quién vendió en el turno (si el dueño ayudó en la caja de un cajero, aparece aquí). */
+  /** Tiquetes y monto de cada usuario. El efectivo y la diferencia son de la caja. */
   porUsuario: { usuario: string; ventas: number; total: number }[];
+  noVentas: NoVenta[];
+  noVentaUmbral: number;
+  cortes: CorteResumen[];
+  desglose: Desglose;
+  /** false en cierres de antes de la migración 9 (no traen desglose). */
+  conDesglose: boolean;
+  /** Departamentos, detalle, formas de pago y efectivo cuadran entre sí (Rust lo revisa). */
+  cuadra: boolean;
+  descuadres: string[];
 }
 
 export interface Detalle {
   turno: Turno;
   resumen: Resumen;
-  /** false en cierre ciego para el cajero: no se muestra esperado ni diferencia. */
-  veEsperado: boolean;
+  /** false para el cajero con el turno abierto: Rust no manda ningún total de ventas. */
+  veTotales: boolean;
   bitacoraOk: boolean | null;
+}
+
+export interface Corte {
+  id: string;
+  fecha: string;
+  usuario: string;
+  turno: Turno;
+  /** Acumulado del turno al momento del corte (antes del retiro). */
+  resumen: Resumen;
+  retiro: number;
+  efectivoDespues: number;
+}
+
+export interface AperturaGaveta {
+  id: string;
+  fecha: string;
+  dia: string | null;
+  usuarioId: string;
+  usuario: string;
+  causa: "no_venta" | "dueno";
+  motivo: string;
+  nota: string | null;
+  autorizadoPor: string | null;
+  turnoId: string | null;
 }
 
 export interface ResultadoCierre {
@@ -133,9 +235,12 @@ export interface ResultadoCierre {
 }
 
 export interface TurnoFila extends Turno {
-  ventas: number;
-  total: number;
+  /** null para el cajero mientras el turno está abierto. */
+  ventas: number | null;
+  total: number | null;
   pendienteRevision: boolean;
+  noVentas: number;
+  alertaNoVentas: boolean;
 }
 
 /** Cierre con diferencia sobre el umbral y sin nota: Rust lo rechaza con este prefijo. */
@@ -146,11 +251,6 @@ export function agruparPorForma(pagos: PagoElectronico[]): { forma: string; tota
   const g = new Map<string, PagoElectronico[]>();
   for (const p of pagos) g.set(p.forma, [...(g.get(p.forma) ?? []), p]);
   return [...g.entries()].map(([forma, l]) => ({ forma, total: l.reduce((s, x) => s + x.monto, 0), pagos: l }));
-}
-
-/** El turno es de quien lo abrió: otro cajero no opera en él (el dueño sí). */
-export function esMiTurno(t: Turno, usuarioId: string, esDueno: boolean): boolean {
-  return t.usuarioAperturaId === usuarioId || esDueno;
 }
 
 export function totalConteo(c: ConteoEntrada): number {
@@ -193,9 +293,38 @@ export async function marcarRevisada(turnoId: string): Promise<void> {
   await invocar("caja_revisada", { turnoId });
 }
 
-/** Datos del reporte Z y si esta impresión es COPIA (la primera es el original). */
+/** Datos del reporte Z y si la próxima impresión es COPIA (la primera es el original). */
 export function datosReporteZ(turnoId: string): Promise<{ detalle: Detalle; copia: boolean }> {
   return invocar("caja_z", { turnoId });
+}
+
+/** Imprime el Z (y los tiquetes por departamento). COPIA: PIN del dueño. Devuelve si fue copia. */
+export function imprimirReporteZ(turnoId: string, documentos: Uint8Array[], pin?: string): Promise<boolean> {
+  return invocar<boolean>("caja_z_imprimir", { turnoId, documentos: documentos.map((d) => Array.from(d)), pin: pin ?? null });
+}
+
+/** Nota del cierre escrita después de ver el resultado (una vez). */
+export async function notaCierre(turnoId: string, nota: string): Promise<void> {
+  await invocar("caja_nota_cierre", { turnoId, nota });
+}
+
+/** Corte parcial (dueño): acumulado sin cerrar y, si se quiere, retiro de efectivo con PIN. */
+export function hacerCorte(retiro: { monto: number; categoria: string; nota: string } | null, pin?: string): Promise<Corte> {
+  return invocar<Corte>("caja_corte", { retiro, pin: pin ?? null });
+}
+
+// ─── Gaveta: solo venta con efectivo (lib/venta/imprimir), "no venta" con motivo u orden del dueño ───
+
+export async function noVenta(motivo: string, nota: string): Promise<void> {
+  await invocar("gaveta_no_venta", { motivo, nota });
+}
+
+export async function gavetaDueno(pin: string, motivo: string): Promise<void> {
+  await invocar("gaveta_dueno", { pin, motivo });
+}
+
+export function aperturasGaveta(desde: string, hasta: string, usuarioId: string | null): Promise<AperturaGaveta[]> {
+  return invocar<AperturaGaveta[]>("gaveta_aperturas", { desde, hasta, usuarioId });
 }
 
 export function listarTurnos(desde: string, hasta: string): Promise<TurnoFila[]> {

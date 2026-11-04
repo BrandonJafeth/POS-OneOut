@@ -11,13 +11,7 @@ export interface ConfigApp {
   abono_minimo_pct: number;
   escaner_debounce_ms: number;
   imprime_tiquete: boolean;
-  imprime_tiquetes_departamento: boolean;
   codigo_interno_siguiente: number;
-  impresora_nombre: string;
-  impresora_code_page: number;
-  impresora_sin_modo_chino: boolean;
-  impresora_barras: "A" | "B";
-  impresora_cortador: boolean;
   /** Importación de la web: categoría → departamento (en orden de prioridad), palabras y favoritos. */
   importacion_reglas: ReglasImportacion;
   /** Tasa de IVA (%) y CAByS que reciben los productos importados. */
@@ -48,8 +42,17 @@ export interface ConfigApp {
   caja_umbral_diferencia: number;
   /** ¢: salidas de efectivo mayores piden el PIN del dueño. */
   caja_salida_max_sin_pin: number;
-  /** El cajero cuenta sin ver lo esperado. */
-  caja_cierre_ciego: boolean;
+  /** Otros usuarios pueden vender en el turno abierto por otra persona (el turno es de la caja). */
+  caja_turno_compartido: boolean;
+  /** Casillas del cierre Z marcadas por defecto. */
+  caja_z_detalle_completo: boolean;
+  caja_z_por_departamento: boolean;
+  /** Motivos de "no venta" (abrir la gaveta sin vender). */
+  caja_no_venta_motivos: string[];
+  /** Desde esta cantidad de aperturas sin venta, el cierre lo marca. 0 = nunca. */
+  caja_no_venta_umbral: number;
+  /** ¢: quitar de una venta abierta una línea de este monto o más queda en la bitácora. 0 = nunca. */
+  caja_quitar_linea_bitacora: number;
   caja_denominaciones: number[];
   caja_motivos: { salida: string[]; entrada: string[] };
   pin_min_dueno: number;
@@ -65,13 +68,7 @@ export const CONFIG_DEFECTO: ConfigApp = {
   abono_minimo_pct: 50,
   escaner_debounce_ms: 400,
   imprime_tiquete: true,
-  imprime_tiquetes_departamento: false,
   codigo_interno_siguiente: 1,
-  impresora_nombre: "",
-  impresora_code_page: 19,
-  impresora_sin_modo_chino: true,
-  impresora_barras: "B",
-  impresora_cortador: false,
   importacion_reglas: REGLAS_DEFECTO,
   producto_tasa_iva_defecto: 13,
   producto_cabys_defecto: "",
@@ -89,8 +86,13 @@ export const CONFIG_DEFECTO: ConfigApp = {
   color_acento: "",
   caja_umbral_diferencia: 1000,
   caja_salida_max_sin_pin: 20000,
-  caja_cierre_ciego: false,
-  caja_denominaciones: [20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
+  caja_turno_compartido: true,
+  caja_z_detalle_completo: false,
+  caja_z_por_departamento: false,
+  caja_no_venta_motivos: ["Cambio de billetes", "Devolución", "Otro"],
+  caja_no_venta_umbral: 5,
+  caja_quitar_linea_bitacora: 5000,
+  caja_denominaciones: [50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
   caja_motivos: { salida: ["Retiro de dinero", "Gasto menor", "Pago a proveedor", "Adelanto"], entrada: ["Ingreso de cambio", "Otro ingreso"] },
   pin_min_dueno: 6,
   pin_min_cajero: 4,
