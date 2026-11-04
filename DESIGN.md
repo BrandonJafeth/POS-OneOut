@@ -237,9 +237,9 @@ Grises neutros sin tinte, casi blancos, con un único acento intercambiable: gra
 - **Monto de cobro** (750, 26px; 30px desde 1700 px, -0.01em): cifra dentro del botón Cobrar. El vuelto/faltante del resumen va a 30px.
 - **Headline** (650, 22px, 1.25): título de pantalla.
 - **Title** (650, 17px; 19px en cabecera de modal): títulos de tarjeta y diálogo.
-- **Precio de tarjeta** (700, 18px, tabular): precio en la grilla.
+- **Precio de tarjeta** (750, 20px, tabular): precio en la grilla.
 - **Body** (400, 16px, 1.45): texto corrido y campos (16px fijo en inputs).
-- **Control** (550, 15px): botones, nombre de producto (500), nombre de línea (600).
+- **Control** (550, 15px): botones. Nombre de producto en la tarjeta: 16px/650; nombre de línea del tiquete: 16px/700.
 - **Label** (600, 14px): etiquetas de campo, chips de filtro, totales.
 - **Caption** (400–600, 13px; 12px para el departamento en la tarjeta): subtítulos de línea, cabeceras de tabla, insignias.
 
@@ -283,9 +283,14 @@ Sobrios y táctiles: blancos con borde `line`, el acento reservado para la acci�
 - **Hover / Focus / Active:** transición de color 150ms ease-out; foco con contorno de 2 px `focus` y 2 px de separación; al presionar baja 1 px. Deshabilitado a 45 % de opacidad.
 - **Atajos:** el componente recibe `atajo` y lo pone en `title` ("Atajo: F12") y `aria-keyshortcuts`; el `<kbd>` interno está oculto.
 
-### Chips (filtros de departamento)
+### Píldoras de departamento (venta)
+- **Style:** píldora del color del departamento (paleta de 12 en `src/ui/departamentos.ts`, editable por departamento), 44 px de alto mínimo, 16 px/650. El texto es blanco o negro, el que dé más contraste: con blanco y negro puros cualquier color llega al menos a 4,58:1, y `tests/tema.test.ts` lo verifica para la paleta y para colores al azar.
+- **State:** la elegida lleva borde de 3 px en `text` y un ✓, además del color (nunca solo color). "Favoritos" va primero, blanca con borde `line` y estrella.
+- Es la única excepción a The One Accent Rule: los colores de departamento son categorías que el negocio elige para encontrar rápido, no acentos; no se usan en ningún otro lado.
+
+### Chips (otros filtros)
 - **Style:** píldora blanca, borde hair, 40 px (34 px ≤ 1200 px), 14 px.
-- **State:** seleccionado = borde accent + fondo accent-bg + texto accent en 650. "Favoritos" va primero con estrella.
+- **State:** seleccionado = borde accent + fondo accent-bg + texto accent en 650.
 
 ### Cards / Containers
 - **Corner Style:** 12px.
@@ -295,7 +300,7 @@ Sobrios y táctiles: blancos con borde `line`, el acento reservado para la acci�
 - **Internal Padding:** 16px 24px.
 
 ### Tarjeta de producto (firma)
-Nombre arriba (hasta 3 líneas, 15 px), departamento en caption muted y precio 18 px/700 al pie. Estrella de favorito siempre visible en la esquina superior derecha: en reposo en color `line`, marcada rellena en `warn`. Si el producto ya está en la venta: borde accent e insignia redonda de cantidad (accent, 26 px) montada sobre la esquina superior izquierda. Selección por teclado en la búsqueda: borde accent + anillo de 1 px accent.
+Nombre arriba en negrita (hasta 3 líneas, 16 px/650), departamento en caption muted y precio destacado al pie (20 px/750). Estrella de favorito siempre visible en la esquina superior derecha: en reposo en color `line`, marcada rellena en `warn`. Si el producto ya está en la venta: borde accent e insignia redonda de cantidad (accent, 26 px) montada sobre la esquina superior izquierda. Selección por teclado en la búsqueda: borde accent + anillo de 1 px accent.
 
 ### Línea del tiquete (firma)
 Rejilla nombre / paso / importe. El paso es `− n +` con botones fantasma de 34 px; con cantidad 1 el `−` se reemplaza por una papelera roja (un solo control para quitar). Al tocar la línea se abre el editor sobre accent-bg con descuento y el control segmentado ¢/%. El descuento se lista en verde (ok) en el subtítulo.

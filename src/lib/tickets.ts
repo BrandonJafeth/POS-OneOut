@@ -5,7 +5,7 @@ import { ean13CheckDigit } from "./ean13";
 import { EscPos } from "./escpos";
 import { LOGO } from "./logo";
 
-export const COLS = 32; // 58 mm, fuente A (12×24): 384 puntos / 12 = 32 columnas
+export const COLS = 32; // 58 mm, fuente A (12×24): 384 puntos / 12 = 32 columnas (80 mm: 48)
 
 export interface TicketSettings {
   codePage: number;
@@ -14,9 +14,17 @@ export interface TicketSettings {
   sinModoChino: boolean;
   /** Formato del comando GS k para el código de barras. */
   barras: "A" | "B";
+  /** Columnas de texto de la impresora (32 en 58 mm, 48 en 80 mm). Sin dato: 32. */
+  columnas?: number;
 }
 
-export const DEFAULT_SETTINGS: TicketSettings = { codePage: 19, cortador: false, sinModoChino: true, barras: "B" };
+export const DEFAULT_SETTINGS: TicketSettings = { codePage: 19, cortador: false, sinModoChino: true, barras: "B", columnas: COLS };
+
+/** Columnas de una impresora (24 a 64; 32 si no se sabe). */
+export function columnas(s: Pick<TicketSettings, "columnas">): number {
+  const c = Math.floor(s.columnas ?? COLS);
+  return c >= 24 && c <= 64 ? c : COLS;
+}
 
 function nuevo(s: TicketSettings, codePage = s.codePage): EscPos {
   return new EscPos(codePage, { sinModoChino: s.sinModoChino });
@@ -51,11 +59,31 @@ export function monto(n: number): string {
   return "¢" + colones(n);
 }
 
-/** Texto a la izquierda y a la derecha en una misma línea de COLS columnas. */
-export function lr(left: string, right: string): string {
-  const space = COLS - right.length;
+/** Texto a la izquierda y a la derecha en una misma línea de `cols` columnas. */
+export function lr(left: string, right: string, cols = COLS): string {
+  const space = cols - right.length;
   return left.slice(0, Math.max(0, space - 1)).padEnd(space) + right;
 }
+
+/** Corta un texto largo de forma ordenada: termina en "." en vez de partir a la mitad sin aviso. */
+export function cortar(s: string, n: number): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  if (t.length <= n) return t;
+  return n <= 1 ? t.slice(0, n) : t.slice(0, n - 1).trimEnd() + ".";
+}
+
+/** Como lr(), pero si el texto no cabe junto al monto lo parte en varias líneas (el monto va en la última). */
+export function lrLargo(left: string, right: string, cols = COLS): string[] {
+  if (left.length + 1 + right.length <= cols) return [lr(left, right, cols)];
+  const lineas = wrap(left, cols);
+  const ultima = lineas[lineas.length - 1] ?? "";
+  if (ultima.length + 1 + right.length <= cols) lineas[lineas.length - 1] = lr(ultima, right, cols);
+  else lineas.push(lr("", right, cols));
+  return lineas;
+}
+
+export const sep = (cols = COLS) => "-".repeat(cols);
+export const sep2 = (cols = COLS) => "=".repeat(cols);
 
 /** Parte el texto en líneas de `width` sin cortar palabras (salvo que una sola no quepa). */
 export function wrap(text: string, width = COLS): string[] {

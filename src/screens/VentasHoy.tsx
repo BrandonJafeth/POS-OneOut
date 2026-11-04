@@ -1,4 +1,6 @@
-// Ventas del día: reimprimir (COPIA), corregir forma de pago y anular. El cierre es el de Caja.
+// Ventas del día: reimprimir (COPIA) y, solo el dueño con su PIN, corregir forma de pago y anular.
+// El cajero ve los tiquetes que emitió en el turno abierto (Rust no le manda los demás) y nunca
+// sumas acumuladas; las ventas de turnos ya cerrados sí las ve. El cierre es el de Caja.
 // Para encontrar una venta cuando el cliente vuelve ("la de la tijera, como a las 3"): buscar por
 // tiquete, producto, monto o cajero, acotar por hora y filtrar por factura pendiente, anuladas o pago.
 import { Ban, FileText, Landmark, Pencil, Printer, ReceiptText, Save, Search, ShieldCheck, X } from "lucide-react";
@@ -11,6 +13,7 @@ import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVent
 import { conMiles, diaLocal, normalizar, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { imprimirVenta } from "../lib/venta/imprimir";
+import { descripcionPago } from "../lib/venta/tiquete";
 import type { Banco, FormaPago, Venta, VentaPago } from "../tipos";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
@@ -81,14 +84,18 @@ export default function VentasHoy() {
         )}
       </div>
       <Mensaje error={error} />
-      <div className="conteos">
-        <div>
-          <strong>{completadas.length}</strong>ventas
+      {puede("caja.admin") ? (
+        <div className="conteos">
+          <div>
+            <strong>{completadas.length}</strong>ventas
+          </div>
+          <div>
+            <strong>{monto(completadas.reduce((s, v) => s + v.total, 0))}</strong>vendido
+          </div>
         </div>
-        <div>
-          <strong>{monto(completadas.reduce((s, v) => s + v.total, 0))}</strong>vendido
-        </div>
-      </div>
+      ) : (
+        <p className="muted">Aquí están los tiquetes que usted emitió y los de turnos ya cerrados. Los totales del turno se ven al cerrar la caja.</p>
+      )}
       {lista.length > 0 && (
         <section className="card ventas-filtros" aria-label="Buscar ventas">
           <div className="row abajo">
@@ -173,7 +180,7 @@ export default function VentasHoy() {
 }
 
 function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }) {
-  const { actor, config, puede, usuario } = useSesion();
+  const { config, puede } = useSesion();
   const [v, setV] = useState<Venta | null>(null);
   const [correcciones, setCorrecciones] = useState<Correccion[]>([]);
   const [corrigiendo, setCorrigiendo] = useState<VentaPago | null>(null);
@@ -191,12 +198,13 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   if (!v) return <Modal titulo="Venta" onCerrar={p.onCerrar}>{error ? <Mensaje error={error} /> : "Cargando…"}</Modal>;
 
   const verCliente = puede("clientes.basico");
-  // Turno cerrado: corregir o anular es un ajuste que solo hace el dueño (queda en la caja de hoy).
-  const puedeAjustar = v.turnoAbierto ? puede("caja.admin") || (puede("venta") && v.turnoUsuarioId === usuario.id) : puede("caja.admin");
+  // Una venta cobrada solo la cambia el dueño (con su PIN y motivo). Si su turno ya cerró, queda
+  // como ajuste en la caja de hoy.
+  const puedeAjustar = puede("caja.admin");
   async function reimprimir() {
     setError("");
     try {
-      await imprimirVenta(actor, v!.id, config, { copia: true, verCliente });
+      await imprimirVenta(v!.id, config, { copia: v!.impreso, verCliente });
       toast.ok("Copia enviada a la impresora.");
       await cargar();
     } catch (e) {
@@ -207,7 +215,8 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   return (
     <Modal titulo={`Tiquete ${v.numero}`} onCerrar={p.onCerrar} ancho={680}>
       <p className="muted">
-        {new Date(v.fecha).toLocaleString("es-CR")} · {v.cajero}
+        {new Date(v.fecha).toLocaleString("es-CR")} · cobró {v.cajero}
+        {v.esperaCreadaPor && v.esperaCreadaPor !== v.cajero && ` (la empezó ${v.esperaCreadaPor})`}
         {verCliente && (v.cliente || v.nombreTiquete) && ` · ${v.cliente ?? v.nombreTiquete}`}
         {v.reimpresiones > 0 && ` · reimpreso ${plural(v.reimpresiones, "vez", "veces")}`}
       </p>
@@ -216,12 +225,16 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           {!v.facturaEmitida && "Está en «Pendientes de factura» para hacerla en el sistema de facturación."}
         </Alert>
       )}
-      {v.estado === "anulada" && <Alert tono="error" titulo="Venta anulada">{v.anuladaMotivo ?? ""}</Alert>}
+      {v.estado === "anulada" && (
+        <Alert tono="error" titulo={`Venta anulada${v.anuladaPor ? ` por ${v.anuladaPor}` : ""}`}>
+          {v.anuladaMotivo ?? ""}
+        </Alert>
+      )}
       <table className="tbl">
         <tbody>
           {v.lineas.map((l) => (
             <tr key={l.id}>
-              <td>{l.descripcion}</td>
+              <td className="linea-producto">{l.descripcion}</td>
               <td className="num">
                 {l.cantidad} × {monto(l.precioUnitario)}
               </td>
@@ -245,19 +258,14 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
           </tr>
         </tbody>
       </table>
-      <h3>Pagos</h3>
+      <h3>{v.pagos.length > 1 ? "Pago dividido" : "Pago"}</h3>
       <table className="tbl">
         <tbody>
           {v.pagos.map((pg) => (
             <tr key={pg.id}>
-              <td>
-                {pg.forma}
-                {pg.banco && ` · ${pg.banco}`}
-                {pg.referencia && ` · ref. ${pg.referencia}`}
-                {pg.ultimos4 && ` · ****${pg.ultimos4}`}
-              </td>
+              <td>{descripcionPago(pg)}</td>
               <td className="num">{monto(pg.monto)}</td>
-              <td className="num muted">{pg.vuelto ? `recibió ${monto(pg.recibido ?? 0)}, vuelto ${monto(pg.vuelto)}` : ""}</td>
+              <td className="num muted">{pg.recibido != null ? `recibió ${monto(pg.recibido)}${pg.vuelto ? `, vuelto ${monto(pg.vuelto)}` : ""}` : ""}</td>
               <td>
                 {puedeAjustar && v.estado === "completada" && (
                   <Button icono={Pencil} onClick={() => setCorrigiendo(pg)}>
@@ -273,6 +281,9 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
         <Alert tono="info">
           La caja de esta venta ya se cerró. {puede("caja.admin") ? "Una corrección o anulación queda como ajuste en la caja de hoy." : "Solo el dueño puede corregirla o anularla."}
         </Alert>
+      )}
+      {v.turnoAbierto && !puedeAjustar && v.estado === "completada" && (
+        <Alert tono="info">Para anular esta venta o cambiar su forma de pago, pida al dueño que entre con su PIN.</Alert>
       )}
       {correcciones.length > 0 && (
         <>
@@ -290,7 +301,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
       <Mensaje error={error} />
       <div className="fila-botones">
         <Button icono={Printer} onClick={reimprimir}>
-          Reimprimir (sale como COPIA)
+          {v.impreso ? "Reimprimir (sale como COPIA)" : "Imprimir tiquete"}
         </Button>
         {v.estado === "completada" && !v.requiereFactura && puede("facturas") && (
           <Button icono={FileText} onClick={() => setFactura(true)}>
@@ -368,14 +379,14 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
     void listarBancos().then(setBancos);
   }, []);
   const nueva = formas.find((f) => f.id === forma);
-  const antes = formas.find((f) => f.id === p.pago.formaPagoId);
   // Turno cerrado: siempre el PIN del dueño. Abierto: solo si entra o sale efectivo de la gaveta.
   const sinCambios =
     forma === p.pago.formaPagoId &&
     (nueva?.requiereBanco ? banco || null : null) === (p.pago.bancoId ?? null) &&
     referencia.trim() === (p.pago.referencia ?? "") &&
     (nueva?.pideUltimos4 ? ultimos4 : "") === (p.pago.ultimos4 ?? "");
-  const pidePin = !p.turnoAbierto || (!!nueva && !!antes && nueva.daVuelto !== antes.daVuelto);
+  // Solo el dueño corrige, y siempre con su PIN.
+  const pidePin = true;
 
   return (
     <Modal titulo={`Corregir pago de ${monto(p.pago.monto)}`} onCerrar={p.onCerrar} ancho={480}>
@@ -431,7 +442,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         </Field>
         {pidePin && (
           <label className="campo">
-            {p.turnoAbierto ? "PIN del dueño (cambia el efectivo de la caja)" : "Su PIN de dueño (la caja de esta venta ya cerró)"}
+            {p.turnoAbierto ? "Su PIN de dueño" : "Su PIN de dueño (la caja de esta venta ya cerró: queda como ajuste en la de hoy)"}
             <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </label>
         )}
@@ -481,7 +492,7 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
             <CampoMonto valor={devolver} onCambio={setDevolver} />
           </Field>
         )}
-        <Field label="PIN del dueño">
+        <Field label="Su PIN de dueño">
           <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </Field>
         {error && <Alert tono="error">{error}</Alert>}

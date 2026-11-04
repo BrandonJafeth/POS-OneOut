@@ -111,12 +111,25 @@ export function Bancos() {
   return (
     <section className="card">
       <Mensaje error={error} />
+      <p className="muted">La abreviatura es lo que sale en el tiquete y en el cierre (por ejemplo «BCR»). Vacía = el nombre.</p>
       <table className="tbl">
+        <thead>
+          <tr>
+            <th>Banco</th>
+            <th>Abreviatura</th>
+            <th>Orden</th>
+            <th />
+            <th />
+          </tr>
+        </thead>
         <tbody>
           {lista.map((b, i) => (
             <tr key={b.id ?? "nuevo" + i}>
               <td>
                 <input aria-label="Nombre del banco" value={b.nombre} onChange={(e) => set(i, { nombre: e.target.value })} />
+              </td>
+              <td>
+                <input className="small" aria-label="Abreviatura en el tiquete" placeholder="BCR" maxLength={12} value={b.abreviatura} onChange={(e) => set(i, { abreviatura: e.target.value })} />
               </td>
               <td>
                 <input className="mini" aria-label="Orden" value={b.orden} onChange={(e) => set(i, { orden: Number(e.target.value) || 0 })} />
@@ -149,7 +162,7 @@ export function Bancos() {
         </tbody>
       </table>
       <div className="fila-botones">
-        <Button icono={Plus} onClick={() => setLista([...lista, { nombre: "", orden: 99, activo: true }])}>
+        <Button icono={Plus} onClick={() => setLista([...lista, { nombre: "", abreviatura: "", orden: 99, activo: true }])}>
           Nuevo banco
         </Button>
       </div>

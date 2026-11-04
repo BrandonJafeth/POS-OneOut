@@ -39,6 +39,8 @@ export interface ResultadoCobro {
   numero: string;
   vuelto: number;
   hayEfectivo: boolean;
+  /** Hay efectivo y la caja abre la gaveta con las ventas: pedir gaveta_venta después de imprimir. */
+  abrirGaveta: boolean;
 }
 
 /** Sin caja abierta de hoy, Rust lo rechaza ("La caja está cerrada…"). */
@@ -70,10 +72,6 @@ export interface VentaResumen {
 
 export function listarVentasDia(dia: string): Promise<VentaResumen[]> {
   return invocar<VentaResumen[]>("venta_listar_dia", { dia });
-}
-
-export async function registrarReimpresion(_actor: Actor, ventaId: string): Promise<void> {
-  await invocar("venta_reimpresion", { ventaId });
 }
 
 export interface Correccion {

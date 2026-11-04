@@ -6,7 +6,17 @@ import { bitacora } from "./bitacora";
 import { bool, db } from "./conexion";
 
 function aDepartamento(f: Record<string, unknown>): Departamento {
-  return { id: String(f.id), codigo: String(f.codigo), nombre: String(f.nombre), orden: Number(f.orden), activo: bool(f.activo) };
+  return { id: String(f.id), codigo: String(f.codigo), nombre: String(f.nombre), orden: Number(f.orden), activo: bool(f.activo), color: f.color == null ? null : String(f.color) };
+}
+
+/** Color de la píldora del departamento (lo valida también la base con un CHECK). null = el de la paleta. */
+export async function colorDepartamento(actor: Actor, id: string, color: string | null): Promise<void> {
+  if (!puede(actor.rol, "departamentos")) throw new SinPermiso("cambiar colores de departamentos");
+  if (color !== null && !/^#[0-9a-f]{6}$/i.test(color)) throw new Error("Color inválido");
+  await db().lote([
+    { id: "departamento.color", params: [color ? color.toLowerCase() : null, ahoraIso(), id] },
+    bitacora(actor.id, "departamento.editar", "departamento", id, { color }),
+  ]);
 }
 
 export async function listarDepartamentos(opc: { incluirInactivos?: boolean } = {}): Promise<Departamento[]> {

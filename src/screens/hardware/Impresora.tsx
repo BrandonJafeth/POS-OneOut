@@ -3,7 +3,7 @@ import Ajustes from "./Ajustes";
 import { copiar } from "../../lib/copiar";
 import { CODE_PAGES } from "../../lib/codepages";
 import { listPrinters, printRaw } from "../../lib/printerApi";
-import { colon, gaveta, textoSimple, tiquete, todosCodePages, type Doc, type TicketSettings } from "../../lib/tickets";
+import { colon, textoSimple, tiquete, todosCodePages, type Doc, type TicketSettings } from "../../lib/tickets";
 
 interface LogEntry {
   id: number;
@@ -152,13 +152,10 @@ export default function Impresora({ settings, onSettings }: Props) {
           <button disabled={busy} onClick={() => void run(diezSeguidos)}>
             Imprimir 10 tiquetes seguidos
           </button>
-          <button disabled={busy} onClick={() => void run(() => send("Abrir gaveta", gaveta(settings)))}>
-            Abrir gaveta
-          </button>
         </div>
         <p className="note">
-          "Abrir gaveta" solo hace algo si hay una gaveta conectada al puerto RJ11 de la impresora. Sin gaveta,
-          el resultado "OK" solo significa que el spooler recibió los bytes.
+          La gaveta no se abre desde aquí: solo con una venta en efectivo, una «No venta» con motivo o una orden del dueño con
+          su PIN (Caja). Para probarla, use «No venta» en la caja.
         </p>
         <p className="muted">
           "OK" = Windows aceptó el trabajo. Confirme siempre en el papel; si algo no sale, revise la cola de impresión

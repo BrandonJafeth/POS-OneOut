@@ -8,7 +8,8 @@ import { conMiles, leerMontoEntero } from "../../lib/texto";
 import CampoMonto from "../../ui/CampoMonto";
 import { monto } from "../../lib/tickets";
 
-export default function ConteoDinero(p: { denominaciones: number[]; valor: ConteoEntrada; onCambio(c: ConteoEntrada): void; etiquetaTotal?: string }) {
+/** `soloDenominaciones`: el cierre del cajero se cuenta billete por billete (sin "escribir el total"). */
+export default function ConteoDinero(p: { denominaciones: number[]; valor: ConteoEntrada; onCambio(c: ConteoEntrada): void; etiquetaTotal?: string; soloDenominaciones?: boolean }) {
   const porTotal = p.valor.total !== null;
   const totalRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -46,14 +47,14 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
 
   return (
     <div className="conteo">
-      <div className="segmento" role="group" aria-label="Forma de contar">
+      {!p.soloDenominaciones && <div className="segmento" role="group" aria-label="Forma de contar">
         <button type="button" aria-pressed={porTotal} onClick={() => p.onCambio({ cantidades: {}, total: totalConteo(p.valor) })}>
           Escribir el total
         </button>
         <button type="button" aria-pressed={!porTotal} onClick={() => p.onCambio({ cantidades: {}, total: null })}>
           Contar billetes y monedas
         </button>
-      </div>
+      </div>}
 
       {porTotal ? (
         <label className="campo conteo-directo">

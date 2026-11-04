@@ -1,28 +1,26 @@
-// Imprime el tiquete de una venta guardada. Si falla, la venta ya está guardada: se reimprime después.
+// Imprime el tiquete de una venta guardada en la impresora de tiquetes. Si falla, la venta ya está
+// guardada: se reimprime después. El original sale una vez; las demás, como COPIA (Rust lo revisa).
 import type { ConfigApp } from "../../db/config";
+import { ajustesPara } from "../../db/impresoras";
 import { obtenerNegocio } from "../../db/negocio";
-import { obtenerVenta, registrarReimpresion } from "../../db/ventas";
-import type { Actor } from "../../tipos";
-import { ajustesImpresora } from "../impresion";
-import { printRaw } from "../printerApi";
+import { obtenerVenta } from "../../db/ventas";
+import { invocar } from "../invocar";
 import { tiqueteVenta } from "./tiquete";
 
-export async function imprimirVenta(
-  actor: Actor,
-  ventaId: string,
-  config: ConfigApp,
-  opc: { copia?: boolean; abrirGaveta?: boolean; verCliente?: boolean } = {},
-): Promise<void> {
-  if (!config.impresora_nombre) throw new Error("No hay impresora elegida. El técnico la elige en Técnico → Hardware");
+export async function imprimirVenta(ventaId: string, config: ConfigApp, opc: { copia?: boolean; verCliente?: boolean } = {}): Promise<void> {
+  const ajustes = await ajustesPara("tiquete");
   const v = await obtenerVenta(ventaId);
   if (!v) throw new Error("Venta no encontrada");
-  const doc = tiqueteVenta(await obtenerNegocio(), v, ajustesImpresora(config), {
+  const doc = tiqueteVenta(await obtenerNegocio(), v, ajustes, {
     copia: opc.copia,
     textoNoFactura: config.texto_no_factura,
-    abrirGaveta: opc.abrirGaveta,
     mostrarIva: config.mostrar_iva,
     nombreCliente: opc.verCliente === false ? null : (v.cliente ?? v.nombreTiquete),
   });
-  await printRaw(config.impresora_nombre, doc.bytes);
-  if (opc.copia) await registrarReimpresion(actor, ventaId);
+  await invocar("venta_imprimir", { ventaId, data: Array.from(doc.bytes) });
+}
+
+/** Abre la gaveta por una venta con efectivo (Rust: una sola vez por venta). */
+export async function abrirGavetaVenta(ventaId: string): Promise<void> {
+  await invocar("gaveta_venta", { ventaId });
 }

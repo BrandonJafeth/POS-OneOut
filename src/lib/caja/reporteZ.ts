@@ -1,107 +1,329 @@
-// Reporte Z (cierre de caja) y comprobante de movimiento, para la POS-58 (32 columnas, ¢).
-// La reimpresión del Z sale marcada "COPIA" (Rust lleva la cuenta de impresiones).
-import { agruparPorForma, type Detalle, type Movimiento } from "../../db/caja";
+// Reporte Z (cierre de caja), tiquete por departamento, corte parcial y comprobante de movimiento.
+// Formato basado en el cierre del sistema anterior: resumen por forma de pago, efectivo, ventas por
+// usuario, totales por departamento, detalle de tarjeta/SINPE/transferencia, movimientos, conteo
+// por billetes y monedas, firmas; y al final, si se elige, el detalle completo por departamento
+// (Co/Ta/De/Mx, producto, cantidad, precio, monto y efectivo).
+//
+// El contenido se arma una sola vez como líneas de texto para un ancho dado (32 columnas en 58 mm,
+// 48 en 80 mm, ~90 en el PDF carta): la térmica y el PDF dicen exactamente lo mismo.
+// Si los números no cuadran entre sí, no se arma nada: se avisa (Rust también lo revisa).
+import type { Corte, DepartamentoDesglose, Detalle, Movimiento, Resumen } from "../../db/caja";
+import { agruparPorForma } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { escribirEncabezado } from "../impresion";
-import { fechaHora, lr, monto, SEP, SEP2, type Doc, type TicketSettings, wrap } from "../tickets";
+import { columnas, cortar, fechaHora, lr, monto, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
+/** Una línea del reporte, independiente de la impresora. */
+export interface LineaDoc {
+  t: string;
+  b?: boolean;
+  centro?: boolean;
+  /** Salto de página (solo en el PDF; en la térmica, nada). */
+  salto?: boolean;
+}
+
+export interface OpcionesZ {
+  copia: boolean;
+  /** Todas las ventas desglosadas por departamento y producto. */
+  detalleCompleto: boolean;
+  /** Un comprobante aparte por cada departamento con ventas. */
+  porDepartamento: boolean;
+  /** Denominaciones configuradas (para listar el conteo completo, también las que fueron 0). */
+  denominaciones?: number[];
+}
+
+/** Casillas del Z al abrir el cierre: las que el dueño o el técnico dejaron por defecto. */
+export function opcionesPorDefecto(e: { zDetalleCompleto: boolean; zPorDepartamento: boolean }): { detalleCompleto: boolean; porDepartamento: boolean } {
+  return { detalleCompleto: !!e.zDetalleCompleto, porDepartamento: !!e.zPorDepartamento };
+}
+
+export const DENOMINACIONES = [50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5];
+export const LEYENDA_CODIGOS = "Co=Contado Ta=Tarjeta De=Depósito/SINPE/Transf. Mx=Mixto";
+export const NOTA_USUARIOS = "Efectivo y diferencia corresponden a la caja, no a cada usuario.";
+
+const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
 const signo = (n: number) => (n < 0 ? "-" : n > 0 ? "+" : "") + monto(Math.abs(n));
+const den = (d: number) => (d >= 1000 ? `${d / 1000} mil` : String(d));
 
-export function reporteZ(n: Negocio, d: Detalle, s: TicketSettings, o: { copia: boolean }): Doc {
-  const { turno: t, resumen: r } = d;
-  const p = new EscPos(s.codePage, { sinModoChino: s.sinModoChino });
-  escribirEncabezado(p, n);
-  p.line(SEP2);
-  p.align("center").bold(true).line("CIERRE DE CAJA (Z)").bold(false);
-  if (o.copia) p.bold(true).line("*** COPIA ***").bold(false);
-  p.align("left");
-  p.line(lr("Día:", t.dia));
-  p.line(lr("Abrió:", `${t.usuarioApertura.slice(0, 12)} ${fechaHora(new Date(t.abiertoEn)).slice(11, 16)}`));
-  if (t.cerradoEn) p.line(lr("Cerró:", `${(t.usuarioCierre ?? "").slice(0, 12)} ${fechaHora(new Date(t.cerradoEn)).slice(11, 16)}`));
-  p.line(SEP);
-  p.line(lr(`Ventas (${r.ventas})`, monto(r.totalVentas)));
-  if (r.descuentos) p.line(lr("  Descuentos dados", monto(r.descuentos)));
-  if (r.anuladas) p.line(lr(`Anuladas (${r.anuladas})`, monto(r.totalAnuladas)));
-  // Si alguien más (el dueño) vendió en este turno, queda a su nombre.
-  if ((r.porUsuario ?? []).length > 1)
-    for (const u of r.porUsuario) p.line(lr(`  ${u.usuario.slice(0, 16)} (${u.ventas})`, d.veEsperado ? monto(u.total) : ""));
-  p.line(SEP);
-  p.bold(true).line("POR FORMA DE PAGO").bold(false);
-  for (const f of r.porForma) p.line(lr(`${f.nombre.slice(0, 18)} (${f.pagos})`, monto(f.monto)));
-  if (!r.porForma.length) p.line("  Sin cobros");
-  p.line(SEP);
-  p.bold(true).line("EFECTIVO").bold(false);
-  p.line(lr("Fondo inicial", monto(r.fondo)));
-  p.line(lr("Cobrado (recibido)", monto(r.recibidoEfectivo)));
-  if (r.vueltos) p.line(lr("Vueltos", "-" + monto(r.vueltos)));
-  if (r.entradas) p.line(lr("Entradas", "+" + monto(r.entradas)));
-  if (r.salidas) p.line(lr("Salidas", "-" + monto(r.salidas)));
-  if (d.veEsperado) p.bold(true).line(lr("Esperado", monto(r.efectivoEsperado))).bold(false);
-  if (t.contado != null) p.bold(true).line(lr("Contado", monto(t.contado))).bold(false);
-  if (d.veEsperado && t.diferencia != null) p.bold(true).line(lr(t.diferencia === 0 ? "Cuadra" : t.diferencia > 0 ? "Sobrante" : "Faltante", signo(t.diferencia))).bold(false);
-  if (t.notaCierre) wrap("Nota: " + t.notaCierre).forEach((l) => p.line(l));
-  if (r.movimientos.length) {
-    p.line(SEP);
-    p.bold(true).line("MOVIMIENTOS").bold(false);
-    for (const m of r.movimientos) {
-      p.line(lr(`${m.tipo === "salida" ? "-" : "+"} ${m.categoria}`.slice(0, 20), monto(m.monto)));
-      if (m.usuario !== t.usuarioApertura) p.line(`    por ${m.usuario.slice(0, 26)}`);
+/** Copia de caja.rs::revisar_cuadre: si algo no suma, el Z no se imprime. */
+export function descuadres(r: Resumen): string[] {
+  const d: string[] = [];
+  const formas = r.porForma.reduce((s, f) => s + f.monto, 0);
+  if (formas !== r.totalVentas) d.push(`formas de pago ${monto(formas)} ≠ ventas ${monto(r.totalVentas)}`);
+  if (r.conDesglose) {
+    const deps = r.desglose.departamentos.reduce((s, x) => s + x.monto, 0);
+    const filas = r.desglose.departamentos.flatMap((x) => x.filas).reduce((s, f) => s + f.monto, 0);
+    const ef = r.desglose.departamentos.reduce((s, x) => s + x.efectivo, 0);
+    if (deps !== r.totalVentas) d.push(`departamentos ${monto(deps)} ≠ ventas ${monto(r.totalVentas)}`);
+    if (filas !== r.totalVentas) d.push(`detalle ${monto(filas)} ≠ ventas ${monto(r.totalVentas)}`);
+    if (ef !== r.ventasEfectivo) d.push(`efectivo por departamento ${monto(ef)} ≠ efectivo cobrado ${monto(r.ventasEfectivo)}`);
+    for (const x of r.desglose.departamentos) {
+      const porForma = x.porForma.reduce((s, f) => s + f.monto, 0);
+      if (porForma !== x.monto) d.push(`${x.nombre}: formas de pago ${monto(porForma)} ≠ ${monto(x.monto)}`);
     }
   }
+  if (r.efectivoEsperado !== r.fondo + r.recibidoEfectivo - r.vueltos + r.entradas - r.salidas) d.push("efectivo esperado");
+  if (!r.cuadra) d.push(...r.descuadres);
+  return [...new Set(d)];
+}
+
+export function exigirCuadre(r: Resumen): void {
+  const d = descuadres(r);
+  if (d.length) throw new Error(`Los totales del cierre no cuadran (${d.join("; ")}). No se imprime para no dar números inconsistentes: avise al técnico.`);
+}
+
+// ─── Piezas ───
+
+function titulo(l: LineaDoc[], texto: string, cols: number) {
+  l.push({ t: sep(cols) }, { t: texto, b: true });
+}
+
+function filaDetalle(f: DepartamentoDesglose["filas"][number], cols: number): LineaDoc[] {
+  if (cols >= 60) {
+    const w = cols - 3 - 6 - 10 - 11 - 11;
+    return [{ t: `${f.codigo.padEnd(3)}${cortar(f.producto, w).padEnd(w)}${String(f.cantidad).padStart(6)}${monto(f.precio).padStart(10)}${monto(f.monto).padStart(11)}${monto(f.efectivo).padStart(11)}` }];
+  }
+  const cant = `x${f.cantidad}`;
+  return [{ t: lr(`${f.codigo} ${cortar(f.producto, cols - cant.length - 4)}`, cant, cols) }, { t: lr(`   ${monto(f.precio)}`, `${monto(f.monto)} ef ${monto(f.efectivo)}`, cols) }];
+}
+
+function encabezadoDetalle(cols: number): LineaDoc[] {
+  if (cols >= 60) {
+    const w = cols - 3 - 6 - 10 - 11 - 11;
+    return [{ t: `${"".padEnd(3)}${"Producto".padEnd(w)}${"Cant".padStart(6)}${"Precio".padStart(10)}${"Monto".padStart(11)}${"Efectivo".padStart(11)}`, b: true }];
+  }
+  return [{ t: lr("Tipo Producto", "Cant", cols) }, { t: lr("   Precio", "Monto ef Efectivo", cols) }];
+}
+
+function lineasDepto(x: DepartamentoDesglose, cols: number, conFormas: boolean): LineaDoc[] {
+  const l: LineaDoc[] = [{ t: cortar(x.nombre, cols), b: true }];
+  for (const f of x.filas) l.push(...filaDetalle(f, cols));
+  l.push({ t: lr(`Subtotal (${x.cantidad})`, monto(x.monto), cols), b: true }, { t: lr("  en efectivo", monto(x.efectivo), cols) });
+  if (conFormas) for (const f of x.porForma) l.push({ t: lr(`  ${cortar(f.forma, cols - 14)}`, monto(f.monto), cols) });
+  return l;
+}
+
+/** El nombre del negocio ya va en el encabezado; solo se repite si el logo lo reemplaza. */
+function nombreSiHayLogo(n: Negocio): string {
+  return n.logo ? n.nombreComercial : "";
+}
+
+function cabeceraTurno(d: Detalle, cols: number, nombreNegocio: string): LineaDoc[] {
+  const t = d.turno;
+  const l: LineaDoc[] = [];
+  if (nombreNegocio) l.push({ t: lr("Negocio:", cortar(nombreNegocio, cols - 9), cols) });
+  l.push({ t: lr("Caja:", cortar(t.caja || "Caja", cols - 6), cols) }, { t: lr("Día:", t.dia, cols) });
+  l.push({ t: lr("Abrió:", `${cortar(t.usuarioApertura, cols - 14)} ${hora(t.abiertoEn)}`, cols) });
+  if (t.cerradoEn) l.push({ t: lr("Cerró:", `${cortar(t.usuarioCierre ?? "", cols - 14)} ${hora(t.cerradoEn)}`, cols) });
+  return l;
+}
+
+// ─── Reporte Z ───
+
+export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): LineaDoc[] {
+  const { turno: t, resumen: r } = d;
+  const l: LineaDoc[] = [{ t: sep2(cols) }, { t: "CIERRE DE CAJA (Z)", b: true, centro: true }];
+  if (o.copia) l.push({ t: "*** COPIA ***", b: true, centro: true });
+  l.push(...cabeceraTurno(d, cols, nombreSiHayLogo(n)));
+
+  titulo(l, "VENTAS POR FORMA DE PAGO", cols);
+  for (const f of r.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.nombre, cols - 18)} (${f.pagos})`, monto(f.monto), cols) });
+  if (!r.porForma.length) l.push({ t: "  Sin ventas" });
+  l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
+
+  titulo(l, "EFECTIVO", cols);
+  l.push({ t: lr("Fondo inicial", monto(r.fondo), cols) });
+  l.push({ t: lr("Contado (recibido)", "+" + monto(r.recibidoEfectivo), cols) });
+  l.push({ t: lr("Entradas", "+" + monto(r.entradas), cols) });
+  l.push({ t: lr("Salidas", "-" + monto(r.salidas), cols) });
+  l.push({ t: lr("Vueltos", "-" + monto(r.vueltos), cols) });
+  l.push({ t: lr("Efectivo esperado", monto(r.efectivoEsperado), cols), b: true });
+  if (t.contado != null) l.push({ t: lr("Efectivo contado", monto(t.contado), cols), b: true });
+  if (t.diferencia != null) l.push({ t: lr(t.diferencia === 0 ? "Diferencia: cuadra" : t.diferencia > 0 ? "Sobrante" : "Faltante", signo(t.diferencia), cols), b: true });
+  if (t.notaCierre) wrap("Nota: " + t.notaCierre, cols).forEach((x) => l.push({ t: x }));
+
+  titulo(l, "OTROS", cols);
+  l.push({ t: lr("Descuentos", monto(r.descuentos), cols) });
+  l.push({ t: lr(`Anulaciones (${r.anuladas})`, monto(r.totalAnuladas), cols) });
+  l.push({ t: lr("Aperturas sin venta", String(r.noVentas.length), cols) });
+  if (r.noVentaUmbral > 0 && r.noVentas.length >= r.noVentaUmbral)
+    wrap(`ATENCION: muchas aperturas sin venta (umbral ${r.noVentaUmbral})`, cols).forEach((x) => l.push({ t: x, b: true }));
+  l.push({ t: lr("Cortes realizados", String(r.cortes.length), cols) });
+
+  titulo(l, "VENTAS POR USUARIO", cols);
+  for (const u of r.porUsuario) l.push({ t: lr(`${cortar(u.usuario, cols - 18)} (${u.ventas} tiq.)`, monto(u.total), cols) });
+  if (!r.porUsuario.length) l.push({ t: "  Sin ventas" });
+  wrap(NOTA_USUARIOS, cols).forEach((x) => l.push({ t: x }));
+
+  if (r.conDesglose && r.desglose.departamentos.length) {
+    titulo(l, "POR DEPARTAMENTO", cols);
+    for (const x of r.desglose.departamentos) {
+      l.push({ t: lr(`${cortar(x.nombre, cols - 18)} (${x.cantidad})`, monto(x.monto), cols) });
+      l.push({ t: lr("  en efectivo", monto(x.efectivo), cols) });
+    }
+    l.push({ t: lr(`Total (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true });
+  }
+
   const grupos = agruparPorForma(r.pagosElectronicos ?? []);
   if (grupos.length) {
-    p.line(SEP);
-    p.bold(true).line("DETALLE TARJETA/SINPE/TRANSF.").bold(false);
+    titulo(l, "DETALLE TARJETA/SINPE/TRANSF.", cols);
     for (const g of grupos) {
-      p.bold(true).line(lr(`${g.forma.slice(0, 18)} (${g.pagos.length})`, monto(g.total))).bold(false);
+      l.push({ t: lr(`${cortar(g.forma, cols - 14)} (${g.pagos.length})`, monto(g.total), cols), b: true });
       for (const x of g.pagos) {
-        const dato = x.ultimos4 ? `****${x.ultimos4}` : (x.referencia ?? "").slice(0, 10);
-        p.line(lr(`  ${fechaHora(new Date(x.fecha)).slice(11, 16)} ${x.ventaNumero} ${dato}`.slice(0, 22), monto(x.monto)));
+        const dato = x.ultimos4 ? `****${x.ultimos4}` : [x.banco, x.referencia && `ref ${x.referencia}`].filter(Boolean).join(" ");
+        const izq = `${hora(x.fecha)} ${x.ventaNumero}`;
+        const cabe = cols - monto(x.monto).length - 1 - izq.length - 1;
+        // Si la referencia no cabe en la misma línea, va completa en la siguiente (no se corta).
+        if (dato.length <= cabe) l.push({ t: lr(`${izq} ${dato}`.trimEnd(), monto(x.monto), cols) });
+        else l.push({ t: lr(izq, monto(x.monto), cols) }, ...wrap(dato, cols - 2).map((y) => ({ t: `  ${y}` })));
       }
     }
   }
+
+  titulo(l, "MOVIMIENTOS DE EFECTIVO", cols);
+  if (!r.movimientos.length) l.push({ t: "  Sin entradas ni salidas" });
+  for (const m of r.movimientos) {
+    l.push({ t: lr(`${m.tipo === "salida" ? "-" : "+"} ${cortar(m.categoria, cols - 14)}`, monto(m.monto), cols) });
+    l.push({ t: `  ${hora(m.fecha)} ${cortar([m.usuario, m.motivo].filter(Boolean).join(" · "), cols - 8)}` });
+  }
+
+  if (r.noVentas.length) {
+    titulo(l, "APERTURAS SIN VENTA", cols);
+    for (const x of r.noVentas) {
+      const que = x.causa === "dueno" ? `Orden del dueño: ${x.motivo}` : x.nota ? `${x.motivo}: ${x.nota}` : x.motivo;
+      wrap(`${hora(x.fecha)} ${x.usuario} · ${que}`, cols).forEach((y) => l.push({ t: y }));
+    }
+  }
+
+  if (r.cortes.length) {
+    titulo(l, "CORTES", cols);
+    for (const k of r.cortes) {
+      l.push({ t: lr(`${hora(k.fecha)} ${cortar(k.usuario, cols - 20)}`, monto(k.total), cols) });
+      if (k.retiro) l.push({ t: lr("  retiro", "-" + monto(k.retiro), cols) });
+    }
+  }
+
   if (r.ajustes.length) {
-    p.line(SEP);
-    p.bold(true).line("AJUSTES DE TURNOS ANTERIORES").bold(false);
-    for (const a of r.ajustes) p.line(lr(`${a.tipo === "anulacion" ? "Anula" : "Pago"} ${a.ventaNumero}`.slice(0, 20), monto(a.monto)));
+    titulo(l, "AJUSTES DE TURNOS ANTERIORES", cols);
+    for (const a of r.ajustes) l.push({ t: lr(`${a.tipo === "anulacion" ? "Anula" : "Pago"} ${a.ventaNumero}`, monto(a.monto), cols) });
   }
-  if (t.conteoFinal && Object.keys(t.conteoFinal).length) {
-    p.line(SEP);
-    p.bold(true).line("CONTEO").bold(false);
-    if ("total" in t.conteoFinal) p.line("  Total escrito, sin detalle");
-    else
-      for (const [den, cant] of Object.entries(t.conteoFinal).sort((a, b) => Number(b[0]) - Number(a[0])))
-        p.line(lr(`  ${cant} x ${monto(Number(den))}`, monto(Number(den) * cant)));
+
+  titulo(l, "CONTEO", cols);
+  const c = t.conteoFinal;
+  if (c && "total" in c) l.push({ t: lr("Total escrito, sin detalle", monto(Number(c.total)), cols) });
+  else {
+    const lista = (o.denominaciones?.length ? o.denominaciones : DENOMINACIONES).slice().sort((a, b) => b - a);
+    for (const [nombre, filtro] of [["BILLETES", (x: number) => x >= 1000], ["MONEDAS", (x: number) => x < 1000]] as const) {
+      l.push({ t: nombre });
+      for (const x of lista.filter(filtro)) {
+        const cant = Number(c?.[String(x)] ?? 0);
+        l.push({ t: lr(`  ${den(x).padEnd(7)} ${String(cant).padStart(4)}`, monto(cant * x), cols) });
+      }
+    }
+    if (t.contado != null) l.push({ t: lr("Total contado", monto(t.contado), cols), b: true });
   }
-  if (d.bitacoraOk === false) {
-    p.line(SEP);
-    p.bold(true).line("ATENCION: BITACORA ALTERADA").bold(false);
+
+  if (d.bitacoraOk === false) l.push({ t: sep(cols) }, { t: "ATENCION: BITACORA ALTERADA", b: true });
+
+  if (o.detalleCompleto && r.conDesglose) {
+    l.push({ t: sep2(cols), salto: true }, { t: "DETALLE DE VENTAS", b: true, centro: true });
+    wrap(LEYENDA_CODIGOS, cols).forEach((x) => l.push({ t: x }));
+    l.push(...encabezadoDetalle(cols));
+    for (const x of r.desglose.departamentos) l.push({ t: sep(cols) }, ...lineasDepto(x, cols, false));
+    l.push({ t: sep2(cols) }, { t: lr(`TOTAL GENERAL (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true }, { t: lr("  en efectivo", monto(r.desglose.efectivo), cols) });
   }
-  p.line(SEP2);
-  p.line("");
-  p.line("Firma: ________________________");
+
+  l.push({ t: sep2(cols) }, { t: "" }, { t: `Cajero: ${cortar(t.usuarioCierre ?? "", cols - 8)}` }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) }, { t: "" }, { t: "Supervisor:" }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
+  return l;
+}
+
+/** Comprobante aparte de un departamento: encabezado, detalle, subtotal por forma de pago y total. */
+export function lineasDepartamento(n: Negocio, d: Detalle, x: DepartamentoDesglose, cols: number, o: { copia: boolean }): LineaDoc[] {
+  const l: LineaDoc[] = [{ t: sep2(cols) }, { t: "VENTAS POR DEPARTAMENTO", b: true, centro: true }];
+  if (o.copia) l.push({ t: "*** COPIA ***", b: true, centro: true });
+  l.push(...cabeceraTurno(d, cols, nombreSiHayLogo(n)));
+  l.push({ t: lr("Departamento:", cortar(x.nombre, cols - 14), cols), b: true });
+  l.push({ t: sep(cols) });
+  wrap(LEYENDA_CODIGOS, cols).forEach((y) => l.push({ t: y }));
+  l.push(...encabezadoDetalle(cols));
+  for (const f of x.filas) l.push(...filaDetalle(f, cols));
+  l.push({ t: sep(cols) }, { t: "POR FORMA DE PAGO", b: true });
+  for (const f of x.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.forma, cols - 16)}`, monto(f.monto), cols) });
+  l.push({ t: lr(`TOTAL ${cortar(x.nombre, cols - 22)} (${x.cantidad})`, monto(x.monto), cols), b: true });
+  l.push({ t: lr("  en efectivo", monto(x.efectivo), cols) }, { t: sep2(cols) });
+  return l;
+}
+
+/** Líneas → bytes ESC/POS, con el encabezado del negocio (logo) arriba. */
+export function aEscPos(n: Negocio, cuerpo: LineaDoc[], s: TicketSettings): Doc {
+  const cols = columnas(s);
+  const p = new EscPos(s.codePage, { sinModoChino: s.sinModoChino });
+  escribirEncabezado(p, n, cols);
+  for (const x of cuerpo) {
+    if (x.centro) p.align("center");
+    if (x.b) p.bold(true);
+    p.line(x.t.slice(0, cols));
+    if (x.b) p.bold(false);
+    if (x.centro) p.align("left");
+  }
   p.feed(4);
   if (s.cortador) p.cut();
   return { bytes: p.bytes(), missing: [...p.missing] };
 }
 
+export function reporteZ(n: Negocio, d: Detalle, s: TicketSettings, o: OpcionesZ): Doc {
+  return aEscPos(n, lineasZ(n, d, columnas(s), o), s);
+}
+
+/**
+ * Lo que sale al cerrar (o al reimprimir): el Z y, si se eligió, un comprobante por departamento con
+ * ventas. Si los totales no cuadran, no devuelve nada: lanza el error.
+ */
+export function documentosCierre(n: Negocio, d: Detalle, s: TicketSettings, o: OpcionesZ): Doc[] {
+  exigirCuadre(d.resumen);
+  const docs = [reporteZ(n, d, s, o)];
+  if (o.porDepartamento && d.resumen.conDesglose)
+    for (const x of d.resumen.desglose.departamentos) docs.push(aEscPos(n, lineasDepartamento(n, d, x, columnas(s), { copia: o.copia }), s));
+  return docs;
+}
+
+// ─── Corte parcial ───
+
+export function lineasCorte(n: Negocio, k: Corte, cols: number): LineaDoc[] {
+  const r = k.resumen;
+  const t = k.turno;
+  const l: LineaDoc[] = [{ t: sep2(cols) }, { t: "CORTE DE CAJA", b: true, centro: true }, { t: "(el turno sigue abierto)", centro: true }];
+  if (nombreSiHayLogo(n)) l.push({ t: lr("Negocio:", cortar(n.nombreComercial, cols - 9), cols) });
+  l.push({ t: lr("Caja:", cortar(t.caja || "Caja", cols - 6), cols) }, { t: lr("Turno:", `${t.dia} ${hora(t.abiertoEn)}`, cols) });
+  l.push({ t: lr("Corte:", `${cortar(k.usuario, cols - 14)} ${hora(k.fecha)}`, cols) });
+  titulo(l, "ACUMULADO POR FORMA DE PAGO", cols);
+  for (const f of r.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.nombre, cols - 18)} (${f.pagos})`, monto(f.monto), cols) });
+  if (!r.porForma.length) l.push({ t: "  Sin ventas" });
+  l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
+  titulo(l, "EFECTIVO", cols);
+  l.push({ t: lr("Efectivo esperado", monto(r.efectivoEsperado), cols) });
+  if (k.retiro) l.push({ t: lr("Retiro", "-" + monto(k.retiro), cols) });
+  l.push({ t: lr("Queda en la caja", monto(k.efectivoDespues), cols), b: true });
+  if (k.retiro) l.push({ t: sep2(cols) }, { t: "" }, { t: "Retira:" }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
+  else l.push({ t: sep2(cols) });
+  return l;
+}
+
+export function reporteCorte(n: Negocio, k: Corte, s: TicketSettings): Doc {
+  return aEscPos(n, lineasCorte(n, k, columnas(s)), s);
+}
+
+// ─── Comprobante de movimiento ───
+
 /** Comprobante de una entrada/salida de efectivo (para firmar y guardar con el dinero). */
 export function comprobanteMovimiento(n: Negocio, m: Movimiento, s: TicketSettings): Doc {
-  const p = new EscPos(s.codePage, { sinModoChino: s.sinModoChino });
-  escribirEncabezado(p, n);
-  p.line(SEP2);
-  p.align("center").bold(true).line(m.tipo === "salida" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO").bold(false).align("left");
-  p.line(lr("Fecha:", fechaHora(new Date(m.fecha))));
-  p.line(lr("Usuario:", m.usuario.slice(0, 22)));
-  p.line(lr("Motivo:", m.categoria.slice(0, 23)));
-  if (m.motivo) wrap("Nota: " + m.motivo).forEach((l) => p.line(l));
-  p.bold(true).line(lr("MONTO", monto(m.monto))).bold(false);
-  if (m.autorizadoPor) p.line("Autorizado por el dueño");
-  p.line(SEP2);
-  p.line("");
-  p.line("Firma: ________________________");
-  p.feed(4);
-  if (s.cortador) p.cut();
-  return { bytes: p.bytes(), missing: [...p.missing] };
+  const c = columnas(s);
+  const l: LineaDoc[] = [{ t: sep2(c) }, { t: m.tipo === "salida" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO", b: true, centro: true }];
+  l.push({ t: lr("Fecha:", fechaHora(new Date(m.fecha)), c) }, { t: lr("Usuario:", cortar(m.usuario, c - 9), c) }, { t: lr("Motivo:", cortar(m.categoria, c - 8), c) });
+  if (m.motivo) wrap("Nota: " + m.motivo, c).forEach((x) => l.push({ t: x }));
+  l.push({ t: lr("MONTO", monto(m.monto), c), b: true });
+  if (m.autorizadoPor) l.push({ t: `Autorizado por: ${cortar(m.autorizadoPor, c - 16)}` });
+  l.push({ t: sep2(c) }, { t: "" }, { t: "Firma: ________________________" });
+  return aEscPos(n, l, s);
 }

@@ -1,13 +1,13 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.1.0, con las migraciones 1 a 5.
+Aplica a la versión 0.1.0, con las migraciones 1 a 9.
 
 ## 1. Modelo de amenazas
 
 | Quién | Qué podría intentar | Cómo se frena |
 |---|---|---|
-| Cajero curioso o deshonesto | Darse más descuento o quitar ventas. Sacar efectivo sin rastro. Ver datos de clientes. Cambiar una forma de pago después del cierre. | Rust valida todo con el usuario de la sesión. El tope de descuento y las salidas grandes piden el PIN del dueño en ese momento. Los pagos de un turno cerrado no se pueden modificar (trigger). Todo queda en una bitácora encadenada. |
+| Cajero curioso o deshonesto | Darse más descuento o quitar ventas. Sacar efectivo sin rastro. Ver datos de clientes. Cambiar una forma de pago después del cierre. Ver lo vendido en el turno ("ya vamos bien") y dejar de registrar ventas. Abrir la gaveta sin motivo. Corregir el conteo después de ver el faltante. | Rust valida todo con el usuario de la sesión. El tope de descuento y las salidas grandes piden el PIN del dueño en ese momento. Anular y cambiar la forma de pago son solo del dueño. Con el turno abierto, ningún comando le devuelve totales de ventas al cajero. La gaveta solo abre por venta en efectivo, "no venta" con motivo u orden del dueño, y todo queda registrado. El conteo cerrado no se edita (trigger). Los pagos de un turno cerrado no se pueden modificar (trigger). Todo queda en una bitácora encadenada. |
 | Alguien con acceso a la pantalla (por ejemplo, DevTools en una compilación de desarrollo) | Llamar comandos con otro rol o mandar SQL propio. | El usuario siempre sale de la sesión guardada en Rust. Las escrituras solo pasan por operaciones con nombre (`sentencias.json`), cada una con su permiso. La lectura acepta un solo `SELECT`, en modo solo lectura y sin tablas sensibles. |
 | Ladrón de la computadora o del disco | Leer clientes y ventas copiando `pos.db`. | La base va cifrada con SQLCipher. La clave de 256 bits se guarda protegida con DPAPI y solo sirve para el usuario de Windows de esa máquina. |
 | Alguien que encuentra una memoria USB con el respaldo | Abrir el respaldo o alterarlo. | Va cifrado con AES-256-GCM y la clave sale de la contraseña con Argon2id. GCM detecta cualquier byte alterado, y la restauración además revisa la integridad. |
@@ -70,7 +70,18 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 
 ### Caja
 - Hay un solo turno abierto por caja (índice único). Sin un turno abierto de hoy no se cobra.
+- El turno es de la caja (`caja_turno_compartido`, por defecto sí). Cada venta, pago, movimiento, corte, apertura de gaveta y anulación guarda su usuario y su turno. Sin la opción, solo quien abrió vende y mueve efectivo en ese turno (el dueño puede cerrarlo).
+- **Totales ocultos al cajero con el turno abierto** (`caja::ve_totales`): `caja_detalle` le manda solo fondo, movimientos y aperturas sin venta; `caja_turnos` le manda las ventas y el total en `null`; `venta_listar_dia`, `venta_obtener`, `venta_imprimir` y `venta_pendientes_factura` solo le dan sus propios tiquetes; `caja_z` falla con el turno abierto; `caja_corte` es del dueño; y `bd_leer` le rechaza `ventas` y `venta_lineas`. Una salida rechazada por falta de efectivo queda en la bitácora (`caja.salida_rechazada`), para que el mensaje no sirva para adivinar lo esperado sin dejar rastro.
+- **Conteo ciego y bloqueado**: el cajero cuenta billete por billete sin ver lo esperado; al confirmar se cierra el turno y el trigger `caja_turnos_conteo_bloqueado` impide cambiar conteo, contado, esperado, diferencia o totales de un turno cerrado. Solo `reabrir` (dueño, PIN, motivo, mismo día, último turno) vuelve a abrirlo; el cierre anterior queda en la bitácora.
+- **Cierre Z**: los totales congelados se revisan otra vez al leerlos (departamentos, detalle, formas de pago y efectivo deben cuadrar). Si no cuadran, Rust no imprime. La reimpresión exige el PIN del dueño y la marca "*** COPIA ***" en cada papel.
+- **Anular y corregir pagos**: solo el dueño, con su PIN y motivo (`confirmar_dueno`). La venta anulada no se borra.
 - Los pagos y los montos de una venta de un turno cerrado no se pueden cambiar (triggers). Una corrección posterior queda como `caja_ajustes` en el turno actual, la hace solo el dueño con PIN, y una devolución de efectivo entra como salida.
+
+### Gaveta e impresoras
+- La gaveta solo se abre por `gaveta_venta` (venta con efectivo del turno abierto, una sola vez: `ventas.gaveta_abierta_en`), `gaveta_no_venta` (motivo de la lista; "Otro" pide texto) o `gaveta_dueno` (PIN del dueño). Las dos últimas quedan en `gaveta_aperturas` (solo añadir, triggers) y en la bitácora; si el pulso no llega, no queda registro.
+- **Todo lo que se imprime pasa por una lista blanca** (`escpos::validar`): texto, saltos, negrita, tamaño, alineación, tabla de caracteres, código de barras, logo (sus datos se saltan por su largo) y corte. `ESC p`, `DLE DC4` y cualquier otro control se rechazan: ni un tiquete, ni el diagnóstico del técnico, ni una prueba de impresora pueden abrir la gaveta.
+- Las impresoras se eligen de lo que detecta Windows (impresoras, puertos COM, dispositivos USB de impresora); Rust lo vuelve a revisar al guardar y al imprimir. No se aceptan rutas escritas a mano (`\\otra-pc\cola`).
+- El tiquete original sale una vez (`ventas.impreso_en`); después solo como COPIA marcada, y cada copia queda en la bitácora.
 
 ### Exportaciones e impresión
 - El CSV de clientes antepone `'` a las celdas que empiezan con `= + - @`, tabulador o retorno, para evitar fórmulas.
@@ -95,7 +106,9 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Borrar todo el archivo de la base**. La bitácora no puede protegerse de eso; lo que lo cubre son los respaldos guardados fuera de la computadora.
 - **Facturación electrónica de Hacienda**. Se hace en otro sistema; aquí solo se marca como hecha.
 - **El instalador no está firmado** con certificado de código. Windows SmartScreen va a avisar. Verifique el SHA-256.
-- **Lectura de catálogo**: `bd_leer` todavía permite a la pantalla leer las tablas no sensibles (productos, ventas sin datos de cliente, config). Pasar esas lecturas a comandos tipados es trabajo pendiente.
+- **Lectura de catálogo**: `bd_leer` todavía permite a la pantalla leer las tablas no sensibles (productos, config y, para el dueño y el técnico, ventas sin datos de cliente). Pasar esas lecturas a comandos tipados es trabajo pendiente.
+- **Turno compartido**: si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona (el Z lo dice). Para control por cajero, desactive `caja_turno_compartido`.
+- **Gaveta abierta a mano** (llave o botón físico de la gaveta): no pasa por el sistema; solo el arqueo lo detecta.
 - **Un solo puesto**: no hay red ni sincronización. El módulo de nube existe pero no está activo.
 
 ## 4. Recomendaciones para cada negocio
@@ -120,11 +133,18 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | Sin solicitudes de red | La CSP solo permite `ipc:`, `on_navigation` y `on_new_window` bloquean, y no hay capacidad HTTP (revisión de configuración; ver la lista de la sección 7). |
 | La pantalla no puede pedir SQL arbitrario | `bd::tests::lectura_solo_select_y_sin_tablas_sensibles`, `bd::tests::lote_solo_por_nombre_y_con_permiso`, `tests/base.test.ts` |
 | Precio o descuento manipulados en la pantalla | `ventas::tests::cobro_exige_turno_y_valida_precio_y_descuento` |
+| El cajero no recibe totales del turno abierto (ningún comando, ni `bd_leer`) | `ventas::tests::cajero_no_recibe_totales_del_turno_abierto` |
+| El cajero no anula ni cambia el pago de una venta cobrada | `ventas::tests::solo_el_dueno_anula_o_cambia_el_pago` |
+| Turno compartido y por persona | `ventas::tests::turno_compartido_cada_venta_con_su_usuario`, `ventas::tests::sin_turno_compartido_otro_no_vende`, `caja::tests::turno_por_persona_si_no_es_compartido` |
+| El conteo no se edita después de cerrar | `caja::tests::conteo_bloqueado_despues_de_cerrar` |
+| La gaveta solo abre por los tres caminos | `gaveta::tests::gaveta_solo_por_los_tres_caminos`, `escpos::tests::rechaza_gaveta_y_controles_raros`, `ventas::tests::dos_impresoras_y_la_venta_no_se_pierde` |
+| Cada documento a su impresora; solo destinos detectados | `impresoras::tests::cada_documento_a_su_impresora_y_solo_destinos_detectados` |
+| El Z cuadra; si no, no se imprime; COPIA con PIN | `ventas::tests::z_cuadra_por_departamento_y_efectivo_esperado`, `desglose::tests::*`, `tests/cierre.test.ts` |
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (28 pruebas, con SQLCipher). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
-- TypeScript: `npm test` (98 pruebas).
+- Rust: `cd src-tauri && cargo test --lib` (54 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (130 pruebas).
 
 ## 6. Compilar y verificar una entrega
 

@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 mod bd;
 mod bitacora;
 mod caja;
@@ -5,7 +6,11 @@ mod calculo;
 mod clave;
 mod clientes;
 mod config;
+mod desglose;
+mod escpos;
+mod gaveta;
 mod importacion;
+mod impresoras;
 mod negocio;
 mod permisos;
 mod pin;
@@ -163,8 +168,8 @@ async fn sesion_tocar(st: St<'_>) -> Res<()> {
 
 #[tauri::command]
 async fn bd_leer(st: St<'_>, sql: String, params: Vec<Value>) -> Res<Vec<Map<String, Value>>> {
-    st.actor().await?;
-    st.bd()?.leer(&sql, &params).await
+    let a = st.actor().await?;
+    st.bd()?.leer(&a, &sql, &params).await
 }
 
 #[tauri::command]
@@ -298,11 +303,57 @@ async fn caja_revisada(st: St<'_>, turno_id: String) -> Res<()> {
     caja::marcar_revisada(st.pool()?, &a, &turno_id).await
 }
 
+/// Datos del Z de un turno cerrado y si la próxima impresión sale como COPIA.
 #[tauri::command]
 async fn caja_z(st: St<'_>, turno_id: String) -> Res<Value> {
     let a = st.actor().await?;
-    let (d, copia) = caja::imprimir_z(st.pool()?, &a, &turno_id).await?;
+    let (d, copia) = caja::datos_z(st.pool()?, &a, &turno_id).await?;
     Ok(json!({"detalle": d, "copia": copia}))
+}
+
+/// Imprime el Z (y los tiquetes por departamento) en la impresora de cierres. COPIA = PIN del dueño.
+#[tauri::command]
+async fn caja_z_imprimir(st: St<'_>, turno_id: String, documentos: Vec<Vec<u8>>, pin: Option<String>) -> Res<bool> {
+    let a = st.actor().await?;
+    caja::imprimir_z(st.pool()?, &a, &turno_id, &documentos, pin.as_deref()).await
+}
+
+#[tauri::command]
+async fn caja_nota_cierre(st: St<'_>, turno_id: String, nota: String) -> Res<()> {
+    let a = st.actor().await?;
+    caja::nota_cierre(st.pool()?, &a, &turno_id, &nota).await
+}
+
+#[tauri::command]
+async fn caja_corte(st: St<'_>, retiro: Option<caja::Retiro>, pin: Option<String>) -> Res<caja::Corte> {
+    let a = st.actor().await?;
+    caja::corte(st.pool()?, &a, caja::CAJA_1, retiro.as_ref(), pin.as_deref()).await
+}
+
+// ─────────── Gaveta (solo tres caminos: venta con efectivo, "no venta" con motivo, orden del dueño) ───────────
+
+#[tauri::command]
+async fn gaveta_venta(st: St<'_>, venta_id: String) -> Res<()> {
+    let a = st.actor().await?;
+    gaveta::por_venta(st.pool()?, &a, &venta_id).await
+}
+
+#[tauri::command]
+async fn gaveta_no_venta(st: St<'_>, motivo: String, nota: String) -> Res<()> {
+    let a = st.actor().await?;
+    gaveta::no_venta(st.pool()?, &a, caja::CAJA_1, &motivo, &nota).await
+}
+
+#[tauri::command]
+async fn gaveta_dueno(st: St<'_>, pin: String, motivo: String) -> Res<()> {
+    let a = st.actor().await?;
+    gaveta::orden_dueno(st.pool()?, &a, caja::CAJA_1, &pin, &motivo).await
+}
+
+#[tauri::command]
+async fn gaveta_aperturas(st: St<'_>, desde: String, hasta: String, usuario_id: Option<String>) -> Res<Vec<gaveta::Apertura>> {
+    let a = st.actor().await?;
+    gaveta::listar(st.pool()?, &a, caja::CAJA_1, &desde, &hasta, usuario_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -361,10 +412,11 @@ async fn venta_listar_dia(st: St<'_>, dia: String) -> Res<Vec<ventas::VentaResum
     ventas::listar_dia(st.pool()?, &a, caja::CAJA_1, &dia).await
 }
 
+/// Tiquete de una venta: el original una vez; después, solo COPIA. Devuelve si fue copia.
 #[tauri::command]
-async fn venta_reimpresion(st: St<'_>, venta_id: String) -> Res<()> {
+async fn venta_imprimir(st: St<'_>, venta_id: String, data: Vec<u8>) -> Res<bool> {
     let a = st.actor().await?;
-    ventas::registrar_reimpresion(st.pool()?, &a, &venta_id).await
+    ventas::imprimir_tiquete(st.pool()?, &a, &venta_id, &data).await
 }
 
 #[tauri::command]
@@ -513,22 +565,80 @@ async fn importacion_aplicar(st: St<'_>, pin: String, pedido: importacion::Pedid
     importacion::aplicar(st.pool()?, &a, &pin, &pedido).await
 }
 
-// ─────────── Impresora ───────────
+// ─────────── Impresoras ───────────
 
-/// Nombres de las impresoras instaladas en Windows.
+#[tauri::command]
+async fn impresoras_listar(st: St<'_>) -> Res<Vec<impresoras::Impresora>> {
+    let a = st.actor().await?;
+    impresoras::listar(st.pool()?, &a, caja::CAJA_1).await
+}
+
+/// Lo que detecta el sistema operativo (la pantalla solo elige de aquí).
+#[tauri::command]
+async fn impresoras_detectar(st: St<'_>) -> Res<printer::Detectadas> {
+    let a = st.actor().await?;
+    impresoras::detectar(&a)
+}
+
+#[tauri::command]
+async fn impresora_guardar(st: St<'_>, datos: impresoras::Datos) -> Res<String> {
+    let a = st.actor().await?;
+    impresoras::guardar(st.pool()?, &a, caja::CAJA_1, &datos).await
+}
+
+#[tauri::command]
+async fn impresora_eliminar(st: St<'_>, id: String) -> Res<()> {
+    let a = st.actor().await?;
+    impresoras::eliminar(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn impresora_asignar(st: St<'_>, documento: String, impresora_id: Option<String>) -> Res<()> {
+    let a = st.actor().await?;
+    impresoras::asignar(st.pool()?, &a, caja::CAJA_1, &documento, impresora_id.as_deref()).await
+}
+
+#[tauri::command]
+async fn impresora_probar(st: St<'_>, id: String, data: Vec<u8>) -> Res<()> {
+    let a = st.actor().await?;
+    impresoras::probar(st.pool()?, &a, &id, &data).await
+}
+
+/// Formato de la impresora de un documento (ancho, code page…), para armarlo en la pantalla.
+#[tauri::command]
+async fn impresora_ajustes(st: St<'_>, documento: String) -> Res<Option<impresoras::Ajustes>> {
+    st.actor().await?;
+    impresoras::ajustes(st.pool()?, caja::CAJA_1, &documento).await
+}
+
+/// Comprobantes de movimiento, etiquetas y cortes (cierres y reportes). Tiquetes y Z tienen su comando.
+#[tauri::command]
+async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
+    let a = st.actor().await?;
+    match documento.as_str() {
+        "movimiento" => a.exigir("caja", "imprimir comprobantes de caja")?,
+        "etiqueta" => a.exigir("productos", "imprimir etiquetas")?,
+        "cierre" => a.exigir("caja.admin", "imprimir reportes de caja")?,
+        _ => return Err("Ese documento se imprime desde su pantalla".into()),
+    }
+    impresoras::enviar(st.pool()?, caja::CAJA_1, &documento, &data).await
+}
+
+/// Diagnóstico del técnico: impresoras de Windows instaladas.
 #[tauri::command]
 async fn list_printers(st: St<'_>) -> Res<Vec<String>> {
-    st.actor().await?;
+    let a = st.actor().await?;
+    a.exigir("config.tecnica", "usar el diagnóstico")?;
     printer::list_printers()
 }
 
-/// Manda `data` tal cual (RAW) a la impresora. Ok = el spooler aceptó el trabajo.
+/// Diagnóstico del técnico: manda bytes a una impresora de Windows instalada. También pasan por
+/// la lista blanca (no abren la gaveta).
 #[tauri::command]
 async fn print_raw(st: St<'_>, printer_name: String, data: Vec<u8>) -> Res<()> {
-    st.actor().await?;
-    if data.len() > 2_000_000 {
-        return Err("Trabajo de impresión demasiado grande".into());
-    }
+    let a = st.actor().await?;
+    a.exigir("config.tecnica", "usar el diagnóstico")?;
+    escpos::validar(&data)?;
     // Solo impresoras instaladas: un nombre inventado (\\equipo\cola) haría que Windows se conecte a otra máquina.
     if !printer::list_printers()?.contains(&printer_name) {
         return Err("Esa impresora no está instalada en este equipo".into());
@@ -630,7 +740,14 @@ pub fn run() {
             caja_reabrir,
             caja_revisada,
             caja_z,
+            caja_z_imprimir,
+            caja_nota_cierre,
+            caja_corte,
             caja_turnos,
+            gaveta_venta,
+            gaveta_no_venta,
+            gaveta_dueno,
+            gaveta_aperturas,
             venta_esperas,
             venta_espera_crear,
             venta_espera_guardar,
@@ -639,7 +756,7 @@ pub fn run() {
             venta_cobrar,
             venta_obtener,
             venta_listar_dia,
-            venta_reimpresion,
+            venta_imprimir,
             venta_correcciones,
             venta_corregir_pago,
             venta_anular,
@@ -663,6 +780,14 @@ pub fn run() {
             importacion_leer,
             importacion_aplicar,
             app_reiniciar,
+            impresoras_listar,
+            impresoras_detectar,
+            impresora_guardar,
+            impresora_eliminar,
+            impresora_asignar,
+            impresora_probar,
+            impresora_ajustes,
+            imprimir,
             list_printers,
             print_raw,
         ])

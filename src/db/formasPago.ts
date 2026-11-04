@@ -32,7 +32,7 @@ export async function listarBancos(opc: { incluirInactivos?: boolean } = {}): Pr
   const filas = await db().select(
     `SELECT * FROM bancos WHERE eliminado_en IS NULL ${opc.incluirInactivos ? "" : "AND activo = 1"} ORDER BY orden, nombre`,
   );
-  return filas.map((f) => ({ id: String(f.id), nombre: String(f.nombre), orden: Number(f.orden), activo: bool(f.activo) }));
+  return filas.map((f) => ({ id: String(f.id), nombre: String(f.nombre), abreviatura: String(f.abreviatura ?? ""), orden: Number(f.orden), activo: bool(f.activo) }));
 }
 
 function exigir(actor: Actor) {
@@ -63,7 +63,7 @@ export async function guardarBanco(actor: Actor, b: Omit<Banco, "id"> & { id?: s
   await db().lote([
     {
       id: "banco.guardar",
-      params: [id, b.nombre.trim(), b.orden, b.activo, ahora, ahora],
+      params: [id, b.nombre.trim(), b.abreviatura.trim().slice(0, 12), b.orden, b.activo, ahora, ahora],
     },
     bitacora(actor.id, "banco.guardar", "banco", id, { ...b, id }),
   ]);

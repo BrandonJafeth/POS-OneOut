@@ -7,15 +7,13 @@ import Mensaje, { textoError } from "../components/Mensaje";
 import { listarBitacora, verificarBitacora, type VerificacionBitacora } from "../db/bitacora";
 import { obtenerCaja } from "../db/cajas";
 import { guardarConfig, leerConfigCruda } from "../db/config";
+import { aSettings, ajustesDe } from "../db/impresoras";
 import { estadoSistema, type EstadoSistema } from "../db/usuarios";
-import { ajustesImpresora } from "../lib/impresion";
 import { PERMISOS, type Permiso } from "../lib/permisos";
-import { listPrinters } from "../lib/printerApi";
-import type { TicketSettings } from "../lib/tickets";
+import { DEFAULT_SETTINGS, type TicketSettings } from "../lib/tickets";
 import { ROL_NOMBRE, type Caja, type EntradaBitacora, type Rol } from "../tipos";
 import { Bancos, FormasPago } from "./config/FormasPago";
 import Departamentos from "./Departamentos";
-import Ajustes from "./hardware/Ajustes";
 import Diagnostico from "./hardware/Diagnostico";
 import { useToast } from "../ui/Toast";
 
@@ -148,57 +146,21 @@ function Claves() {
   );
 }
 
-/** Impresora elegida y ajustes ESC/POS (se guardan en config) + las pruebas del prototipo. */
+/** Las impresoras se configuran en Administración → Impresoras; aquí quedan las pruebas del prototipo. */
 function Hardware() {
-  const { actor, config, recargarConfig } = useSesion();
-  const [impresoras, setImpresoras] = useState<string[]>([]);
-  const [error, setError] = useState("");
-  const toast = useToast();
-  const ajustes = ajustesImpresora(config);
-
+  const { irA } = useSesion();
+  const [ajustes, setAjustes] = useState<TicketSettings>(DEFAULT_SETTINGS);
   useEffect(() => {
-    listPrinters().then(setImpresoras, (e) => setError(textoError(e)));
+    ajustesDe("tiquete").then((a) => a && setAjustes(aSettings(a)), () => undefined);
   }, []);
-
-  async function guardar(cambios: Record<string, unknown>) {
-    setError("");
-    try {
-      for (const [k, v] of Object.entries(cambios)) await guardarConfig(actor, k, v);
-      await recargarConfig();
-      toast.ok("Guardado.");
-    } catch (e) {
-      setError(textoError(e));
-    }
-  }
-
-  const guardarAjustes = (s: TicketSettings) =>
-    guardar({
-      impresora_code_page: s.codePage,
-      impresora_sin_modo_chino: s.sinModoChino,
-      impresora_barras: s.barras,
-      impresora_cortador: s.cortador,
-    });
-
   return (
     <>
       <section className="card">
-        <h2>Impresora de tiquetes y etiquetas</h2>
-        <div className="row">
-          <select value={config.impresora_nombre} onChange={(e) => guardar({ impresora_nombre: e.target.value })}>
-            <option value="">— Ninguna —</option>
-            {[...new Set([config.impresora_nombre, ...impresoras].filter(Boolean))].map((p) => (
-              <option key={p} value={p}>
-                {p}
-                {impresoras.includes(p) ? "" : " (no encontrada)"}
-              </option>
-            ))}
-          </select>
-          <button onClick={() => listPrinters().then(setImpresoras, (e) => setError(textoError(e)))}>Actualizar lista</button>
+        <h2>Impresoras</h2>
+        <p className="muted">Cada impresora (tiquetes, etiquetas…), su ancho, code page, cortador y gaveta, y a cuál va cada documento, se configuran en Administración → Impresoras.</p>
+        <div>
+          <Button onClick={() => irA("admin")}>Ir a Administración</Button>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <Ajustes settings={ajustes} onSettings={guardarAjustes} />
-        </div>
-        <Mensaje error={error} />
       </section>
       <section className="card">
         <h2>Diagnóstico (prototipo de hardware)</h2>
@@ -224,8 +186,9 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   clientes: "Clientes: lista, datos, exportar, anonimizar",
   respaldo: "Respaldo cifrado (lleva datos de clientes)",
   facturas: "Pendientes de factura electrónica",
-  caja: "Caja: abrir, movimientos, cerrar",
-  "caja.admin": "Caja: todos los turnos, reabrir, revisar",
+  caja: "Caja: abrir, movimientos, no venta, cerrar (conteo ciego)",
+  "caja.admin": "Caja: totales en vivo, cortes, todos los turnos, reabrir, anular",
+  impresoras: "Impresoras y gaveta",
 };
 
 function Permisos() {

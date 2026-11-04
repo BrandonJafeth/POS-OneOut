@@ -1,20 +1,21 @@
 // Cobro, consecutivo, turnos, descuentos con tope, corrección y anulación se prueban en Rust
-// (src-tauri/src/ventas.rs y caja.rs). Aquí: el cálculo que muestra la pantalla y lo impreso.
+// (src-tauri/src/ventas.rs y caja.rs). Aquí: el cálculo que muestra la pantalla y el tiquete impreso.
+// El cierre Z está en tests/cierre.test.ts.
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Detalle } from "../src/db/caja";
 import { obtenerNegocio } from "../src/db/negocio";
-import { reporteZ } from "../src/lib/caja/reporteZ";
 import { EscPos } from "../src/lib/escpos";
 import { interpret } from "../src/lib/preview";
-import { DEFAULT_SETTINGS } from "../src/lib/tickets";
+import { DEFAULT_SETTINGS, lr } from "../src/lib/tickets";
 import { calcularTotales, estadoVacio, redondear } from "../src/lib/venta/calculo";
 import { calcularPagos, sugerenciasEfectivo } from "../src/lib/venta/pagos";
-import { tiqueteVenta } from "../src/lib/venta/tiquete";
+import { lineasPago, tiqueteVenta } from "../src/lib/venta/tiquete";
 import type { EstadoEspera, FormaPago, LineaEspera, Venta } from "../src/tipos";
 import { baseDePrueba } from "./driverNode";
+import { validarEscPos } from "./escposValidar";
 
 const EF = "0000000000000000000000FP01";
 const TJ = "0000000000000000000000FP02";
+const SP = "0000000000000000000000FP03";
 const TR = "0000000000000000000000FP04";
 const BN = "0000000000000000000000BN01";
 const OFICINA = "00000000000000000000000D02";
@@ -80,8 +81,9 @@ function lineasTexto(bytes: Uint8Array): string[] {
 }
 
 const VENTA: Venta = {
-  id: "V1", cajaId: "C1", turnoId: "T1", turnoAbierto: true, consecutivo: 67791, numero: "67791", fecha: "2026-10-29T15:30:00Z", dia: "2026-10-29",
-  usuarioId: "U", cajero: "Luis", clienteId: null, cliente: null, nombreTiquete: null, subtotal: 2400, descuento: 50, redondeo: 0, total: 2350, ivaTotal: 270,
+  id: "V1", cajaId: "C1", turnoId: "T1", turnoAbierto: true, turnoUsuarioId: "U", consecutivo: 67791, numero: "67791", fecha: "2026-10-29T15:30:00Z", dia: "2026-10-29",
+  usuarioId: "U", cajero: "Luis", esperaCreadaPor: "Luis", anuladaPor: null, impreso: false, clienteId: null, cliente: null, nombreTiquete: null,
+  subtotal: 2400, descuento: 50, redondeo: 0, total: 2350, ivaTotal: 270,
   estado: "completada", anuladaMotivo: null, requiereFactura: false, facturaEmitida: false, facturaReferencia: null, reimpresiones: 0,
   lineas: [{ id: "L1", productoId: null, codigo: null, descripcion: "Cuaderno", departamentoId: OFICINA, cantidad: 2, precioUnitario: 1250, descuento: 100, total: 2400, tasaIva: 13, iva: 270 }],
   pagos: [
@@ -90,15 +92,73 @@ const VENTA: Venta = {
   ],
 };
 
+/** Como el tiquete viejo de la foto: ¢500, ¢200 por SINPE (BCR, ref 69898) y ¢300 en efectivo. */
+const DIVIDIDA: Venta = {
+  ...VENTA,
+  numero: "67979",
+  subtotal: 500,
+  descuento: 0,
+  total: 500,
+  ivaTotal: 0,
+  lineas: [{ id: "L1", productoId: null, codigo: null, descripcion: "IMPRESIONES A COLOR", departamentoId: OFICINA, cantidad: 1, precioUnitario: 200, descuento: 0, total: 200, tasaIva: 13, iva: 0 }, { id: "L2", productoId: null, codigo: null, descripcion: "ESCANEO Y ENVIO", departamentoId: OFICINA, cantidad: 1, precioUnitario: 300, descuento: 0, total: 300, tasaIva: 13, iva: 0 }],
+  pagos: [
+    { id: "P1", formaPagoId: SP, forma: "SINPE Móvil", tipo: "sinpe", monto: 200, recibido: null, vuelto: null, bancoId: BN, banco: "BCR", referencia: "69898", ultimos4: null },
+    { id: "P2", formaPagoId: EF, forma: "Efectivo", tipo: "efectivo", monto: 300, recibido: 1000, vuelto: 700, bancoId: null, banco: null, referencia: null, ultimos4: null },
+  ],
+};
+
+const tienePulsoGaveta = (b: Uint8Array) => b.some((x, i) => x === 0x1b && b[i + 1] === 0x70) || b.some((x, i) => x === 0x10 && b[i + 1] === 0x14);
+
 describe("tiquete", () => {
-  it("consecutivo, cajero, descuentos, pagos, vuelto, ¢ y leyenda; COPIA sin gaveta", async () => {
+  it("consecutivo, cajero, descuentos, cada pago, recibido y vuelto, ¢ y leyenda", async () => {
     const neg = await obtenerNegocio();
-    const t = lineasTexto(tiqueteVenta(neg, VENTA, DEFAULT_SETTINGS, { textoNoFactura: "Este tiquete no es una factura electrónica", abrirGaveta: true }).bytes).join("\n");
-    for (const s of ["67791", "Luis", "-¢100", "-¢50", "TOTAL", "¢2.350", "Tarjeta ****4321", "Vuelto", "¢3.650", "Este tiquete no es una factura", "electrónica"]) expect(t).toContain(s);
-    expect(t).toContain("ESC p: pulso a gaveta");
-    const copia = lineasTexto(tiqueteVenta(neg, VENTA, DEFAULT_SETTINGS, { copia: true, abrirGaveta: true }).bytes).join("\n");
-    expect(copia).toContain("*** COPIA ***");
-    expect(copia).not.toContain("gaveta");
+    const doc = tiqueteVenta(neg, VENTA, DEFAULT_SETTINGS, { textoNoFactura: "Este tiquete no es una factura electrónica" });
+    const t = lineasTexto(doc.bytes).join("\n");
+    for (const s of ["67791", "Luis", "-¢100", "-¢50", "TOTAL", "¢2.350", "Este tiquete no es una factura", "electrónica"]) expect(t).toContain(s);
+    expect(t).toMatch(/Tarjeta \*\*\*\*4321 +¢1\.000/);
+    expect(t).toMatch(/Efectivo +¢1\.350/);
+    expect(t).toMatch(/Recibido +¢5\.000/);
+    expect(t).toMatch(/Vuelto +¢3\.650/);
+    // El tiquete nunca lleva el pulso de la gaveta (la abre Rust) y pasa la lista blanca de Rust.
+    expect(tienePulsoGaveta(doc.bytes)).toBe(false);
+    validarEscPos(doc.bytes);
+  });
+
+  it("pago dividido: una línea por pago con banco, referencia y monto; también en la COPIA", async () => {
+    const neg = await obtenerNegocio();
+    for (const copia of [false, true]) {
+      const doc = tiqueteVenta(neg, DIVIDIDA, DEFAULT_SETTINGS, { copia });
+      const l = lineasTexto(doc.bytes);
+      const t = l.join("\n");
+      expect(t).toMatch(/TOTAL +¢500/);
+      expect(l).toContain(lr("SINPE Móvil BCR ref 69898", "¢200"));
+      expect(l).toContain(lr("Efectivo", "¢300"));
+      expect(l).toContain(lr("  Recibido", "¢1.000"));
+      expect(l).toContain(lr("  Vuelto", "¢700"));
+      expect(t.includes("*** COPIA ***")).toBe(copia);
+      expect(tienePulsoGaveta(doc.bytes)).toBe(false);
+      validarEscPos(doc.bytes);
+    }
+    // Lo mismo que muestra la pantalla en el detalle de la venta.
+    expect(lineasPago(DIVIDIDA)).toEqual([
+      { texto: "SINPE Móvil BCR ref 69898", monto: 200 },
+      { texto: "Efectivo", monto: 300 },
+      { texto: "Recibido", monto: 1000, sub: true },
+      { texto: "Vuelto", monto: 700, sub: true },
+    ]);
+  });
+
+  it("si la referencia no cabe junto al monto, se parte sin perder el monto; 80 mm usa 48 columnas", async () => {
+    const neg = await obtenerNegocio();
+    const larga = { ...DIVIDIDA, pagos: [{ ...DIVIDIDA.pagos[0], forma: "Transferencia", banco: "Davivienda", referencia: "1234567890123456" }, DIVIDIDA.pagos[1]] };
+    const l = lineasTexto(tiqueteVenta(neg, larga, DEFAULT_SETTINGS).bytes);
+    expect(l.every((x) => x.length <= 32)).toBe(true);
+    expect(l.some((x) => x.endsWith("¢200"))).toBe(true);
+    // En 80 mm (48 columnas) la misma línea sí cabe completa.
+    const media = { ...larga, pagos: [{ ...larga.pagos[0], referencia: "123456789" }, larga.pagos[1]] };
+    const ancha = lineasTexto(tiqueteVenta(neg, media, { ...DEFAULT_SETTINGS, columnas: 48 }).bytes);
+    expect(ancha).toContain(lr("Transferencia Davivienda ref 123456789", "¢200", 48));
+    expect(ancha.every((x) => x.length <= 48)).toBe(true);
   });
 });
 
@@ -114,45 +174,3 @@ describe("impresión segura", () => {
   });
 });
 
-describe("reporte Z", () => {
-  const detalle = (ve: boolean): Detalle => ({
-    veEsperado: ve,
-    bitacoraOk: true,
-    turno: {
-      id: "T1", cajaId: "C1", estado: "cerrado", dia: "2026-10-29", abiertoEn: "2026-10-29T14:00:00Z", cerradoEn: "2026-10-30T00:00:00Z",
-      usuarioAperturaId: "U", usuarioApertura: "Luis", usuarioCierreId: "U", usuarioCierre: "Luis", fondo: 27000, conteoInicial: null,
-      conteoFinal: { "10000": 2, "1000": 4 }, esperado: ve ? 25000 : null, contado: 24000, diferencia: ve ? -1000 : null, notaCierre: "Faltan mil", revisadaPor: null, reimpresiones: 0,
-    },
-    resumen: {
-      fondo: 27000, ventas: 3, totalVentas: 8000, descuentos: 0, anuladas: 1, totalAnuladas: 500,
-      porForma: [{ formaPagoId: EF, nombre: "Efectivo", tipo: "efectivo", daVuelto: true, pagos: 2, monto: 3000 }, { formaPagoId: TJ, nombre: "Tarjeta", tipo: "tarjeta", daVuelto: false, pagos: 1, monto: 5000 }],
-      recibidoEfectivo: 5000, vueltos: 2000, ventasEfectivo: 3000, entradas: 0, salidas: 5000, efectivoEsperado: 25000,
-      movimientos: [{ id: "M1", tipo: "salida", monto: 5000, categoria: "Pago a proveedor", motivo: "", usuario: "Luis", autorizadoPor: null, fecha: "2026-10-29T18:00:00Z" }],
-      ajustes: [],
-      pagosElectronicos: [
-        { fecha: "2026-10-29T16:05:00Z", ventaNumero: "67795", forma: "Tarjeta", tipo: "tarjeta", monto: 5000, ultimos4: "4321", banco: null, referencia: null },
-      ],
-    },
-  });
-
-  it("totales por forma, efectivo esperado, contado y faltante; la reimpresión dice COPIA", async () => {
-    const neg = await obtenerNegocio();
-    const t = lineasTexto(reporteZ(neg, detalle(true), DEFAULT_SETTINGS, { copia: false }).bytes).join("\n");
-    for (const s of ["CIERRE DE CAJA (Z)", "Efectivo (2)", "¢3.000", "Tarjeta (1)", "¢5.000", "Esperado", "¢25.000", "Contado", "¢24.000", "Faltante", "-¢1.000", "Pago a proveedor", "Faltan mil"])
-      expect(t).toContain(s);
-    expect(t).not.toContain("COPIA");
-    // Detalle de tarjeta para cuadrar con el cierre del datáfono.
-    expect(t).toContain("DETALLE TARJETA/SINPE/TRANSF.");
-    expect(t).toMatch(/67795 \*\*\*\*4321/);
-    expect(lineasTexto(reporteZ(neg, detalle(true), DEFAULT_SETTINGS, { copia: true }).bytes).join("\n")).toContain("*** COPIA ***");
-  });
-
-  it("en cierre ciego no sale lo esperado ni la diferencia", async () => {
-    const t = lineasTexto(reporteZ(await obtenerNegocio(), detalle(false), DEFAULT_SETTINGS, { copia: false }).bytes).join("\n");
-    expect(t).toContain("Contado");
-    expect(t).not.toContain("Esperado");
-    expect(t).not.toContain("Faltante");
-    // La tarjeta no es efectivo: también sale en cierre ciego.
-    expect(t).toContain("****4321");
-  });
-});

@@ -4,7 +4,9 @@ import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import Papel from "../components/Papel";
 import { guardarLogo, guardarNegocio, obtenerLogoOriginal, obtenerNegocio, puedeEditarCampo, type CampoNegocio } from "../db/negocio";
-import { ajustesImpresora, muestraEncabezado } from "../lib/impresion";
+import { aSettings, ajustesDe, type AjustesImpresora } from "../db/impresoras";
+import { muestraEncabezado } from "../lib/impresion";
+import { DEFAULT_SETTINGS } from "../lib/tickets";
 import { aUnBit, LOGO_ANCHO_MAX, medidasLogo, umbralSugerido } from "../lib/logo1bit";
 import { interpret } from "../lib/preview";
 import type { LogoUnBit, Negocio as TNegocio } from "../tipos";
@@ -32,12 +34,16 @@ const CAMPOS: { k: CampoNegocio; texto: string; multilinea?: boolean }[] = [
 ];
 
 export default function Negocio() {
-  const { actor, config, puede } = useSesion();
+  const { actor, puede } = useSesion();
   const [guardado, setGuardado] = useState<TNegocio | null>(null);
   const [form, setForm] = useState<TNegocio | null>(null);
   const [logoNuevo, setLogoNuevo] = useState<LogoPendiente | null>(null);
   const [error, setError] = useState("");
+  const [impresora, setImpresora] = useState<AjustesImpresora | null>(null);
   const toast = useToast();
+  useEffect(() => {
+    ajustesDe("tiquete").then(setImpresora, () => setImpresora(null));
+  }, []);
 
   const cargar = async () => {
     const n = await obtenerNegocio();
@@ -50,8 +56,8 @@ export default function Negocio() {
   const items = useMemo(() => {
     if (!form) return [];
     const n = logoNuevo ? { ...form, logo: logoNuevo.logo } : form;
-    return interpret(muestraEncabezado(n, ajustesImpresora(config)).bytes);
-  }, [form, logoNuevo, config]);
+    return interpret(muestraEncabezado(n, impresora ? aSettings(impresora) : DEFAULT_SETTINGS).bytes);
+  }, [form, logoNuevo, impresora]);
 
   if (!form || !guardado) return <div className="screen">{error ? <Mensaje error={error} /> : "Cargando…"}</div>;
 
