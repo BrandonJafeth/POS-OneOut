@@ -1359,6 +1359,14 @@ mod tests {
         assert_eq!(x.top_productos.iter().map(|t| (t.producto.as_str(), t.cantidad)).collect::<Vec<_>>(), [("Lápiz", 4), ("Calculadora", 1)]);
         // Con el turno abierto, el cajero no recibe nada de esto.
         assert_eq!(detalle(p, &cajero, &t.id).await.unwrap().resumen.estadisticas, Default::default());
+
+        // Supervisor del Z: abierto, los dueños activos; al cerrar un dueño, ese dueño.
+        let tec = Actor { id: crate::usuarios::tecnico_id(p).await.unwrap().unwrap(), rol: Rol::Tecnico, nombre: "T".into() };
+        crate::usuarios::crear(p, &tec, "Bea", Rol::Dueno, "864209").await.unwrap();
+        assert_eq!(detalle(p, &dueno, &t.id).await.unwrap().resumen.supervisor, "Ana / Bea");
+        let esperado = detalle(p, &dueno, &t.id).await.unwrap().resumen.efectivo_esperado;
+        cerrar(p, &dueno, CAJA_1, &crate::caja::Conteo { total: Some(esperado), ..Default::default() }, "").await.unwrap();
+        assert_eq!(detalle(p, &dueno, &t.id).await.unwrap().resumen.supervisor, "Ana");
     }
 
     #[tokio::test]

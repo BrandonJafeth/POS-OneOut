@@ -276,7 +276,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     l.push({ t: sep2(cols) }, { t: lr(`TOTAL GENERAL (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true }, { t: lr("  en efectivo", monto(r.desglose.efectivo), cols) });
   }
 
-  l.push({ t: sep2(cols) }, { t: "" }, { t: `Cajero: ${cortar(t.usuarioCierre ?? "", cols - 8)}` }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) }, { t: "" }, { t: "Supervisor:" }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
+  l.push({ t: sep2(cols) }, { t: "" }, { t: `Cajero: ${cortar(t.usuarioCierre ?? "", cols - 8)}` }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) }, { t: "" }, { t: `Supervisor: ${cortar(r.supervisor, cols - 12)}`.trimEnd() }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
   return l;
 }
 

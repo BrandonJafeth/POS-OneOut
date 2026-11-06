@@ -499,8 +499,13 @@ label.check {
   gap: 2px;
 }
 
+/* El menú principal empuja hacia abajo lo que sigue (avanzado y usuario): el pie queda fijo abajo
+   aunque el rol no tenga sección avanzada (cajero). */
+.lateral nav[aria-label="Principal"] {
+  margin-bottom: auto;
+}
+
 .lateral nav.avanzado {
-  margin-top: auto;
   padding-top: var(--e3);
   border-top: 1px solid var(--hair);
 }

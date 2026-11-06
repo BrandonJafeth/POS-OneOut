@@ -545,6 +545,15 @@ async fn respaldo_restaurar(st: St<'_>, pin: String, archivo: Vec<u8>, contrasen
     respaldo::restaurar(st.bd()?, &a, &pin, &archivo, &contrasena, st.clave.as_ref()).await
 }
 
+/// PDF del cierre, CSV, datos del cliente: Rust lo guarda en Descargas y devuelve la ruta real.
+/// Con un enlace "blob:" la app no podía saber si el archivo quedó guardado.
+#[tauri::command]
+async fn guardar_descarga(app: tauri::AppHandle, st: St<'_>, nombre: String, datos: Vec<u8>) -> Res<String> {
+    st.actor().await?;
+    let dir = app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?;
+    util::guardar_en(&dir, &nombre, &datos)
+}
+
 #[tauri::command]
 async fn respaldo_ultimo(st: St<'_>) -> Res<Option<String>> {
     let a = st.actor().await?;
@@ -791,6 +800,7 @@ pub fn run() {
             cliente_retencion,
             respaldo_crear,
             respaldo_ultimo,
+            guardar_descarga,
             respaldo_restaurar,
             importacion_leer,
             importacion_aplicar,

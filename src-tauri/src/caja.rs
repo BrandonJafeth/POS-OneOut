@@ -537,6 +537,8 @@ pub struct Resumen {
     pub descuadres: Vec<String>,
     /// Control por usuario, ventas por hora, promedio, semana anterior y más vendidos (solo informa).
     pub estadisticas: Estadisticas,
+    /// Quién firma como supervisor en el Z: el dueño que cerró o, si cerró un cajero, los dueños activos.
+    pub supervisor: String,
 }
 
 /// Una diferencia de caja pide nota y revisión si NO es cero y llega al umbral
@@ -749,6 +751,10 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         .collect();
     r.desglose = desglose::calcular(c, &t.id).await?;
     r.estadisticas = estadisticas::calcular(c, t).await?;
+    r.supervisor = sqlx::query_scalar("SELECT COALESCE(group_concat(nombre, ' / '), '') FROM (SELECT nombre FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL ORDER BY nombre)")
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
     // Los ajustes no cambian el efectivo de este turno: una devolución en efectivo entra como salida.
     r.efectivo_esperado = r.fondo + r.recibido_efectivo - r.vueltos + r.entradas - r.salidas;
     revisar_cuadre(&mut r);
@@ -880,7 +886,10 @@ pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo
     let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja no está abierta")?;
     let comp = compartido(&mut tx).await;
     puede_cerrar(a, &t, comp)?;
-    let r = resumen(&mut tx, &t).await?;
+    let mut r = resumen(&mut tx, &t).await?;
+    if a.rol == Rol::Dueno {
+        r.supervisor = a.nombre.clone();
+    }
     let diferencia = contado - r.efectivo_esperado;
     let requiere_revision = fuera_de_umbral(diferencia, umbral);
     if requiere_revision && !ciego && nota.chars().count() < 5 {

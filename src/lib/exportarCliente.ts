@@ -2,6 +2,7 @@
 import type { ExportacionCliente } from "../db/clientes";
 import { TIPO_IDENTIFICACION } from "../tipos";
 import { celdaSegura } from "./csv";
+import { invocar } from "./invocar";
 import { crearPdf, type LineaPdf } from "./pdf";
 import { monto } from "./tickets";
 
@@ -55,11 +56,7 @@ export function pdfCliente(e: ExportacionCliente, responsable: string): Uint8Arr
 }
 
 /** Descarga (WebView2 lo guarda en Descargas). */
-export function descargar(nombre: string, bytes: Uint8Array, tipo: string): void {
-  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: tipo }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nombre;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+/** Rust lo guarda en Descargas (sin pisar otro) y devuelve la ruta real, para decírsela al usuario. */
+export async function descargar(nombre: string, bytes: Uint8Array): Promise<string> {
+  return String(await invocar("guardar_descarga", { nombre, datos: Array.from(bytes) }));
 }

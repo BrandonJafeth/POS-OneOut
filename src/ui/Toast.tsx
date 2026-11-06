@@ -22,10 +22,12 @@ interface Api {
   mostrar(a: AvisoToast): void;
   ok(titulo: string, texto?: ReactNode): void;
   info(titulo: string, texto?: ReactNode): void;
+  /** Para acciones cuyo botón puede quedar lejos del mensaje en pantalla (imprimir, descargar). */
+  error(titulo: string, texto?: ReactNode): void;
   cerrar(): void;
 }
 
-const Ctx = createContext<Api>({ mostrar: () => {}, ok: () => {}, info: () => {}, cerrar: () => {} });
+const Ctx = createContext<Api>({ mostrar: () => {}, ok: () => {}, info: () => {}, error: () => {}, cerrar: () => {} });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [actual, setActual] = useState<(AvisoToast & { id: number }) | null>(null);
@@ -34,7 +36,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // Un aviso con acción ("Deshacer") no lo tapa uno simple: perderlo sería perder lo que deshace.
   const mostrar = useCallback((a: AvisoToast) => setActual((v) => (v?.accion && !a.accion ? v : { ...a, id: ++id.current })), []);
   const api = useMemo<Api>(
-    () => ({ mostrar, cerrar, ok: (titulo, texto) => mostrar({ tono: "ok", titulo, texto }), info: (titulo, texto) => mostrar({ tono: "info", titulo, texto }) }),
+    () => ({
+      mostrar,
+      cerrar,
+      ok: (titulo, texto) => mostrar({ tono: "ok", titulo, texto }),
+      info: (titulo, texto) => mostrar({ tono: "info", titulo, texto }),
+      error: (titulo, texto) => mostrar({ tono: "error", titulo, texto }),
+    }),
     [mostrar, cerrar],
   );
   const tono = actual?.tono ?? "ok";

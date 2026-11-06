@@ -192,6 +192,8 @@ export interface Resumen {
   descuadres: string[];
   /** Solo informa (no entra en el cuadre). Vacío para el cajero con el turno abierto. */
   estadisticas: Estadisticas;
+  /** Dueño que firma como supervisor (el que cerró, o los dueños activos). Vacío en cierres viejos. */
+  supervisor: string;
 }
 
 /** Lectura del día (estadisticas.rs). */

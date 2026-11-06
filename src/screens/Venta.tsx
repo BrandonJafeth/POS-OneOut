@@ -215,6 +215,7 @@ export default function Venta() {
     try {
       await imprimirVenta(cobrada.ventaId, config);
       setCobrada({ ...cobrada, errorImpresion: undefined });
+      toast.ok("Tiquete enviado a la impresora.");
     } catch (e) {
       setCobrada({ ...cobrada, errorImpresion: textoError(e) });
     }
@@ -225,6 +226,7 @@ export default function Venta() {
     try {
       await abrirGavetaVenta(cobrada.ventaId);
       setCobrada({ ...cobrada, errorGaveta: undefined });
+      toast.ok("Gaveta abierta.");
     } catch (e) {
       setCobrada({ ...cobrada, errorGaveta: textoError(e) });
     }

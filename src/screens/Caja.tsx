@@ -87,11 +87,11 @@ export default function Caja() {
   };
 
   async function imprimir(f: () => Promise<unknown>) {
-    setError("");
     try {
       await f();
+      toast.ok("Comprobante enviado a la impresora.");
     } catch (e) {
-      setError(textoError(e));
+      toast.error("No se imprimió el comprobante", textoError(e));
     }
   }
 
@@ -369,7 +369,15 @@ export default function Caja() {
           </dl>
           {corte.errorImpresion ? <Alert tono="error" titulo="No se imprimió el corte">{corte.errorImpresion}</Alert> : <p className="muted">Corte enviado a la impresora.</p>}
           <div className="fila-botones">
-            <Button icono={Printer} onClick={() => imprimirCorte(corte.k).then(() => setCorte({ ...corte, errorImpresion: undefined }), (e) => setCorte({ ...corte, errorImpresion: textoError(e) }))}>
+            <Button
+              icono={Printer}
+              onClick={() =>
+                imprimirCorte(corte.k).then(
+                  () => (setCorte({ ...corte, errorImpresion: undefined }), toast.ok("Corte enviado a la impresora.")),
+                  (e) => (setCorte({ ...corte, errorImpresion: textoError(e) }), toast.error("No se imprimió el corte", textoError(e))),
+                )
+              }
+            >
               Imprimir otra vez
             </Button>
             <span className="separador" />
@@ -436,7 +444,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
       {d && <VistaZ d={d} denominaciones={p.estado.denominaciones} />}
       <div className="fila-botones">
         {d && <BotonImprimirZ turnoId={res.turnoId} opciones={p.cierre.o} denominaciones={p.estado.denominaciones} onError={setError} onListo={() => setError("")} />}
-        {d && puede("caja.admin") && <BotonPdf d={d} denominaciones={p.estado.denominaciones} onError={setError} />}
+        {d && puede("caja.admin") && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
         <span className="separador" />
         <Button variante="primario" onClick={p.onCerrar}>
           Listo
@@ -459,6 +467,10 @@ function BotonImprimirZ(p: { turnoId: string; opciones: OpcionesCierre; denomina
       toast.ok(copia ? "Copia del cierre enviada a la impresora." : "Cierre enviado a la impresora.");
       p.onListo();
       setPidePin(false);
+    } catch (e) {
+      // Con el PIN abierto, el error lo muestra ese diálogo (PIN incorrecto); si no, el aviso flotante.
+      if (pin === undefined) toast.error("No se imprimió el cierre", textoError(e));
+      throw e;
     } finally {
       setOcupado(false);
     }
@@ -475,6 +487,7 @@ function BotonImprimirZ(p: { turnoId: string; opciones: OpcionesCierre; denomina
             await intentar();
           } catch (e) {
             p.onError(textoError(e));
+            toast.error("No se imprimió el cierre", textoError(e));
           }
         }}
       >
@@ -485,7 +498,8 @@ function BotonImprimirZ(p: { turnoId: string; opciones: OpcionesCierre; denomina
   );
 }
 
-function BotonPdf(p: { d: Detalle; denominaciones: number[]; onError(m: string): void }) {
+function BotonPdf(p: { d: Detalle; denominaciones: number[] }) {
+  const toast = useToast();
   return (
     <Button
       icono={FileDown}
@@ -493,9 +507,10 @@ function BotonPdf(p: { d: Detalle; denominaciones: number[]; onError(m: string):
         try {
           const n = await obtenerNegocio();
           const bytes = pdfCierre(n, p.d, { copia: p.d.turno.reimpresiones > 0, denominaciones: p.denominaciones });
-          descargar(`cierre-${p.d.turno.dia}-${p.d.turno.id.slice(-6)}.pdf`, bytes, "application/pdf");
+          const nombre = `cierre-${p.d.turno.dia}-${p.d.turno.id.slice(-6)}.pdf`;
+          toast.ok("PDF guardado.", await descargar(nombre, bytes));
         } catch (e) {
-          p.onError(textoError(e));
+          toast.error("No se pudo crear el PDF", textoError(e));
         }
       }}
     >
@@ -648,7 +663,7 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                     texto={t.reimpresiones > 0 ? "Reimprimir (COPIA)" : "Imprimir cierre Z"}
                   />
                 )}
-                {t.estado === "cerrado" && admin && <BotonPdf d={d} denominaciones={p.estado.denominaciones} onError={setError} />}
+                {t.estado === "cerrado" && admin && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
                 <span className="separador" />
                 {admin && t.estado === "cerrado" && t.dia === diaLocal() && (
                   <Button icono={RotateCcw} onClick={() => setReabrir(true)}>

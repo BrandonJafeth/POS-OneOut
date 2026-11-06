@@ -190,10 +190,11 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
     setError("");
     try {
       await imprimirVenta(v!.id, config, { copia: v!.impreso, verCliente });
-      toast.ok("Copia enviada a la impresora.");
+      toast.ok(v!.impreso ? "Copia enviada a la impresora." : "Tiquete enviado a la impresora.");
       await cargar();
     } catch (e) {
       setError(textoError(e));
+      toast.error("No se imprimió el tiquete", textoError(e));
     }
   }
 

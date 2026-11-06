@@ -34,6 +34,12 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
           <dt>Cerró</dt>
           <dd>{t.cerradoEn ? `${t.usuarioCierre} · ${hora(t.cerradoEn)}` : "Abierta"}</dd>
         </div>
+        {r.supervisor && (
+          <div>
+            <dt>Supervisor</dt>
+            <dd>{r.supervisor}</dd>
+          </div>
+        )}
         <div>
           <dt>Ventas ({r.ventas})</dt>
           <dd>{monto(r.totalVentas)}</dd>

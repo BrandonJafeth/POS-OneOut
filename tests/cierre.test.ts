@@ -66,6 +66,7 @@ function detalle(): Detalle {
       conDesglose: true,
       cuadra: true,
       descuadres: [],
+      supervisor: "Isaias",
       estadisticas: {
         control: [
           { usuario: "Isaias", precioLibre: 0, montoPrecioLibre: 0, descuentos: 105, lineasQuitadas: 0, montoQuitado: 0 },
@@ -143,6 +144,8 @@ describe("reporte Z", () => {
     // El conteo lista todas las denominaciones, también las que fueron 0.
     expect(t).toMatch(/50 mil +0 +¢0/);
     expect(t).toMatch(/5 +1 +¢5/);
+    // Firma el dueño como supervisor.
+    expect(l).toContain("Supervisor: Isaias");
     // Control por usuario y lectura del día.
     expect(l).toContain(lr("Venta simple / ventas", "50 %"));
     expect(l).toContain(lr("  Venta simple (2)", "¢5.300"));

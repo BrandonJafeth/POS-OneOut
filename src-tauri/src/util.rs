@@ -87,9 +87,46 @@ pub fn texto(v: &str, max: usize, campo: &str, obligatorio: bool) -> Res<String>
     Ok(t.to_string())
 }
 
+/// Guarda en `dir` un archivo que armó la app (PDF del cierre, CSV) sin pisar uno existente
+/// ("x (1).pdf"). Solo un nombre simple .pdf/.csv: la ventana no elige carpetas ni extensiones.
+pub fn guardar_en(dir: &std::path::Path, nombre: &str, datos: &[u8]) -> Res<String> {
+    let simple = !nombre.is_empty() && nombre.len() <= 120 && !nombre.starts_with('.') && !nombre.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c));
+    let Some((base, ext)) = nombre.rsplit_once('.').filter(|(_, x)| *x == "pdf" || *x == "csv") else {
+        return Err(format!("{TECNICO}Archivo no permitido: {nombre}"));
+    };
+    if !simple {
+        return Err(format!("{TECNICO}Archivo no permitido: {nombre}"));
+    }
+    if datos.len() > 50_000_000 {
+        return Err("El archivo es demasiado grande".into());
+    }
+    std::fs::create_dir_all(dir).map_err(e)?;
+    let mut ruta = dir.join(nombre);
+    let mut n = 1;
+    while ruta.exists() {
+        ruta = dir.join(format!("{base} ({n}).{ext}"));
+        n += 1;
+    }
+    std::fs::write(&ruta, datos).map_err(|err| format!("No se pudo guardar {}: {err}", ruta.display()))?;
+    Ok(ruta.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardar_sin_pisar_y_solo_nombres_simples() {
+        let dir = std::env::temp_dir().join(format!("pos-descargas-{}", ulid()));
+        let a = guardar_en(&dir, "cierre.pdf", b"uno").unwrap();
+        let b = guardar_en(&dir, "cierre.pdf", b"dos").unwrap();
+        assert!(b.ends_with("cierre (1).pdf"));
+        assert_eq!(std::fs::read(&a).unwrap(), b"uno");
+        for malo in ["../x.pdf", "a\\b.pdf", "x.exe", "x.pdf.bat", ".pdf", "C:x.csv"] {
+            assert!(guardar_en(&dir, malo, b"x").is_err(), "{malo}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ulid_y_normalizar() {

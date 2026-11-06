@@ -74,6 +74,7 @@ export default function Impresoras() {
       toast.ok(`Prueba enviada a ${i.nombre}. Revise el papel.`);
     } catch (e) {
       setError(textoError(e));
+      toast.error(`No se imprimió la prueba en ${i.nombre}`, textoError(e));
     } finally {
       setProbando(null);
     }

@@ -29,6 +29,7 @@ import { normalizar } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import type { Departamento } from "../../tipos";
 import Alert from "../../ui/Alert";
+import { useToast } from "../../ui/Toast";
 import Badge from "../../ui/Badge";
 import Button from "../../ui/Button";
 import Field from "../../ui/Field";
@@ -48,6 +49,7 @@ const n = (x: number) => x.toLocaleString("es-CR");
 
 export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductosImportados): void }) {
   const { actor, config, recargarConfig } = useSesion();
+  const toast = useToast();
   const [paso, setPaso] = useState<Paso>("archivo");
   const [pestana, setPestana] = useState<Pestana>("resumen");
   const [deps, setDeps] = useState<Departamento[]>([]);
@@ -144,13 +146,14 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
     }
   }
 
-  function descargarProblemas(filas: ErrorFila[], nombre: string) {
+  async function descargarProblemas(filas: ErrorFila[], nombre: string) {
     const porFila = new Map(fuente?.filas.map((f) => [f.fila, f]));
-    descargar(
-      nombre,
-      csvSeguro([["Fila", "Id", "Nombre", "Problema"], ...filas.map((e) => [String(e.fila), porFila.get(e.fila)?.webId ?? "", e.nombre, e.mensaje])]),
-      "text/csv",
-    );
+    try {
+      const ruta = await descargar(nombre, csvSeguro([["Fila", "Id", "Nombre", "Problema"], ...filas.map((e) => [String(e.fila), porFila.get(e.fila)?.webId ?? "", e.nombre, e.mensaje])]));
+      toast.ok("Lista guardada.", ruta);
+    } catch (e) {
+      toast.error("No se pudo guardar la lista", textoError(e));
+    }
   }
 
   const aImportar = plan ? plan.nuevos.length + plan.actualizar.length : 0;
