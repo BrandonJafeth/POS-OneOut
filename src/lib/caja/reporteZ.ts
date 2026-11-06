@@ -12,7 +12,7 @@ import { agruparPorForma } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { escribirEncabezado } from "../impresion";
-import { columnas, cortar, fechaHora, lr, monto, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
+import { columnas, cortar, fechaHora, lr, monto, montoConSigno, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
 /** Una línea del reporte, independiente de la impresora. */
 export interface LineaDoc {
@@ -43,7 +43,7 @@ export const LEYENDA_CODIGOS = "Co=Contado Ta=Tarjeta De=Depósito/SINPE/Transf.
 export const NOTA_USUARIOS = "Efectivo y diferencia corresponden a la caja, no a cada usuario.";
 
 const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
-const signo = (n: number) => (n < 0 ? "-" : n > 0 ? "+" : "") + monto(Math.abs(n));
+const signo = (n: number) => montoConSigno(n, "-");
 const den = (d: number) => (d >= 1000 ? `${d / 1000} mil` : String(d));
 
 /** Copia de caja.rs::revisar_cuadre: si algo no suma, el Z no se imprime. */

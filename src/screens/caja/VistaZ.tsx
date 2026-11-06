@@ -3,13 +3,12 @@
 import { ChevronDown } from "lucide-react";
 import type { Detalle } from "../../db/caja";
 import { DENOMINACIONES, descuadres, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
-import { fechaHora, monto } from "../../lib/tickets";
+import { fechaHora, monto, montoConSigno as signo } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Badge from "../../ui/Badge";
 import PagosElectronicos from "./PagosElectronicos";
 
 const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
-const signo = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "") + monto(Math.abs(n));
 
 export default function VistaZ({ d, denominaciones }: { d: Detalle; denominaciones?: number[] }) {
   const { turno: t, resumen: r } = d;

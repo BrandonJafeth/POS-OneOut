@@ -30,7 +30,7 @@ import { pdfCierre } from "../lib/caja/pdfZ";
 import { opcionesPorDefecto } from "../lib/caja/reporteZ";
 import { descargar } from "../lib/exportarCliente";
 import { diaLocal, plural } from "../lib/texto";
-import { fechaHora, monto } from "../lib/tickets";
+import { fechaHora, monto, montoConSigno as signo } from "../lib/tickets";
 import type { Usuario } from "../tipos";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
@@ -44,7 +44,6 @@ import PagosElectronicos from "./caja/PagosElectronicos";
 import VistaZ from "./caja/VistaZ";
 
 const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
-const signo = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "") + monto(Math.abs(n));
 
 function haceDias(n: number): string {
   const d = new Date();

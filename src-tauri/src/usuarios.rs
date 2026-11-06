@@ -239,19 +239,11 @@ pub async fn iniciar_sesion(pool: &SqlitePool, id: &str, p: &str, ahora_ms: i64)
 }
 
 /// Autorización del dueño EN EL MOMENTO (nunca se guarda): PIN de cualquier dueño activo.
-/// Cada fallo queda en bitácora; con 5 fallos en un minuto se frena.
+/// Cada fallo queda en bitácora y frena los siguientes (freno_autorizacion).
 /// Un PIN que puso otra persona (debe_cambiar_pin) no autoriza nada hasta que el dueño lo cambie.
 pub async fn autorizar_dueno(pool: &SqlitePool, p: &str, contexto: &str, actor_id: &str) -> Res<String> {
     let _turno = PIN_EN_CURSO.lock().await;
-    let desde = chrono::Utc::now() - chrono::Duration::seconds(60);
-    let recientes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
-        .bind(desde.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-        .fetch_one(pool)
-        .await
-        .map_err(e)?;
-    if recientes >= 5 {
-        return Err("Demasiados PIN incorrectos. Espere un minuto.".into());
-    }
+    freno_autorizacion(pool, chrono::Utc::now()).await?;
     let duenos = sqlx::query("SELECT id, pin_hash FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL").fetch_all(pool).await.map_err(e)?;
     for d in &duenos {
         if pin::verificar(p, &d.get::<String, _>("pin_hash")) {
@@ -265,6 +257,26 @@ pub async fn autorizar_dueno(pool: &SqlitePool, p: &str, contexto: &str, actor_i
     Err("PIN del dueño incorrecto".into())
 }
 
+/// Freno de los PIN de autorización (dueño o propio), con la misma escalera que el inicio de
+/// sesión: 4 fallos libres en 24 h y después 30 s, 1 min, 2 min… hasta 15 min desde el último.
+/// Un tope fijo por minuto dejaba probar ~7.000 PIN al día desde la pantalla de venta.
+async fn freno_autorizacion(pool: &SqlitePool, ahora: chrono::DateTime<chrono::Utc>) -> Res<()> {
+    let desde = (ahora - chrono::Duration::hours(24)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let f = sqlx::query("SELECT COUNT(*) AS n, MAX(fecha) AS ultima FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
+        .bind(desde)
+        .fetch_one(pool)
+        .await
+        .map_err(e)?;
+    let ultima = f.get::<Option<String>, _>("ultima").and_then(|u| chrono::DateTime::parse_from_rfc3339(&u).ok());
+    let falta = ultima.map_or(0, |u| espera_tras_fallos(f.get("n")) - (ahora - u.with_timezone(&chrono::Utc)).num_milliseconds());
+    if falta > 0 {
+        let s = (falta + 999) / 1000;
+        let cuanto = if s < 60 { format!("{s} segundos") } else { format!("{} minutos", (s + 59) / 60) };
+        return Err(format!("Demasiados PIN incorrectos. Espere {cuanto} y vuelva a intentarlo."));
+    }
+    Ok(())
+}
+
 /// Para acciones solo del dueño: además de ser dueño, confirma con su PIN cada vez.
 pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<String> {
     if a.rol != Rol::Dueno {
@@ -274,21 +286,13 @@ pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, p: &str, contexto: &s
 }
 
 /// Para acciones grandes del dueño o el técnico (importar el catálogo): el usuario de la sesión
-/// vuelve a escribir SU PIN. Mismo freno que autorizar_dueno: cada fallo a la bitácora, 5 por minuto.
+/// vuelve a escribir SU PIN. Mismo freno que autorizar_dueno (freno_autorizacion).
 pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<()> {
     if a.rol == Rol::Cajero {
         return Err(sin_permiso(contexto));
     }
     let _turno = PIN_EN_CURSO.lock().await;
-    let desde = chrono::Utc::now() - chrono::Duration::seconds(60);
-    let recientes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'autorizacion.fallida' AND fecha >= ?")
-        .bind(desde.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-        .fetch_one(pool)
-        .await
-        .map_err(e)?;
-    if recientes >= 5 {
-        return Err("Demasiados PIN incorrectos. Espere un minuto.".into());
-    }
+    freno_autorizacion(pool, chrono::Utc::now()).await?;
     let hash: Option<String> = sqlx::query_scalar("SELECT pin_hash FROM usuarios WHERE id = ? AND activo = 1 AND eliminado_en IS NULL")
         .bind(&a.id)
         .fetch_optional(pool)
@@ -385,6 +389,19 @@ pub mod tests {
         assert_eq!(n, 5);
         // Un id inexistente responde igual que un PIN incorrecto (no revela si existe).
         assert!(matches!(iniciar_sesion(&bd.pool, "NO-EXISTE", "123456", t0).await.unwrap(), Login::Rechazado { .. }));
+    }
+
+    #[tokio::test]
+    async fn autorizacion_con_espera_progresiva() {
+        let (bd, _, _, cajero) = base_con_usuarios().await;
+        for _ in 0..5 {
+            assert!(autorizar_dueno(&bd.pool, "000000", "prueba", &cajero.id).await.unwrap_err().contains("incorrecto"));
+        }
+        // 5 fallos: ni el PIN correcto pasa hasta que se cumpla la espera (30 s desde el último).
+        assert!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.unwrap_err().contains("Espere"));
+        let luego = chrono::Utc::now() + chrono::Duration::seconds(31);
+        assert!(freno_autorizacion(&bd.pool, luego).await.is_ok());
+        assert!(freno_autorizacion(&bd.pool, luego - chrono::Duration::seconds(5)).await.is_err());
     }
 
     #[tokio::test]

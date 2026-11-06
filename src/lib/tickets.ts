@@ -59,6 +59,11 @@ export function monto(n: number): string {
   return "¢" + colones(n);
 }
 
+/** +¢500 / −¢500 (sobrante o faltante). En papel va "-": el "−" no está en las code pages. */
+export function montoConSigno(n: number, menos = "−"): string {
+  return (n > 0 ? "+" : n < 0 ? menos : "") + monto(Math.abs(n));
+}
+
 /** Texto a la izquierda y a la derecha en una misma línea de `cols` columnas. */
 export function lr(left: string, right: string, cols = COLS): string {
   const space = cols - right.length;

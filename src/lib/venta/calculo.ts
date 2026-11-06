@@ -6,6 +6,7 @@
 // El redondeo es "al múltiplo más cercano" (₡5: 1.502 → 1.500, 1.503 → 1.505).
 import type { EstadoEspera, LineaEspera } from "../../tipos";
 import { ivaIncluido } from "../iva";
+import { leerMontoEntero } from "../texto";
 
 export function redondear(n: number, paso: number): number {
   if (!Number.isInteger(paso) || paso <= 1) return n;
@@ -34,11 +35,23 @@ export interface Totales {
   ivaLineas: number[];
 }
 
-export function validarLinea(l: LineaEspera): string | null {
-  if (!Number.isSafeInteger(l.cantidad) || l.cantidad < 1) return `"${l.descripcion}": la cantidad debe ser un entero mayor que 0`;
-  if (!Number.isSafeInteger(l.precioUnitario) || l.precioUnitario < 0) return `"${l.descripcion}": precio inválido`;
-  if (!Number.isSafeInteger(l.descuento) || l.descuento < 0 || l.descuento > bruto(l)) return `"${l.descripcion}": descuento inválido`;
-  return null;
+/** Agrega una línea a la venta. El mismo producto, al mismo precio y sin descuento, suma
+ *  cantidad en vez de repetir la línea. */
+export function conLinea(e: EstadoEspera, l: LineaEspera): EstadoEspera {
+  const igual = l.productoId ? e.lineas.find((x) => x.productoId === l.productoId && !x.descuento && x.precioUnitario === l.precioUnitario) : undefined;
+  const lineas = igual ? e.lineas.map((x) => (x === igual ? { ...x, cantidad: x.cantidad + l.cantidad } : x)) : [...e.lineas, l];
+  return { ...e, lineas };
+}
+
+/** Descuento en colones a partir de "500" (¢) o "10" (%) sobre `base`. null si no se entiende. */
+export function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | null {
+  const t = texto.trim();
+  if (!t) return 0;
+  if (modo === "%") {
+    const n = Number(t.replace(",", "."));
+    return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round((base * n) / 100) : null;
+  }
+  return leerMontoEntero(t);
 }
 
 export function calcularTotales(e: EstadoEspera, paso: number): Totales {

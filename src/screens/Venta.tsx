@@ -3,23 +3,25 @@
 // Atajos: F2 nueva venta en espera · F3 buscar · F4 venta simple (precio libre) · F7 cliente ·
 // F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · ↑↓ elegir.
 // "3*código" agrega 3 unidades.
+// Las pestañas viven en useEsperas, el catálogo en useCatalogo y las reglas de dinero en
+// lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
 import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import PinDueno from "../components/PinDueno";
 import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
-import { buscarProductos, marcarFavorito, ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
-import { autorizarDescuento, cobrarVenta, crearEspera, descartarEspera, guardarEspera, listarEsperas, type ResultadoCobro } from "../db/ventas";
-import { conMiles, leerMontoEntero, plural } from "../lib/texto";
+import { ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
+import { autorizarDescuento, cobrarVenta, type ResultadoCobro } from "../db/ventas";
+import { conMiles, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
-import { bruto, calcularTotales, estadoVacio, importeLinea, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
+import { bruto, calcularTotales, conLinea, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
 import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
-import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, ProductoLista, VentaEspera } from "../tipos";
+import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
 import CampoMonto from "../ui/CampoMonto";
@@ -28,50 +30,22 @@ import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
+import { FAVORITOS, useCatalogo } from "./venta/useCatalogo";
+import { useEsperas } from "./venta/useEsperas";
 import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { colorDe, textoSobre } from "../ui/departamentos";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | null;
-const FAVORITOS = "★";
-const POR_PAGINA = 60;
-
-/** Orden elegido en este equipo (comodidad del cajero; si no se puede leer, A–Z). */
-function ordenGuardado(): OrdenProductos {
-  try {
-    const o = localStorage.getItem("venta.orden");
-    return o && o in ORDENES_PRODUCTOS ? (o as OrdenProductos) : "nombre";
-  } catch {
-    return "nombre";
-  }
-}
-
-/** Monto en colones a partir de "500" (¢) o "10" (%) sobre `base`. */
-function leerDescuento(texto: string, base: number, modo: "¢" | "%"): number | null {
-  const t = texto.trim();
-  if (!t) return 0;
-  if (modo === "%") {
-    const n = Number(t.replace(",", "."));
-    return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round((base * n) / 100) : null;
-  }
-  return leerMontoEntero(t);
-}
 
 export default function Venta() {
   const { actor, usuario, config, puede, caja, recargarCaja, irA } = useSesion();
   const toast = useToast();
   const [abrirCaja, setAbrirCaja] = useState(false);
-  const [esperas, setEsperas] = useState<VentaEspera[]>([]);
-  const [activaId, setActivaId] = useState<string | null>(null);
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [formas, setFormas] = useState<FormaPago[]>([]);
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [texto, setTexto] = useState("");
   const [filtro, setFiltro] = useState<string>(FAVORITOS); // ★ o id de departamento
-  const [productos, setProductos] = useState<ProductoLista[]>([]);
-  const [totalCatalogo, setTotalCatalogo] = useState(0);
-  const [orden, setOrden] = useState<OrdenProductos>(ordenGuardado);
-  const [cargando, setCargando] = useState(true);
-  const [sel, setSel] = useState(0); // tarjeta resaltada (teclado)
   const [lineaSel, setLineaSel] = useState<string | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [pendiente, setPendiente] = useState<EstadoEspera | null>(null); // cambio que espera PIN de dueño
@@ -79,29 +53,20 @@ export default function Venta() {
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
   const buscador = useRef<HTMLInputElement>(null);
-  const grilla = useRef<HTMLDivElement>(null);
+  const tabs = useEsperas(setError);
+  const { esperas, activa, activaId, setActivaId, actual, actualizar } = tabs;
+  const { productos, total: totalCatalogo, cargando, buscando, sel, setSel, orden, cambiarOrden, grilla, finGrilla, alternarFavorito } = useCatalogo(texto, filtro, setError);
 
-  const activa = esperas.find((e) => e.id === activaId) ?? null;
   const estado = activa?.estado ?? estadoVacio();
   const t = useMemo(() => calcularTotales(estado, config.redondeo_total), [estado, config.redondeo_total]);
   const tope = topeDescuento(actor.rol, config.descuento_max_pct);
   const modal = dialogo !== null || pendiente !== null || cobrada !== null;
-  const buscando = texto.replace(/^\d+\*/, "").trim().length >= 2;
 
-  // ── Carga inicial: las ventas en espera vienen de SQLite (sobreviven a un apagón).
-  // El ref evita que React (StrictMode en desarrollo) la corra dos veces y cree dos pestañas.
-  const iniciado = useRef(false);
   useEffect(() => {
-    if (iniciado.current) return;
-    iniciado.current = true;
     (async () => {
       setDepartamentos(await listarDepartamentos());
       setFormas(await listarFormasPago());
       setBancos(await listarBancos());
-      let l = await listarEsperas();
-      if (!l.length) l = [await crearEspera(actor, estadoVacio())];
-      ponerEsperas(l);
-      setActivaId(l[0].id);
     })().catch((e) => setError(textoError(e)));
   }, []);
 
@@ -117,25 +82,6 @@ export default function Venta() {
   }, [modal, activaId]);
   const alBuscador = () => setTimeout(() => buscador.current?.focus(), 0);
 
-  // Copia "al instante" de las pestañas: dos lecturas del lector en el mismo milisegundo
-  // no deben pisarse (React todavía no volvió a dibujar entre una y otra).
-  const esperasRef = useRef<VentaEspera[]>([]);
-  const activaRef = useRef<string | null>(null);
-  activaRef.current = activaId;
-  const ponerEsperas = (l: VentaEspera[]) => {
-    esperasRef.current = l;
-    setEsperas(l);
-  };
-  const actual = (): EstadoEspera => esperasRef.current.find((e) => e.id === activaRef.current)?.estado ?? estadoVacio();
-
-  /** Aplica un cambio a la venta activa y lo guarda en la base de inmediato. */
-  const actualizar = useCallback((nuevo: EstadoEspera) => {
-    const id = activaRef.current;
-    if (!id) return;
-    ponerEsperas(esperasRef.current.map((e) => (e.id === id ? { ...e, estado: nuevo } : e)));
-    guardarEspera(id, nuevo).catch((e) => setError("No se pudo guardar la venta en espera: " + textoError(e)));
-  }, []);
-
   /** Igual que actualizar, pero si el descuento pasa el tope del rol, pide antes el PIN del dueño. */
   function actualizarConTope(nuevo: EstadoEspera) {
     const pct = calcularTotales(nuevo, config.redondeo_total).pctDescuento;
@@ -145,11 +91,7 @@ export default function Venta() {
 
   function agregarLinea(l: LineaEspera) {
     setAviso("");
-    // Mismo producto sin descuento: suma cantidad en vez de repetir la línea.
-    const e = actual();
-    const igual = l.productoId ? e.lineas.find((x) => x.productoId === l.productoId && !x.descuento && x.precioUnitario === l.precioUnitario) : null;
-    const lineas = igual ? e.lineas.map((x) => (x === igual ? { ...x, cantidad: x.cantidad + l.cantidad } : x)) : [...e.lineas, l];
-    actualizar({ ...e, lineas });
+    actualizar(conLinea(actual(), l));
     setLineaSel(null);
   }
 
@@ -187,70 +129,6 @@ export default function Venta() {
     { activo: !modal && !!activa, debounceMs: config.escaner_debounce_ms },
   );
 
-  // ── Catálogo: búsqueda, favoritos o un departamento.
-  const consulta = useRef(0);
-  const cargarCatalogo = useCallback(async (mas = false) => {
-    const n = ++consulta.current;
-    const q = texto.replace(/^\d+\*/, "").trim();
-    setCargando(true);
-    try {
-      const r = await buscarProductos({
-        texto: q.length >= 2 ? q : undefined,
-        soloFavoritos: q.length < 2 && filtro === FAVORITOS,
-        departamentoId: q.length < 2 && filtro !== FAVORITOS ? filtro : undefined,
-        orden,
-        limite: POR_PAGINA,
-        desplazamiento: mas ? productos.length : 0,
-      });
-      if (n !== consulta.current) return;
-      setProductos(mas ? [...productos, ...r.filas] : r.filas);
-      setTotalCatalogo(r.total);
-      if (!mas) setSel(0), grilla.current?.scrollTo({ top: 0 });
-    } catch (e) {
-      setError(textoError(e));
-    } finally {
-      if (n === consulta.current) setCargando(false);
-    }
-  }, [texto, filtro, orden, productos]);
-  useEffect(() => {
-    const h = setTimeout(() => void cargarCatalogo(), buscando ? 120 : 0);
-    return () => clearTimeout(h);
-    // Solo al cambiar lo buscado, el filtro o el orden (no al agregar páginas).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [texto, filtro, orden]);
-  // Scroll continuo: cuando el final de la grilla se acerca a la vista, se trae la siguiente tanda.
-  const cargarMas = useRef(() => {});
-  cargarMas.current = () => {
-    if (!cargando && productos.length < totalCatalogo) void cargarCatalogo(true);
-  };
-  // Callback ref: la grilla no existe mientras la caja está cerrada; se observa cuando aparece.
-  const observador = useRef<IntersectionObserver | null>(null);
-  const fin = useRef<HTMLDivElement | null>(null);
-  const finGrilla = useCallback((el: HTMLDivElement | null) => {
-    observador.current?.disconnect();
-    fin.current = el;
-    if (!el) return;
-    observador.current = new IntersectionObserver((e) => e[0]?.isIntersecting && cargarMas.current(), {
-      root: el.parentElement,
-      rootMargin: "0px 0px 600px 0px",
-    });
-    observador.current.observe(el);
-  }, []);
-  // Si después de una tanda el final sigue a la vista, volver a observar hace que avise otra vez.
-  useEffect(() => {
-    if (!fin.current || !observador.current || cargando) return;
-    observador.current.unobserve(fin.current);
-    observador.current.observe(fin.current);
-  }, [productos.length, cargando]);
-  const cambiarOrden = (o: OrdenProductos) => {
-    setOrden(o);
-    try {
-      localStorage.setItem("venta.orden", o);
-    } catch {
-      /* sin almacenamiento: solo dura esta sesión */
-    }
-  };
-
   async function enterBuscador() {
     const m = /^(\d+)\*(.+)$/.exec(texto.trim());
     const cantidad = m ? Math.max(1, Number(m[1])) : 1;
@@ -264,37 +142,17 @@ export default function Venta() {
     } else setAviso(`Nada coincide con "${q}".`);
   }
 
-  async function alternarFavorito(p: ProductoLista) {
-    try {
-      await marcarFavorito(actor, p.id, !p.favorito);
-      if (filtro === FAVORITOS && !buscando) setProductos((l) => l.filter((x) => x.id !== p.id)), setTotalCatalogo((t) => t - 1);
-      else setProductos((l) => l.map((x) => (x.id === p.id ? { ...x, favorito: !p.favorito } : x)));
-    } catch (e) {
-      setError(textoError(e));
-    }
-  }
-
   // ── Pestañas
   async function nuevaEspera() {
-    try {
-      const e = await crearEspera(actor, estadoVacio());
-      ponerEsperas([...esperasRef.current, e].sort((a, b) => a.numero - b.numero));
-      setActivaId(e.id);
-      setTexto("");
-      alBuscador();
-    } catch (err) {
-      setError(textoError(err));
-    }
+    if (!(await tabs.nueva())) return;
+    setTexto("");
+    alBuscador();
   }
 
   // Descartar no pregunta: se hace al instante y el aviso ofrece "Deshacer" unos segundos
   // (menos diálogos, y un toque equivocado se recupera). Queda anotado en la bitácora igual.
   async function descartar(e: VentaEspera) {
-    await descartarEspera(actor, e.id);
-    const resto = esperasRef.current.filter((x) => x.id !== e.id);
-    if (!resto.length) resto.push(await crearEspera(actor, estadoVacio()));
-    ponerEsperas(resto);
-    if (activaId === e.id) setActivaId(resto[0].id);
+    if (!(await tabs.descartar(e))) return;
     alBuscador();
     if (!e.estado.lineas.length) return;
     toast.mostrar({
@@ -305,24 +163,10 @@ export default function Venta() {
     });
   }
 
-  /** Vuelve a poner una venta descartada: en una pestaña vacía si hay, si no en una nueva. */
   async function recuperar(e: VentaEspera) {
-    try {
-      const vacia = esperasRef.current.find((x) => !x.estado.lineas.length);
-      if (vacia) {
-        await guardarEspera(vacia.id, e.estado);
-        ponerEsperas(esperasRef.current.map((x) => (x.id === vacia.id ? { ...x, estado: e.estado } : x)));
-        setActivaId(vacia.id);
-      } else {
-        const nueva = await crearEspera(actor, e.estado);
-        ponerEsperas([...esperasRef.current, nueva]);
-        setActivaId(nueva.id);
-      }
-      toast.ok("Venta recuperada");
-      alBuscador();
-    } catch (err) {
-      setError(textoError(err));
-    }
+    if (!(await tabs.recuperar(e))) return;
+    toast.ok("Venta recuperada");
+    alBuscador();
   }
 
   // ── Líneas
@@ -330,9 +174,10 @@ export default function Venta() {
     const e = actual();
     actualizarConTope({ ...e, lineas: e.lineas.map((l) => (l.id === id ? { ...l, ...patch } : l)) });
   };
+  // Con tope: quitar una línea sube el % del descuento al total (¢1.000 de ¢10.000 → de ¢5.000).
   const quitarLinea = (id: string) => {
     const e = actual();
-    actualizar({ ...e, lineas: e.lineas.filter((l) => l.id !== id) });
+    actualizarConTope({ ...e, lineas: e.lineas.filter((l) => l.id !== id) });
     setLineaSel(null);
     alBuscador();
   };
@@ -361,11 +206,9 @@ export default function Venta() {
     setDialogo(null);
     setCobrada({ ...r, errorImpresion, errorGaveta });
     // La venta cobrada sale de las pestañas; las demás quedan como estaban.
-    const resto = esperasRef.current.filter((e) => e.id !== activa.id);
-    if (!resto.length) resto.push(await crearEspera(actor, estadoVacio()));
-    ponerEsperas(resto);
-    setActivaId(resto[0].id);
+    await tabs.quitar(activa.id);
   }
+
 
   async function reimprimir() {
     if (!cobrada) return;
