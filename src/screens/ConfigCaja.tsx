@@ -102,6 +102,7 @@ export default function ConfigCaja() {
         <Field label="Anotar en la bitácora al quitar una línea desde" ayuda="El cajero puede quitar líneas antes de cobrar; desde este monto queda anotado para que usted lo vea. 0 = nunca.">
           <CampoMonto valor={quitar} onCambio={setQuitar} />
         </Field>
+        {!leerMontoEntero(quitar) && <Alert tono="aviso">Con 0 no queda anotada ninguna línea quitada y el cierre Z no las muestra en «Control por usuario».</Alert>}
         <div>
           <Button variante="primario" icono={Save} onClick={() => void guardar({ caja_quitar_linea_bitacora: leerMontoEntero(quitar) ?? 0 })}>
             Guardar

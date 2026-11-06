@@ -1283,6 +1283,20 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn da_vuelto_no_cambia_con_la_caja_abierta() {
+        let (bd, _, _, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let cambiar = |v: i64| sqlx::query("UPDATE formas_pago SET da_vuelto = ? WHERE id = '0000000000000000000000FP01'").bind(v).execute(p);
+        abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
+        // Abierta: quitarle "da vuelto" a Efectivo movería el esperado de lo ya cobrado.
+        assert!(cambiar(0).await.unwrap_err().to_string().contains("Cierre la caja"));
+        // Otros cambios de la forma sí pasan.
+        sqlx::query("UPDATE formas_pago SET orden = 9 WHERE id = '0000000000000000000000FP01'").execute(p).await.unwrap();
+        cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 1)]), "").await.unwrap();
+        cambiar(0).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn turno_por_persona_si_no_es_compartido() {
         let (bd, tec, dueno, luis) = base_con_usuarios().await;
         let p = &bd.pool;

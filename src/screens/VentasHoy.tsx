@@ -364,6 +364,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
     void listarBancos().then(setBancos);
   }, []);
   const nueva = formas.find((f) => f.id === forma);
+  const antes = formas.find((f) => f.id === p.pago.formaPagoId);
   const sinCambios =
     forma === p.pago.formaPagoId &&
     (nueva?.requiereBanco ? banco || null : null) === (p.pago.bancoId ?? null) &&
@@ -385,6 +386,11 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         }}
       >
         <p className="muted">El monto y el total no cambian; solo la forma de pago. Queda el historial.</p>
+        {p.turnoAbierto && nueva && antes && nueva.daVuelto !== antes.daVuelto && (
+          <Alert tono="aviso">
+            La caja esperará {monto(p.pago.monto)} {nueva.daVuelto ? "más" : "menos"} en efectivo al cerrar.
+          </Alert>
+        )}
         <Field label="Forma de pago correcta">
           <select value={forma} onChange={(e) => setForma(e.target.value)}>
             {formas.map((f) => (
@@ -460,6 +466,16 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
         }}
       >
         <Alert tono="aviso">La venta queda registrada como anulada (no se borra) y conserva su número. No se puede deshacer.</Alert>
+        {p.turnoAbierto && p.efectivo > 0 && (
+          <Alert tono="aviso" titulo={`Devuelva ${monto(p.efectivo)} en efectivo`}>
+            Ese efectivo sale de lo que la caja espera al cerrar. Si no se lo devuelve al cliente, el cierre dará sobrante.
+          </Alert>
+        )}
+        {p.total > p.efectivo && (
+          <Alert tono="aviso" titulo={`${monto(p.total - p.efectivo)} con tarjeta, SINPE o transferencia`}>
+            Anular aquí no devuelve ese dinero: hágalo en el datáfono o en el banco.
+          </Alert>
+        )}
         {p.facturaEmitida && (
           <Alert tono="error" titulo="Esta venta ya tiene factura electrónica">
             Anularla aquí no anula la factura en Hacienda: haga también la nota de crédito en el sistema de facturación.

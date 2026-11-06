@@ -95,6 +95,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     limpiarAvisos();
     if (precioNum === null) return setError("Precio inválido: use solo números (ej. 1500 o 1.500)");
     if (!Number.isFinite(tasaNum)) return setError("Tasa de IVA inválida");
+    if (precioNum === 0 && prod?.precio !== 0 && !(await confirmar({ titulo: "¿Precio ¢0?", texto: "El producto se venderá gratis cada vez que se escanee o se toque.", aceptar: "Guardar en ¢0", peligro: true })))
+      return;
     const datos = { nombre, departamentoId, precio: precioNum, activo, cabys: cabys.trim() || null, tasaIva: tasaNum, exento };
     try {
       if (id) await editarProducto(actor, id, datos);

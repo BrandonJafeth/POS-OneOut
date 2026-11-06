@@ -23,6 +23,9 @@ const ICONO_FORMA: Record<TipoFormaPago, LucideIcon> = {
   otro: Wallet,
 };
 
+/** Más vuelto que el billete más grande casi siempre es un cero de más en lo recibido. */
+const VUELTO_GRANDE = 50_000;
+
 interface Fila extends Omit<PagoEntrada, "monto"> {
   clave: number;
   texto: string; // lo que se escribe en el monto
@@ -177,7 +180,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                 <Field label="Forma">
                   <span className="cobro-forma">
                     <Icono size={20} aria-hidden />
-                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, ultimos4: undefined })}>
+                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, bancoId: null, referencia: null, ultimos4: null })}>
                       {p.formas.map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.nombre}
@@ -223,6 +226,12 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
             </>
           )}
         </div>
+        {p.total === 0 && <Alert tono="aviso">El total es ¢0: la venta queda registrada sin cobrar nada.</Alert>}
+        {r.vuelto > VUELTO_GRANDE && (
+          <Alert tono="aviso" titulo={`Vuelto de ${monto(r.vuelto)}`}>
+            Revise que de verdad recibió {monto(r.pagado)}: un cero de más da un vuelto que sale de la gaveta.
+          </Alert>
+        )}
         {sinMonto.length > 0 && (
           <Alert tono="aviso">
             {sinMonto.map((f) => forma(f.formaPagoId)?.nombre).join(" y ")} sin monto: escríbalo o quite {sinMonto.length > 1 ? "esas filas" : "la fila"} con la papelera.

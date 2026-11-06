@@ -40,6 +40,7 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
     <Modal titulo="Abrir caja" onCerrar={p.onCerrar} ancho={720}>
       <p className="muted">Cuente el dinero con que empieza el día (el fondo para dar vuelto).</p>
       <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Fondo inicial" />
+      {totalConteo(conteo) === 0 && <Alert tono="aviso">Sin fondo: no habrá efectivo para dar vuelto en las primeras ventas.</Alert>}
       {error && <Alert tono="error">{error}</Alert>}
       <div className="fila-botones">
         <Button onClick={p.onCerrar}>Cancelar</Button>
