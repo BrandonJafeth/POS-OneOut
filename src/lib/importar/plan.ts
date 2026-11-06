@@ -145,6 +145,17 @@ export function leerPrecio(s: string): number | null {
 
 const sinOferta = (s: string) => !s || /^(null|0|-)$/i.test(s.trim());
 
+/** Productos que ya estaban y cambian de precio. `fuertes`: bajan a menos de la mitad (un precio
+ *  mal escrito en la web, ¢120 en vez de ¢1.200, se vendería más barato sin que nadie lo note). */
+export function cambiosDePrecio(plan: Pick<Plan, "actualizar">): { suben: number; bajan: number; fuertes: ItemPlan[] } {
+  const con = plan.actualizar.filter((i) => i.antes && i.antes.precio !== i.precio);
+  return {
+    suben: con.filter((i) => i.precio > i.antes!.precio).length,
+    bajan: con.filter((i) => i.precio < i.antes!.precio).length,
+    fuertes: con.filter((i) => i.precio * 2 < i.antes!.precio),
+  };
+}
+
 export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones): Plan {
   const { reglas } = op;
   const deps = new Map(ctx.departamentos.filter((d) => d.activo).map((d) => [d.id, d]));

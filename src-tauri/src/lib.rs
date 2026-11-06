@@ -546,6 +546,12 @@ async fn respaldo_restaurar(st: St<'_>, pin: String, archivo: Vec<u8>, contrasen
 }
 
 #[tauri::command]
+async fn respaldo_ultimo(st: St<'_>) -> Res<Option<String>> {
+    let a = st.actor().await?;
+    respaldo::ultimo(st.bd()?, &a).await
+}
+
+#[tauri::command]
 async fn app_reiniciar(app: tauri::AppHandle) -> Res<()> {
     app.restart();
 }
@@ -777,6 +783,7 @@ pub fn run() {
             cliente_anonimizar,
             cliente_retencion,
             respaldo_crear,
+            respaldo_ultimo,
             respaldo_restaurar,
             importacion_leer,
             importacion_aplicar,

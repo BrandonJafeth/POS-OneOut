@@ -22,7 +22,7 @@ import {
 import { csvSeguro } from "../../lib/csv";
 import { descargar } from "../../lib/exportarCliente";
 import type { ErrorFila, FuenteImportacion } from "../../lib/importar/fuente";
-import { categoriasSinMapear, crearPlan, type Contexto, type ItemPlan, type Plan, type Respuesta } from "../../lib/importar/plan";
+import { cambiosDePrecio, categoriasSinMapear, crearPlan, type Contexto, type ItemPlan, type Plan, type Respuesta } from "../../lib/importar/plan";
 import { CRITERIOS_FAVORITOS, pluralesSinRegla, REGLAS_DEFECTO, reglasValidas, type CriterioFavoritos, type ReglasImportacion } from "../../lib/importar/reglas";
 import { fuenteDesdeTabla } from "../../lib/importar/web";
 import { normalizar } from "../../lib/texto";
@@ -154,6 +154,7 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
   }
 
   const aImportar = plan ? plan.nuevos.length + plan.actualizar.length : 0;
+  const precios = plan ? cambiosDePrecio(plan) : null;
   const problemas = plan ? [...plan.errores, ...plan.omitidos].sort((a, b) => a.fila - b.fila) : [];
 
   return (
@@ -404,6 +405,25 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
               .filter(Boolean)
               .join(" · ") || "Todas las filas son válidas."}
           </p>
+
+          {precios && (precios.suben > 0 || precios.bajan > 0) && (
+            <p>
+              Cambian de precio: <strong>{n(precios.suben)}</strong> suben y <strong>{n(precios.bajan)}</strong> bajan.
+            </p>
+          )}
+          {precios && precios.fuertes.length > 0 && (
+            <Alert tono="aviso" titulo={`${n(precios.fuertes.length)} bajan a menos de la mitad`}>
+              Revise que el precio de la web esté bien antes de importar:
+              <ul>
+                {precios.fuertes.slice(0, 8).map((i) => (
+                  <li key={i.fila}>
+                    {i.nombre}: {monto(i.antes!.precio)} → {monto(i.precio)}
+                  </li>
+                ))}
+              </ul>
+              {precios.fuertes.length > 8 && `y ${n(precios.fuertes.length - 8)} más.`}
+            </Alert>
+          )}
 
           <fieldset className="opciones-modo">
             <legend>Si una fila falla al guardar</legend>

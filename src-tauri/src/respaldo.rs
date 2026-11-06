@@ -158,6 +158,12 @@ pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
     Ok(destino.to_string_lossy().to_string())
 }
 
+/// Cuándo se hizo el último respaldo cifrado (None: nunca). Para avisar al dueño si pasa mucho tiempo.
+pub async fn ultimo(bd: &Bd, a: &Actor) -> Res<Option<String>> {
+    a.exigir("respaldo", "ver los respaldos")?;
+    sqlx::query_scalar("SELECT MAX(fecha) FROM bitacora WHERE accion = 'respaldo.crear'").fetch_one(&bd.pool).await.map_err(e)
+}
+
 /// Revisa un respaldo ya descifrado: integridad SQLite y versión de esquema conocida.
 /// `ancla`: archivo vacío para abrir la conexión. No puede ser "sqlite::memory:": sqlx la abre con
 /// la marca de memoria y SQLite la hereda en el ATTACH, así pos.db.nuevo nunca se escribiría al disco.

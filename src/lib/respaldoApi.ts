@@ -36,6 +36,14 @@ export async function restaurarRespaldo(archivo: File, contrasena: string, pinDu
   await invocar("respaldo_restaurar", { pin: pinDueno, archivo: datos, contrasena });
 }
 
+/** Fecha ISO del último respaldo cifrado, o null si nunca se hizo. */
+export async function ultimoRespaldo(invocar: Invocar = invocarRust): Promise<string | null> {
+  return ((await invocar("respaldo_ultimo", {})) as string | null) ?? null;
+}
+
+/** Días sin respaldo a partir de los cuales se avisa al dueño. */
+export const DIAS_SIN_RESPALDO = 7;
+
 export async function reiniciarApp(): Promise<void> {
   await invocarRust("app_reiniciar");
 }

@@ -133,6 +133,18 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str
     Ok(obtener(pool, &id).await?.ok_or("Usuario no encontrado")?.0)
 }
 
+/// Sin un dueño activo nadie anula, autoriza descuentos, reabre la caja ni restaura respaldos.
+async fn no_quedar_sin_dueno(c: &mut sqlx::SqliteConnection, u: &Usuario) -> Res<()> {
+    if u.rol != Rol::Dueno || !u.activo {
+        return Ok(());
+    }
+    let otros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL AND id <> ?").bind(&u.id).fetch_one(c).await.map_err(e)?;
+    if otros == 0 {
+        return Err(format!("{} es el único dueño activo: cree otro dueño antes. Sin dueño nadie puede anular ventas, autorizar descuentos ni reabrir la caja.", u.nombre));
+    }
+    Ok(())
+}
+
 async fn administrable(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Usuario> {
     let u = obtener(pool, id).await?.ok_or("Usuario no encontrado")?.0;
     if u.id != a.id && !administrables(a.rol).contains(&u.rol) {
@@ -152,6 +164,9 @@ pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, nombre: Option<&str>
     };
     let act = activo.unwrap_or(u.activo);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    if !act {
+        no_quedar_sin_dueno(&mut tx, &u).await?;
+    }
     sqlx::query("UPDATE usuarios SET nombre = ?, activo = ?, actualizado_en = ? WHERE id = ?").bind(&n).bind(act as i64).bind(ahora_iso()).bind(id).execute(&mut *tx).await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "usuario.editar", "usuario", Some(id), &json!({"antes": {"nombre": u.nombre, "activo": u.activo}, "despues": {"nombre": n, "activo": act}})).await?;
     tx.commit().await.map_err(e)?;
@@ -185,6 +200,7 @@ pub async fn eliminar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
     }
     let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    no_quedar_sin_dueno(&mut tx, &u).await?;
     sqlx::query("UPDATE usuarios SET eliminado_en = ?, activo = 0, actualizado_en = ? WHERE id = ?").bind(&ahora).bind(&ahora).bind(id).execute(&mut *tx).await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "usuario.eliminar", "usuario", Some(id), &json!({"nombre": u.nombre, "rol": u.rol})).await?;
     tx.commit().await.map_err(e)?;
@@ -402,6 +418,16 @@ pub mod tests {
         let luego = chrono::Utc::now() + chrono::Duration::seconds(31);
         assert!(freno_autorizacion(&bd.pool, luego).await.is_ok());
         assert!(freno_autorizacion(&bd.pool, luego - chrono::Duration::seconds(5)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn siempre_queda_un_dueno_activo() {
+        let (bd, tec, ana, _) = base_con_usuarios().await;
+        assert!(editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap_err().contains("único dueño"));
+        assert!(eliminar(&bd.pool, &tec, &ana.id).await.unwrap_err().contains("único dueño"));
+        // Con otro dueño activo, sí.
+        crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap();
     }
 
     #[tokio::test]

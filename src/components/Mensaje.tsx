@@ -16,6 +16,7 @@ const CONOCIDOS: [RegExp, string][] = [
   [/turno cerrado: el pago/i, "La caja de esa venta ya se cerró: el pago no se puede cambiar. Si hace falta, el dueño lo corrige como ajuste en la caja de hoy."],
   [/turno cerrado: los montos/i, "La caja de esa venta ya se cerró: sus montos no se pueden cambiar."],
   [/la bitácora no se puede/i, "La bitácora no se puede modificar ni borrar."],
+  [/Cierre la caja antes de cambiar «Da vuelto»/i, "Cierre la caja antes de cambiar «Da vuelto»: cambiaría el efectivo esperado de las ventas ya cobradas en el turno abierto."],
   [/UNIQUE constraint failed: codigos/i, "Ese código ya pertenece a otro producto."],
   [/UNIQUE constraint failed: departamentos/i, "Ya existe un departamento con ese código."],
   [/database is locked|database table is locked|busy/i, "El sistema está terminando otra operación. Espere unos segundos e intente de nuevo."],

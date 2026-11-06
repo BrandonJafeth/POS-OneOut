@@ -44,6 +44,37 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
     }
 }
 
+/// Claves que cambian cobros, el efectivo o el cierre: tipo y rango. Un valor de otro tipo no daba
+/// error: Rust usaba su valor por defecto y la pantalla el guardado (p. ej. redondeo "5" en texto:
+/// la pantalla no redondeaba y una tarjeta por el total mostrado pasaba del total cobrado).
+fn validar(clave: &str, v: &Value) -> Res<()> {
+    let entero = |min: i64, max: i64| match v.as_i64() {
+        Some(n) if (min..=max).contains(&n) => Ok(()),
+        _ => Err(format!("«{clave}»: debe ser un número entero de {min} a {max}")),
+    };
+    let si_no = || if v.is_boolean() { Ok(()) } else { Err(format!("«{clave}»: debe ser true o false")) };
+    match clave {
+        "redondeo_total" => match v.as_i64() {
+            Some(1 | 5 | 10 | 25 | 50 | 100) => Ok(()),
+            _ => Err("El redondeo del total debe ser 1, 5, 10, 25, 50 o 100 colones".into()),
+        },
+        "descuento_max_pct" => match v.as_object() {
+            Some(m) if m.values().all(|x| x.as_f64().is_some_and(|p| (0.0..=100.0).contains(&p))) => Ok(()),
+            _ => Err("«descuento_max_pct»: un porcentaje de 0 a 100 por rol, p. ej. {\"cajero\": 10}".into()),
+        },
+        "caja_denominaciones" | "denominaciones_rapidas" => match v.as_array() {
+            Some(l) if !l.is_empty() && l.iter().all(|x| x.as_i64().is_some_and(|n| (1..=1_000_000).contains(&n))) => Ok(()),
+            _ => Err(format!("«{clave}»: una lista de montos enteros mayores que 0")),
+        },
+        "caja_umbral_diferencia" | "caja_salida_max_sin_pin" | "caja_quitar_linea_bitacora" => entero(0, 100_000_000),
+        "caja_no_venta_umbral" => entero(0, 1000),
+        "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
+        "sesion_inactividad_min" => entero(1, 240),
+        "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
+        _ => Ok(()),
+    }
+}
+
 pub async fn guardar(pool: &SqlitePool, a: &Actor, clave: &str, v: &Value) -> Res<()> {
     if clave.is_empty() || clave.len() > 60 || !clave.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
         return Err("La clave solo admite minúsculas, números y _".into());
@@ -52,6 +83,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, clave: &str, v: &Value) -> Re
     if !perms.is_empty() && !perms.iter().any(|p| puede(a.rol, p)) {
         return Err(sin_permiso("cambiar esta configuración"));
     }
+    validar(clave, v)?;
     let txt = v.to_string();
     if txt.len() > 20_000 {
         return Err("Valor demasiado grande".into());
@@ -91,14 +123,38 @@ mod tests {
         assert!(guardar(&bd.pool, &dueno, "pin_min_dueno", &json!(4)).await.is_err());
         guardar(&bd.pool, &tec, "escaner_debounce_ms", &json!(250)).await.unwrap();
         // Turno compartido, casillas del Z y "no venta": dueño y técnico, nunca el cajero.
-        for clave in ["caja_turno_compartido", "caja_z_detalle_completo", "caja_z_por_departamento", "caja_no_venta_umbral", "caja_quitar_linea_bitacora"] {
-            assert!(guardar(&bd.pool, &cajero, clave, &json!(false)).await.unwrap_err().contains("permiso"), "{clave}");
-            guardar(&bd.pool, &dueno, clave, &json!(true)).await.unwrap();
-            guardar(&bd.pool, &tec, clave, &json!(false)).await.unwrap();
+        for (clave, v1, v2) in [
+            ("caja_turno_compartido", json!(true), json!(false)),
+            ("caja_z_detalle_completo", json!(true), json!(false)),
+            ("caja_z_por_departamento", json!(true), json!(false)),
+            ("caja_no_venta_umbral", json!(3), json!(0)),
+            ("caja_quitar_linea_bitacora", json!(2000), json!(0)),
+        ] {
+            assert!(guardar(&bd.pool, &cajero, clave, &v1).await.unwrap_err().contains("permiso"), "{clave}");
+            guardar(&bd.pool, &dueno, clave, &v1).await.unwrap();
+            guardar(&bd.pool, &tec, clave, &v2).await.unwrap();
         }
         // Valores que siembra la migración 9.
         assert!(!booleano(&bd.pool, "caja_z_por_departamento", true).await);
         assert_eq!(valor(&bd.pool, "caja_no_venta_motivos").await, Some(json!(["Cambio de billetes", "Devolución", "Otro"])));
         assert_eq!(entero(&bd.pool, "caja_umbral_diferencia", 0).await, 2000);
+    }
+
+    #[tokio::test]
+    async fn valores_que_tocan_dinero_se_validan() {
+        let (bd, tec, dueno, _) = base_con_usuarios().await;
+        for (clave, malo) in [
+            ("redondeo_total", json!(1000)),
+            ("redondeo_total", json!("5")),
+            ("descuento_max_pct", json!({"cajero": 150})),
+            ("caja_umbral_diferencia", json!(-5)),
+            ("caja_denominaciones", json!([])),
+            ("caja_turno_compartido", json!("si")),
+        ] {
+            assert!(guardar(&bd.pool, &tec, clave, &malo).await.is_err(), "{clave} = {malo}");
+        }
+        guardar(&bd.pool, &tec, "redondeo_total", &json!(10)).await.unwrap();
+        guardar(&bd.pool, &dueno, "caja_salida_max_sin_pin", &json!(30000)).await.unwrap();
+        assert_eq!(entero(&bd.pool, "redondeo_total", 5).await, 10);
     }
 }

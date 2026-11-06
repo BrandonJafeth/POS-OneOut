@@ -24,6 +24,8 @@ describe("mensajes de error para el usuario", async () => {
 
   it("los de negocio pasan tal cual; los técnicos se cambian por uno general", () => {
     expect(textoError(new Error("Todavía faltan ¢500 por pagar."))).toBe("Todavía faltan ¢500 por pagar.");
+    // El trigger de «Da vuelto» llega como error de base: se explica igual para todos.
+    expect(textoError(new Error("ERROR_TECNICO: Paso 1 (forma_pago.guardar): (code: 1811) Cierre la caja antes de cambiar «Da vuelto»: x"))).toMatch(/^Cierre la caja antes/);
     expect(textoError(new Error("ERROR_TECNICO: error returned from database: (code: 1) no such column: x"))).toBe(MENSAJE_GENERAL);
     expect(textoError(new TypeError("Cannot read properties of undefined"))).toBe(MENSAJE_GENERAL);
     expect(textoError(new Error("ERROR_TECNICO: database is locked"))).toContain("Espere unos segundos");

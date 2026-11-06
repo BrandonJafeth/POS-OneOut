@@ -11,12 +11,11 @@ const TIPOS: TipoFormaPago[] = ["efectivo", "tarjeta", "sinpe", "transferencia",
 const NUEVA: Omit<FormaPago, "id"> = { codigo: "", nombre: "", tipo: "otro", requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, orden: 99, activo: true };
 
 export function FormasPago() {
-  const { actor, caja } = useSesion();
+  const { actor } = useSesion();
   const [lista, setLista] = useState<(Omit<FormaPago, "id"> & { id?: string })[]>([]);
-  const [guardadas, setGuardadas] = useState<FormaPago[]>([]);
   const [error, setError] = useState("");
   const toast = useToast();
-  const cargar = () => listarFormasPago({ incluirInactivas: true }).then((l) => (setLista(l), setGuardadas(l)), (e) => setError(textoError(e)));
+  const cargar = () => listarFormasPago({ incluirInactivas: true }).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
 
   const set = (i: number, patch: Partial<FormaPago>) => setLista(lista.map((f, j) => (j === i ? { ...f, ...patch } : f)));
@@ -74,15 +73,13 @@ export function FormasPago() {
                   icono={Save}
                   onClick={async () => {
                     setError("");
-                    // La base también lo impide (migración 10); aquí se explica antes de intentarlo.
-                    if (caja?.turno && f.id && guardadas.find((g) => g.id === f.id)?.daVuelto !== f.daVuelto)
-                      return setError("Cierre la caja antes de cambiar «Da vuelto»: cambiaría el efectivo esperado de las ventas ya cobradas en el turno abierto.");
                     try {
                       await guardarFormaPago(actor, f);
                       await cargar();
                       toast.ok(`"${f.nombre}" guardada.`);
                     } catch (e) {
                       setError(textoError(e));
+                      await cargar(); // la fila vuelve a mostrar lo que quedó guardado, no lo rechazado
                     }
                   }}
                 >

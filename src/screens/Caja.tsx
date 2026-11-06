@@ -29,6 +29,7 @@ import { imprimirCorte, imprimirMovimiento, imprimirZ } from "../lib/caja/imprim
 import { pdfCierre } from "../lib/caja/pdfZ";
 import { opcionesPorDefecto } from "../lib/caja/reporteZ";
 import { descargar } from "../lib/exportarCliente";
+import { DIAS_SIN_RESPALDO, ultimoRespaldo } from "../lib/respaldoApi";
 import { diaLocal, plural } from "../lib/texto";
 import { fechaHora, monto, montoConSigno as signo } from "../lib/tickets";
 import type { Usuario } from "../tipos";
@@ -54,7 +55,8 @@ function haceDias(n: number): string {
 type Dialogo = null | "abrir" | "entrada" | "salida" | "cerrar" | "noventa" | "gaveta" | "corte";
 
 export default function Caja() {
-  const { caja, recargarCaja, config, puede, usuario } = useSesion();
+  const { caja, recargarCaja, config, puede, usuario, irA } = useSesion();
+  const [respaldo, setRespaldo] = useState<string | null | undefined>(undefined);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [esperas, setEsperas] = useState(0);
@@ -67,6 +69,12 @@ export default function Caja() {
   const turno = caja?.turno ?? null;
   const admin = puede("caja.admin");
   const usable = !!turno && !!caja?.puedeUsar;
+
+  // Una falla del disco se lleva todas las ventas: se avisa si el respaldo es viejo o no existe.
+  useEffect(() => {
+    if (puede("respaldo")) ultimoRespaldo().then(setRespaldo, () => undefined);
+  }, []);
+  const diasSinRespaldo = respaldo ? Math.floor((Date.now() - Date.parse(respaldo)) / 86_400_000) : null;
 
   useEffect(() => {
     setDetalle(null);
@@ -95,6 +103,14 @@ export default function Caja() {
     <div className="screen">
       <h1>Caja</h1>
       {error && <Alert tono="error">{error}</Alert>}
+      {respaldo !== undefined && (respaldo === null || (diasSinRespaldo ?? 0) >= DIAS_SIN_RESPALDO) && (
+        <Alert tono="aviso" titulo={respaldo === null ? "Todavía no hay ningún respaldo" : `El último respaldo es de hace ${plural(diasSinRespaldo ?? 0, "día", "días")}`}>
+          Si la computadora se daña o se la roban, se pierden todas las ventas y cierres desde entonces. Haga un respaldo en Administración → Respaldo y cópielo a una memoria USB.{" "}
+          <Button variante="fantasma" onClick={() => irA("admin")}>
+            Ir a Administración
+          </Button>
+        </Alert>
+      )}
 
       <section className="card caja-turno">
         {!turno ? (

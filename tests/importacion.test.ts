@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { codigosExistentes, favoritosActuales, productosParaImportar, resumenCatalogo } from "../src/db/importacion";
 import { buscarProductos, crearProducto } from "../src/db/productos";
 import { celdaSegura, detectarSeparador, leerCsv } from "../src/lib/csv";
-import { categoriasSinMapear, crearPlan, leerPrecio, type Contexto, type Opciones, type ProductoExistente } from "../src/lib/importar/plan";
+import { cambiosDePrecio, categoriasSinMapear, crearPlan, leerPrecio, type Contexto, type Opciones, type ProductoExistente } from "../src/lib/importar/plan";
 import { codigoBase, codigoLibre, contienePalabra, pluralesSinRegla, porCategorias, porPalabras, REGLAS_DEFECTO, reglasValidas, sugerenciaNombre } from "../src/lib/importar/reglas";
 import { leerCsvWeb } from "../src/lib/importar/web";
 import { puede } from "../src/lib/permisos";
@@ -320,5 +320,13 @@ describe("consultas del importador", () => {
     expect(r.porDepartamento.find((d) => d.departamentoId === D("07"))?.total).toBe(0);
     expect((await buscarProductos({ sinBarras: true })).filas.map((x) => x.nombre)).toEqual(["Goma"]);
     expect((await buscarProductos({ paraRevisar: true })).total).toBe(0);
+  });
+});
+
+describe("cambios de precio al importar", () => {
+  const item = (precio: number, antes?: number) => ({ fila: precio, nombre: "x", precio, antes: antes == null ? undefined : { nombre: "x", precio: antes, activo: true, departamentoId: "D", favorito: false } }) as never;
+  it("cuenta lo que sube y baja, y marca lo que baja a menos de la mitad", () => {
+    const r = cambiosDePrecio({ actualizar: [item(1300, 1200), item(1100, 1200), item(120, 1200), item(500, 500), item(900)] });
+    expect([r.suben, r.bajan, r.fuertes.map((i) => (i as { precio: number }).precio)]).toEqual([1, 2, [120]]);
   });
 });

@@ -285,6 +285,20 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
             format!("La caja ya la tiene abierta {}. Debe cerrarla con su conteo antes de abrir la suya.", t.usuario_apertura)
         });
     }
+    // Reloj atrasado: el día de la caja y las horas del Z saldrían mal. Se nota contra lo último registrado.
+    let ultimo: Option<String> = sqlx::query_scalar(
+        "SELECT MAX(f) FROM (SELECT MAX(fecha) AS f FROM ventas UNION ALL SELECT MAX(COALESCE(cerrado_en, abierto_en)) FROM caja_turnos)",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(e)?;
+    let margen = (chrono::Utc::now() + chrono::Duration::minutes(10)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    if let Some(u) = ultimo.filter(|u| *u > margen) {
+        return Err(format!(
+            "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de abrir la caja.",
+            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u)
+        ));
+    }
     sqlx::query(
         "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en)
          SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
@@ -1280,6 +1294,17 @@ pub mod tests {
         assert!(fuera_de_umbral(-5, 0));
         assert!(!fuera_de_umbral(-999, 1000));
         assert!(fuera_de_umbral(1000, 1000));
+    }
+
+    #[tokio::test]
+    async fn no_abre_con_el_reloj_atrasado() {
+        let (bd, _, _, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let t = abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
+        cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 1)]), "").await.unwrap();
+        // Lo último registrado quedó "en el futuro": el reloj se atrasó después.
+        sqlx::query("UPDATE caja_turnos SET cerrado_en = '2999-01-01T00:00:00.000Z' WHERE id = ?").bind(&t.id).execute(p).await.unwrap();
+        assert!(abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap_err().contains("atrasada"));
     }
 
     #[tokio::test]
