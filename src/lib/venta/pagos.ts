@@ -34,7 +34,8 @@ export function calcularPagos(total: number, pagos: PagoEntrada[], formas: Forma
     if (!Number.isSafeInteger(p.monto) || p.monto <= 0) errores.push(`${f.nombre}: monto inválido`);
     if (f.requiereBanco && !p.bancoId) errores.push(`${f.nombre}: elija el banco`);
     if (f.requiereReferencia && !p.referencia?.trim()) errores.push(`${f.nombre}: escriba la referencia`);
-    if (f.pideUltimos4 && p.ultimos4 && !/^\d{4}$/.test(p.ultimos4)) errores.push(`${f.nombre}: los últimos 4 dígitos son 4 números`);
+    // Igual que calculo.rs: últimos 4 en una forma que no los pide también se rechaza.
+    if (p.ultimos4 && !(f.pideUltimos4 && /^\d{4}$/.test(p.ultimos4))) errores.push(`${f.nombre}: los últimos 4 dígitos son 4 números`);
     if (!f.daVuelto) sinVuelto += p.monto;
   }
   if (sinVuelto > total) errores.push("Tarjeta, SINPE y transferencia no dan vuelto: no pueden pasar del total");

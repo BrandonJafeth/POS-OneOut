@@ -2,7 +2,7 @@
 //
 // El hash es un texto "PHC" ($argon2id$v=19$m=...,t=...,p=...$sal$hash) que ya trae
 // adentro la sal aleatoria y los parámetros: no hay que guardar nada aparte.
-// El límite de intentos y la espera se manejan en src/db/usuarios.ts (quedan guardados
+// El límite de intentos y la espera se manejan en usuarios.rs (quedan guardados
 // en la base, así no se reinician cerrando la app).
 
 use argon2::password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier};

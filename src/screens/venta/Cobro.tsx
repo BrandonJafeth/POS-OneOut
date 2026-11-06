@@ -172,7 +172,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                 <Field label="Forma">
                   <span className="cobro-forma">
                     <Icono size={20} aria-hidden />
-                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value })}>
+                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, ultimos4: undefined })}>
                       {p.formas.map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.nombre}

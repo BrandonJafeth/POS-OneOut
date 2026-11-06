@@ -10,8 +10,9 @@ import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
-import { conMiles, diaLocal, normalizar, plural } from "../lib/texto";
+import { conMiles, diaLocal, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
+import { buscarVentas, formasDe, horaDe, pendienteFactura } from "../lib/venta/buscar";
 import { imprimirVenta } from "../lib/venta/imprimir";
 import { descripcionPago } from "../lib/venta/tiquete";
 import type { Banco, FormaPago, Venta, VentaPago } from "../tipos";
@@ -42,26 +43,10 @@ export default function VentasHoy() {
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [dia]);
 
   const completadas = lista.filter((v) => v.estado === "completada");
-  const hora = (iso: string) => new Date(iso).toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const formasDelDia = useMemo(() => [...new Set(lista.flatMap((v) => v.formas.split(" + ").filter(Boolean)))].sort(), [lista]);
-  const pendientes = lista.filter((v) => v.requiereFactura && !v.facturaEmitida && v.estado !== "anulada").length;
+  const formasDelDia = useMemo(() => [...new Set(lista.flatMap(formasDe))].sort(), [lista]);
+  const pendientes = lista.filter(pendienteFactura).length;
   const anuladas = lista.filter((v) => v.estado === "anulada").length;
-  const visibles = useMemo(() => {
-    const q = normalizar(texto);
-    const cifras = texto.replace(/\D/g, "");
-    return lista.filter((v) => {
-      if (filtro === "factura" && !(v.requiereFactura && !v.facturaEmitida && v.estado !== "anulada")) return false;
-      if (filtro === "anuladas" && v.estado !== "anulada") return false;
-      if (filtro.startsWith("forma:") && !v.formas.split(" + ").includes(filtro.slice(6))) return false;
-      const h = hora(v.fecha);
-      if (desde && h < desde) return false;
-      if (hasta && h > hasta) return false;
-      if (!q) return true;
-      // Monto: "3500" o "3.500" encuentran ¢3.500 (y ¢13.500); el número de tiquete también.
-      if (cifras && cifras.length === texto.replace(/[\s.¢₡]/g, "").length && (String(v.total).includes(cifras) || v.numero.includes(cifras))) return true;
-      return normalizar(`${v.numero} ${v.productos} ${v.cajero} ${v.formas}`).includes(q);
-    });
-  }, [lista, texto, desde, hasta, filtro]);
+  const visibles = useMemo(() => buscarVentas(lista, { texto, desde, hasta, filtro }), [lista, texto, desde, hasta, filtro]);
   const hayFiltros = !!(texto || desde || hasta || filtro !== "todas");
   const limpiar = () => (setTexto(""), setDesde(""), setHasta(""), setFiltro("todas"));
   return (
@@ -152,7 +137,7 @@ export default function VentasHoy() {
           <tbody>
             {visibles.map((v) => (
               <FilaClic key={v.id} etiqueta={`Abrir tiquete ${v.numero}`} className={v.estado === "anulada" ? "inactivo" : ""} onAbrir={() => setAbierta(v.id)}>
-                <td className="hora">{hora(v.fecha)}</td>
+                <td className="hora">{horaDe(v.fecha)}</td>
                 <td className="mono">{v.numero}</td>
                 <td className="productos-venta" title={v.productos}>
                   <span className="muted">{plural(v.articulos, "art.", "art.")} · </span>
@@ -164,7 +149,7 @@ export default function VentasHoy() {
                 <td>
                   <div className="row">
                     {v.estado === "anulada" && <Badge tono="error">Anulada</Badge>}
-                    {v.requiereFactura && !v.facturaEmitida && <Badge tono="aviso">Factura pendiente</Badge>}
+                    {pendienteFactura(v) && <Badge tono="aviso">Factura pendiente</Badge>}
                   </div>
                 </td>
               </FilaClic>
@@ -379,14 +364,11 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
     void listarBancos().then(setBancos);
   }, []);
   const nueva = formas.find((f) => f.id === forma);
-  // Turno cerrado: siempre el PIN del dueño. Abierto: solo si entra o sale efectivo de la gaveta.
   const sinCambios =
     forma === p.pago.formaPagoId &&
     (nueva?.requiereBanco ? banco || null : null) === (p.pago.bancoId ?? null) &&
     referencia.trim() === (p.pago.referencia ?? "") &&
     (nueva?.pideUltimos4 ? ultimos4 : "") === (p.pago.ultimos4 ?? "");
-  // Solo el dueño corrige, y siempre con su PIN.
-  const pidePin = true;
 
   return (
     <Modal titulo={`Corregir pago de ${monto(p.pago.monto)}`} onCerrar={p.onCerrar} ancho={480}>
@@ -440,12 +422,11 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         <Field label="Motivo (obligatorio)" ayuda="Al menos 5 letras. Ej. «El cliente pagó con SINPE, no con tarjeta».">
           <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
         </Field>
-        {pidePin && (
-          <label className="campo">
-            {p.turnoAbierto ? "Su PIN de dueño" : "Su PIN de dueño (la caja de esta venta ya cerró: queda como ajuste en la de hoy)"}
-            <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
-          </label>
-        )}
+        {/* Solo el dueño corrige, y siempre con su PIN. */}
+        <label className="campo">
+          {p.turnoAbierto ? "Su PIN de dueño" : "Su PIN de dueño (la caja de esta venta ya cerró: queda como ajuste en la de hoy)"}
+          <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+        </label>
         {sinCambios && <Alert tono="info">Esa ya es la forma de pago registrada. Elija la forma correcta (o cambie el banco o la referencia).</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
         <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || motivo.trim().length < 5}>
