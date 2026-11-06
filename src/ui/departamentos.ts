@@ -28,8 +28,20 @@ export function textoSobre(fondo: string): string {
   return contraste(BLANCO, fondo) >= contraste(NEGRO, fondo) ? BLANCO : NEGRO;
 }
 
+/** Config departamentos_color: cada uno con el suyo, todos de un color ("#rrggbb") o sin color. */
+export type ModoColorDepartamentos = "cada_uno" | "ninguno" | string;
+
+export const esColor = (c: string | null | undefined): c is string => !!c && /^#[0-9a-f]{6}$/i.test(c);
+
+/** Fondo de la píldora en la venta según el modo; null = sin color (píldora neutra del tema). */
+export function fondoPildora(d: Pick<Departamento, "color">, posicion: number, modo: ModoColorDepartamentos): string | null {
+  if (modo === "ninguno") return null;
+  if (esColor(modo)) return modo.toLowerCase();
+  return colorDe(d, posicion);
+}
+
 /** Color del departamento: el guardado o, si no tiene, el de la paleta según su posición. */
 export function colorDe(d: Pick<Departamento, "color">, posicion: number): string {
-  if (d.color && /^#[0-9a-f]{6}$/i.test(d.color)) return d.color.toLowerCase();
+  if (esColor(d.color)) return d.color.toLowerCase();
   return PALETA_DEPARTAMENTOS[((posicion % 12) + 12) % 12].color;
 }

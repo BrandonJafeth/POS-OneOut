@@ -1907,13 +1907,15 @@ mark {
   padding: 0 16px 0 12px;
 }
 
-.pildora-fav {
+.pildora-fav,
+.pildora-neutra {
   background: var(--card);
   color: var(--text);
   border: 1px solid var(--line);
 }
 
-.pildora-fav[aria-pressed="true"] {
+.pildora-fav[aria-pressed="true"],
+.pildora-neutra[aria-pressed="true"] {
   border: 3px solid var(--text);
 }
 

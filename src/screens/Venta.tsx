@@ -33,7 +33,7 @@ import PrecioLibre from "./venta/PrecioLibre";
 import { FAVORITOS, useCatalogo } from "./venta/useCatalogo";
 import { useEsperas } from "./venta/useEsperas";
 import { AbrirCaja, NoVenta } from "./caja/Dialogos";
-import { colorDe, textoSobre } from "../ui/departamentos";
+import { fondoPildora, textoSobre } from "../ui/departamentos";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | null;
 
@@ -349,13 +349,13 @@ export default function Venta() {
             {!buscando && filtro === FAVORITOS ? <Check size={18} aria-hidden strokeWidth={3} /> : <Star size={18} aria-hidden />} Favoritos
           </button>
           {departamentos.map((d, i) => {
-            const fondo = colorDe(d, i);
+            const fondo = fondoPildora(d, i, config.departamentos_color);
             const activo = !buscando && filtro === d.id;
             return (
               <button
                 key={d.id}
-                className="pildora"
-                style={{ background: fondo, color: textoSobre(fondo) }}
+                className={fondo ? "pildora" : "pildora pildora-neutra"}
+                style={fondo ? { background: fondo, color: textoSobre(fondo) } : undefined}
                 aria-pressed={activo}
                 onClick={() => (setFiltro(d.id), setTexto(""), alBuscador())}
               >

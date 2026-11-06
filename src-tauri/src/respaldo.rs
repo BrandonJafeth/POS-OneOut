@@ -258,17 +258,20 @@ fn renombrar(de: impl AsRef<Path>, a: impl AsRef<Path>) -> Res<()> {
 
 /// Al arrancar, antes de abrir la base: si hay una restauración pendiente, la activa.
 /// La base anterior queda en respaldos-automaticos (cifrada, igual que estaba).
-pub fn aplicar_restauracion_pendiente(dir: &Path) -> Res<bool> {
+/// Devuelve Some(archivo donde quedó la base anterior) si se aplicó una restauración.
+pub fn aplicar_restauracion_pendiente(dir: &Path) -> Res<Option<String>> {
     let nuevo = dir.join("pos.db.nuevo");
     if !nuevo.exists() {
-        return Ok(false);
+        return Ok(None);
     }
     let actual = dir.join("pos.db");
+    let mut guardada = String::new();
     if actual.exists() {
         let carpeta = dir.join("respaldos-automaticos");
         std::fs::create_dir_all(&carpeta).map_err(e)?;
         let archivo = carpeta.join(format!("pos-antes-restaurar-{}.db", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         renombrar(&actual, &archivo)?;
+        guardada = archivo.to_string_lossy().to_string();
         // El WAL va con su base (puede tener lo último que se escribió).
         for ext in ["-wal", "-shm"] {
             let de = PathBuf::from(format!("{}{ext}", actual.to_string_lossy()));
@@ -278,7 +281,40 @@ pub fn aplicar_restauracion_pendiente(dir: &Path) -> Res<bool> {
         }
     }
     renombrar(&nuevo, &actual)?;
-    Ok(true)
+    Ok(Some(guardada))
+}
+
+/// Lo que la base reemplazada tenía y el respaldo no: numeración de tiquetes y ventas posteriores.
+async fn leer_anterior(ruta: &str, clave: Option<&[u8; 32]>, desde: Option<&str>) -> Res<(Vec<(String, i64)>, i64)> {
+    let o = crate::bd::opciones(ruta, clave)?.create_if_missing(false);
+    let vieja = SqlitePoolOptions::new().max_connections(1).connect_with(o).await.map_err(e)?;
+    let cajas: Vec<(String, i64)> = sqlx::query_as("SELECT id, consecutivo_siguiente FROM cajas").fetch_all(&vieja).await.map_err(e)?;
+    let fuera: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas WHERE fecha > COALESCE(?, '')").bind(desde).fetch_one(&vieja).await.map_err(e)?;
+    vieja.close().await;
+    Ok((cajas, fuera))
+}
+
+/// La base restaurada no trae rastro de que se restauró (eso quedó en la anterior, que se movió).
+/// Se anota aquí: dónde quedó la base reemplazada y cuántas ventas suyas no están en el respaldo.
+/// Además la numeración de tiquetes sigue desde la más alta de las dos: si volviera a la del
+/// respaldo, las ventas nuevas repetirían números ya entregados a clientes.
+pub async fn anotar_restauracion(bd: &Bd, base_anterior: &str, clave: Option<&[u8; 32]>) -> Res<()> {
+    let ultima_venta: Option<String> = sqlx::query_scalar("SELECT MAX(fecha) FROM ventas").fetch_one(&bd.pool).await.map_err(e)?;
+    let anterior = if base_anterior.is_empty() { Ok((vec![], 0)) } else { leer_anterior(base_anterior, clave, ultima_venta.as_deref()).await };
+    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let mut detalle = json!({"baseAnterior": base_anterior, "ultimaVentaDelRespaldo": ultima_venta});
+    match &anterior {
+        Ok((cajas, fuera)) => {
+            for (id, siguiente) in cajas {
+                sqlx::query("UPDATE cajas SET consecutivo_siguiente = MAX(consecutivo_siguiente, ?) WHERE id = ?").bind(siguiente).bind(id).execute(&mut *tx).await.map_err(e)?;
+            }
+            detalle["ventasQueNoEstanEnElRespaldo"] = json!(fuera);
+        }
+        Err(err) => detalle["noSePudoLeerLaBaseAnterior"] = json!(err),
+    }
+    bitacora::registrar(&mut tx, None, "respaldo.restaurado", "respaldo", None, &detalle).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -376,6 +412,9 @@ mod tests_disco {
         usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
+        // Después del respaldo se siguieron emitiendo tiquetes (1000 más).
+        let en_respaldo: i64 = sqlx::query_scalar("SELECT MIN(consecutivo_siguiente) FROM cajas").fetch_one(&bd.pool).await.unwrap();
+        sqlx::query("UPDATE cajas SET consecutivo_siguiente = consecutivo_siguiente + 1000").execute(&bd.pool).await.unwrap();
         assert!(!archivo.windows(5).any(|w| w == &"Lápiz".as_bytes()[..5]));
         let mut malo = archivo.clone();
         let medio = malo.len() / 2;
@@ -389,8 +428,16 @@ mod tests_disco {
         cerrar(bd).await;
 
         // 4. Al reiniciar se activa la restauración y abre con la misma clave.
-        assert!(aplicar_restauracion_pendiente(&dir).unwrap());
+        let anterior = aplicar_restauracion_pendiente(&dir).unwrap().expect("se aplicó");
+        assert!(anterior.contains("pos-antes-restaurar-") && Path::new(&anterior).exists());
         let bd = Bd::abrir(&dir, Some(clave)).await.unwrap();
+        // La base restaurada dice que lo es y dónde quedó la reemplazada.
+        anotar_restauracion(&bd, &anterior, Some(&clave)).await.unwrap();
+        let d: String = sqlx::query_scalar("SELECT detalle FROM bitacora WHERE accion = 'respaldo.restaurado'").fetch_one(&bd.pool).await.unwrap();
+        assert!(d.contains("pos-antes-restaurar-") && d.contains("ventasQueNoEstanEnElRespaldo"), "{d}");
+        // La numeración no vuelve atrás: no se repiten tiquetes ya entregados.
+        let sig: i64 = sqlx::query_scalar("SELECT MIN(consecutivo_siguiente) FROM cajas").fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(sig, en_respaldo + 1000);
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM productos WHERE id = 'P1'").fetch_one(&bd.pool).await.unwrap();
         assert_eq!(n, 1);
         cerrar(bd).await;

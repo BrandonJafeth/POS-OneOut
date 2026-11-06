@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
+import { guardarConfig } from "../db/config";
 import { colorDepartamento, crearDepartamento, editarDepartamento, listarDepartamentos, moverDepartamento } from "../db/departamentos";
 import type { Departamento } from "../tipos";
-import { colorDe, PALETA_DEPARTAMENTOS, textoSobre } from "../ui/departamentos";
+import { colorDe, esColor, PALETA_DEPARTAMENTOS, textoSobre } from "../ui/departamentos";
 import { useToast } from "../ui/Toast";
 
 /** Color de la píldora: los 12 de la paleta o uno propio. El texto (blanco o negro) se elige solo. */
@@ -28,9 +29,53 @@ function ColorDepto(p: { d: Departamento; posicion: number; onCambio(c: string |
   );
 }
 
+/** Cómo se ven las píldoras en la venta: cada departamento con su color, todos de un color o sin color. */
+function ModoColores(p: { modo: string; onCambio(m: string): Promise<void> }) {
+  const unico = esColor(p.modo) ? p.modo.toLowerCase() : null;
+  const [color, setColor] = useState(unico ?? PALETA_DEPARTAMENTOS[0].color);
+  const dePaleta = PALETA_DEPARTAMENTOS.find((x) => x.color === color);
+  const opcion = (valor: string, titulo: string, ayuda: string) => (
+    <label className={`opcion ${(valor === "uno" ? !!unico : p.modo === valor) ? "elegida" : ""}`}>
+      <input type="radio" name="modo-color" checked={valor === "uno" ? !!unico : p.modo === valor} onChange={() => void p.onCambio(valor === "uno" ? color : valor)} />
+      <span>
+        <strong>{titulo}</strong>
+        <span className="ayuda">{ayuda}</span>
+      </span>
+    </label>
+  );
+  return (
+    <section className="card">
+      <h2>Colores en la venta</h2>
+      <fieldset className="opciones-modo">
+        <legend className="sr-only">Colores de los departamentos</legend>
+        {opcion("cada_uno", "Cada departamento con su color", "Se elige abajo, en cada fila.")}
+        {opcion("uno", "Todos del mismo color", "El departamento elegido se marca con borde y ✓.")}
+        {opcion("ninguno", "Sin color", "Píldoras sencillas, del color del tema.")}
+      </fieldset>
+      {unico && (
+        <div className="depto-color">
+          <span className="depto-muestra" style={{ background: color, color: textoSobre(color) }}>
+            Departamento
+          </span>
+          <select aria-label="Color de todos los departamentos" value={dePaleta ? color : "propio"} onChange={(e) => e.target.value !== "propio" && (setColor(e.target.value), void p.onCambio(e.target.value))}>
+            {PALETA_DEPARTAMENTOS.map((x) => (
+              <option key={x.color} value={x.color}>
+                {x.nombre}
+              </option>
+            ))}
+            <option value="propio">Otro color…</option>
+          </select>
+          <input type="color" aria-label="Elegir otro color para todos" value={color} onChange={(e) => (setColor(e.target.value), void p.onCambio(e.target.value))} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Lista editable. El dueño cambia nombre, orden, color y activo; el técnico además crea y cambia códigos. */
 export default function Departamentos({ embebido = false }: { embebido?: boolean }) {
-  const { actor, puede } = useSesion();
+  const { actor, puede, config, recargarConfig } = useSesion();
+  const cadaUno = !esColor(config.departamentos_color) && config.departamentos_color !== "ninguno";
   const estructura = puede("departamentos.estructura");
   const [lista, setLista] = useState<Departamento[]>([]);
   const [edicion, setEdicion] = useState<Record<string, { codigo: string; nombre: string }>>({});
@@ -60,13 +105,17 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
     <div className="screen">
       {!embebido && <h1>Departamentos</h1>}
       <Mensaje error={error} />
+      <ModoColores
+        modo={config.departamentos_color}
+        onCambio={(m) => hacer(async () => (await guardarConfig(actor, "departamentos_color", m), await recargarConfig()), "Colores guardados.")}
+      />
       <section className="card">
         <table className="tbl tbl-grande">
           <thead>
             <tr>
               <th>Código</th>
               <th>Nombre</th>
-              <th>Color en la venta</th>
+              {cadaUno && <th>Color en la venta</th>}
               <th>Estado</th>
               <th />
             </tr>
@@ -84,9 +133,11 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
                   <td>
                     <input aria-label={`Nombre de ${d.nombre}`} value={e.nombre} onChange={(x) => set({ nombre: x.target.value })} />
                   </td>
-                  <td>
-                    <ColorDepto d={d} posicion={i} onCambio={(c) => void hacer(() => colorDepartamento(actor, d.id, c), "Color guardado.")} />
-                  </td>
+                  {cadaUno && (
+                    <td>
+                      <ColorDepto d={d} posicion={i} onCambio={(c) => void hacer(() => colorDepartamento(actor, d.id, c), "Color guardado.")} />
+                    </td>
+                  )}
                   <td>{d.activo ? "Activo" : "Inactivo"}</td>
                   <td className="acciones">
                     {sucio && (

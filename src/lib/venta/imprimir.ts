@@ -1,6 +1,6 @@
 // Imprime el tiquete de una venta guardada en la impresora de tiquetes. Si falla, la venta ya está
 // guardada: se reimprime después. El original sale una vez; las demás, como COPIA (Rust lo revisa).
-import type { ConfigApp } from "../../db/config";
+import { CONFIG_DEFECTO, type ConfigApp } from "../../db/config";
 import { ajustesPara } from "../../db/impresoras";
 import { obtenerNegocio } from "../../db/negocio";
 import { obtenerVenta } from "../../db/ventas";
@@ -13,7 +13,8 @@ export async function imprimirVenta(ventaId: string, config: ConfigApp, opc: { c
   if (!v) throw new Error("Venta no encontrada");
   const doc = tiqueteVenta(await obtenerNegocio(), v, ajustes, {
     copia: opc.copia,
-    textoNoFactura: config.texto_no_factura,
+    // Sin la leyenda el tiquete parecería un comprobante fiscal: nunca sale vacía.
+    textoNoFactura: config.texto_no_factura?.trim() || CONFIG_DEFECTO.texto_no_factura,
     mostrarIva: config.mostrar_iva,
     nombreCliente: opc.verCliente === false ? null : (v.cliente ?? v.nombreTiquete),
   });

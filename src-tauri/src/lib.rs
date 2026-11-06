@@ -658,9 +658,10 @@ compile_error!("Una compilación release sin la feature `cifrado` guardaría la 
 
 /// Abre la base al arrancar. Errores no tumban la app: la pantalla los muestra (sistema_estado).
 async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]>) {
-    if let Err(err) = respaldo::aplicar_restauracion_pendiente(dir) {
-        return (Err(format!("No se pudo aplicar la restauración: {err}")), None);
-    }
+    let restaurada = match respaldo::aplicar_restauracion_pendiente(dir) {
+        Ok(r) => r,
+        Err(err) => return (Err(format!("No se pudo aplicar la restauración: {err}")), None),
+    };
     let clave = if cfg!(feature = "cifrado") {
         match clave::obtener(dir) {
             Ok(k) => Some(k),
@@ -669,7 +670,13 @@ async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]
     } else {
         None
     };
-    (Bd::abrir(dir, clave).await, clave)
+    let bd = Bd::abrir(dir, clave).await;
+    if let (Ok(b), Some(anterior)) = (&bd, &restaurada) {
+        if let Err(err) = respaldo::anotar_restauracion(b, anterior, clave.as_ref()).await {
+            return (Err(format!("Se restauró el respaldo pero no se pudo anotar en la bitácora: {err}")), clave);
+        }
+    }
+    (bd, clave)
 }
 
 /// Solo se navega dentro de la app (nada de sitios externos ni ventanas nuevas).

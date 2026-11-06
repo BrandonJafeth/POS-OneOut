@@ -75,7 +75,7 @@ fn registro() -> HashMap<String, Sentencia> {
         .collect()
 }
 
-fn opciones(destino: &str, clave: Option<&[u8; 32]>) -> Res<SqliteConnectOptions> {
+pub(crate) fn opciones(destino: &str, clave: Option<&[u8; 32]>) -> Res<SqliteConnectOptions> {
     let mut o = SqliteConnectOptions::from_str(destino)
         .map_err(e)?
         .create_if_missing(true)

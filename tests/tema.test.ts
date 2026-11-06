@@ -73,3 +73,17 @@ describe("colores de departamento", () => {
     expect(colorDe({ color: "rojo" }, 2)).toBe(PALETA_DEPARTAMENTOS[2].color);
   });
 });
+
+describe("modo de color de los departamentos", () => {
+  it("cada uno con su color, todos de uno o sin color", async () => {
+    const { fondoPildora, PALETA_DEPARTAMENTOS } = await import("../src/ui/departamentos");
+    const propio = { color: "#123456" };
+    const sin = { color: null };
+    expect(fondoPildora(propio, 0, "cada_uno")).toBe("#123456");
+    expect(fondoPildora(sin, 1, "cada_uno")).toBe(PALETA_DEPARTAMENTOS[1].color);
+    expect(fondoPildora(propio, 0, "#ABCDEF")).toBe("#abcdef");
+    expect(fondoPildora(propio, 0, "ninguno")).toBeNull();
+    // Un valor raro guardado a mano no rompe la venta: cae a "cada uno".
+    expect(fondoPildora(propio, 0, "azul")).toBe("#123456");
+  });
+});

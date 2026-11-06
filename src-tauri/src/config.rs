@@ -40,6 +40,7 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         "tema" => &[],                                            // cualquier usuario con sesión
         c if c.starts_with("importacion_") => &["productos.importar"],
         c if c.starts_with("caja_") => &["caja.admin", "config.tecnica"],
+        "departamentos_color" => &["departamentos", "config.tecnica"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }
 }
@@ -70,6 +71,16 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         "caja_no_venta_umbral" => entero(0, 1000),
         "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
         "sesion_inactividad_min" => entero(1, 240),
+        // El tiquete no es comprobante fiscal: la leyenda que lo dice no puede quedar vacía.
+        "texto_no_factura" => match v.as_str() {
+            Some(t) if t.trim().chars().count() >= 10 => Ok(()),
+            _ => Err("El aviso «no es factura electrónica» del tiquete no puede quedar vacío".into()),
+        },
+        "departamentos_color" => match v.as_str() {
+            Some("cada_uno" | "ninguno") => Ok(()),
+            Some(c) if c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit()) => Ok(()),
+            _ => Err("«departamentos_color»: \"cada_uno\", \"ninguno\" o un color como \"#2563eb\"".into()),
+        },
         "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
         _ => Ok(()),
     }
@@ -154,6 +165,12 @@ mod tests {
             assert!(guardar(&bd.pool, &tec, clave, &malo).await.is_err(), "{clave} = {malo}");
         }
         guardar(&bd.pool, &tec, "redondeo_total", &json!(10)).await.unwrap();
+        // Color de los departamentos: el dueño lo elige; el cajero no.
+        for bueno in [json!("cada_uno"), json!("ninguno"), json!("#2563EB")] {
+            guardar(&bd.pool, &dueno, "departamentos_color", &bueno).await.unwrap();
+        }
+        assert!(guardar(&bd.pool, &dueno, "departamentos_color", &json!("azul")).await.is_err());
+        assert!(guardar(&bd.pool, &tec, "texto_no_factura", &json!("  ")).await.is_err());
         guardar(&bd.pool, &dueno, "caja_salida_max_sin_pin", &json!(30000)).await.unwrap();
         assert_eq!(entero(&bd.pool, "redondeo_total", 5).await, 10);
     }

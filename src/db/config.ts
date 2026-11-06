@@ -53,6 +53,8 @@ export interface ConfigApp {
   caja_no_venta_umbral: number;
   /** ¢: quitar de una venta abierta una línea de este monto o más queda en la bitácora. 0 = nunca. */
   caja_quitar_linea_bitacora: number;
+  /** Píldoras de la venta: "cada_uno" (el color de cada departamento), "#rrggbb" (todos iguales) o "ninguno". */
+  departamentos_color: string;
   caja_denominaciones: number[];
   caja_motivos: { salida: string[]; entrada: string[] };
   pin_min_dueno: number;
@@ -92,6 +94,7 @@ export const CONFIG_DEFECTO: ConfigApp = {
   caja_no_venta_motivos: ["Cambio de billetes", "Devolución", "Otro"],
   caja_no_venta_umbral: 5,
   caja_quitar_linea_bitacora: 5000,
+  departamentos_color: "cada_uno",
   caja_denominaciones: [50000, 20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5],
   caja_motivos: { salida: ["Retiro de dinero", "Gasto menor", "Pago a proveedor", "Adelanto"], entrada: ["Ingreso de cambio", "Otro ingreso"] },
   pin_min_dueno: 6,
