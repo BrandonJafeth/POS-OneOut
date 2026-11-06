@@ -121,6 +121,47 @@ function cabeceraTurno(d: Detalle, cols: number, nombreNegocio: string): LineaDo
 
 // ─── Reporte Z ───
 
+const diaCorto = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+
+/** Control por usuario, lectura del día (promedio, semana anterior, horas) y más vendidos. */
+export function lineasLectura(r: Resumen, cols: number): LineaDoc[] {
+  const x = r.estadisticas;
+  const l: LineaDoc[] = [];
+  if (x.control.length) {
+    titulo(l, "CONTROL POR USUARIO", cols);
+    const libre = x.control.reduce((s, c) => s + c.montoPrecioLibre, 0);
+    if (r.totalVentas > 0 && libre > 0) l.push({ t: lr("Venta simple / ventas", `${Math.round((libre / r.totalVentas) * 100)} %`, cols), b: true });
+    for (const c of x.control) {
+      l.push({ t: cortar(c.usuario, cols), b: true });
+      if (c.precioLibre) l.push({ t: lr(`  Venta simple (${c.precioLibre})`, monto(c.montoPrecioLibre), cols) });
+      if (c.descuentos) l.push({ t: lr("  Descuentos dados", monto(c.descuentos), cols) });
+      if (c.lineasQuitadas) l.push({ t: lr(`  Quitado antes de cobrar (${c.lineasQuitadas})`, monto(c.montoQuitado), cols) });
+    }
+    if (x.control.some((c) => c.lineasQuitadas)) wrap(`Quitado: solo líneas de ${monto(x.umbralQuitar)} o más.`, cols).forEach((y) => l.push({ t: y }));
+  }
+  if (x.porHora.length) {
+    titulo(l, "LECTURA DEL DÍA", cols);
+    l.push({ t: lr("Tiquete promedio", monto(x.tiquetePromedio), cols) });
+    const { hoy, semanaAnterior: antes } = x;
+    l.push({ t: lr(`Hoy ${diaCorto(hoy.dia)} (${hoy.ventas})`, monto(hoy.total), cols) });
+    l.push({ t: lr(`${diaCorto(antes.dia)} sem. pasada (${antes.ventas})`, monto(antes.total), cols) });
+    if (antes.total > 0) l.push({ t: lr("  Diferencia", `${montoConSigno(hoy.total - antes.total, "-")} (${Math.round(((hoy.total - antes.total) / antes.total) * 100)} %)`, cols) });
+    l.push({ t: "Hasta la misma hora, toda la caja." });
+    l.push({ t: "VENTAS POR HORA" });
+    const max = Math.max(...x.porHora.map((h) => h.total), 1);
+    const ancho = Math.max(4, cols - 24);
+    for (const h of x.porHora) {
+      const barra = "#".repeat(Math.max(1, Math.round((h.total / max) * ancho)));
+      l.push({ t: lr(`${String(h.hora).padStart(2, "0")}h ${barra}`, `${h.ventas} ${monto(h.total)}`, cols) });
+    }
+  }
+  if (x.topProductos.length) {
+    titulo(l, "MÁS VENDIDOS", cols);
+    x.topProductos.forEach((p, i) => l.push({ t: lr(`${String(i + 1).padStart(2)} ${cortar(p.producto, cols - 18)}`, `${p.cantidad} ${monto(p.monto)}`, cols) }));
+  }
+  return l;
+}
+
 export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): LineaDoc[] {
   const { turno: t, resumen: r } = d;
   const l: LineaDoc[] = [{ t: sep2(cols) }, { t: "CIERRE DE CAJA (Z)", b: true, centro: true }];
@@ -155,6 +196,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   for (const u of r.porUsuario) l.push({ t: lr(`${cortar(u.usuario, cols - 18)} (${u.ventas} tiq.)`, monto(u.total), cols) });
   if (!r.porUsuario.length) l.push({ t: "  Sin ventas" });
   wrap(NOTA_USUARIOS, cols).forEach((x) => l.push({ t: x }));
+  l.push(...lineasLectura(r, cols));
 
   if (r.conDesglose && r.desglose.departamentos.length) {
     titulo(l, "POR DEPARTAMENTO", cols);

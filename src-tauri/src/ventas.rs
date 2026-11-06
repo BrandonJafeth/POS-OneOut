@@ -1329,6 +1329,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn z_con_control_por_usuario_horas_y_mas_vendidos() {
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
+        let lapiz = producto_en(p, "Lápiz", LIBRERIA, 300).await;
+        let caro = producto_en(p, "Calculadora", LIBRERIA, 12000).await;
+        // Cajero: quita una calculadora antes de cobrar (¢12.000, queda anotado) y da ¢100 de descuento.
+        let mut e = Estado { lineas: vec![linea(&caro, "Calculadora", LIBRERIA, 12000, 2, 0), linea(&lapiz, "Lápiz", LIBRERIA, 300, 3, 0)], ..Default::default() };
+        let esp = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+        e.lineas[0].cantidad = 1;
+        e.lineas[1].descuento = 90;
+        guardar_espera(p, &cajero, &esp.id, &e).await.unwrap();
+        cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago(EF, 12810)]).await.unwrap();
+        // Dueño: una venta simple (precio escrito a mano) y otra con lápices.
+        let libre = Linea { producto_id: None, ..linea("x", "Regalo", LIBRERIA, 2500, 1, 0) };
+        vender(p, &dueno, &Estado { lineas: vec![libre], ..Default::default() }, &[pago(EF, 2500)]).await;
+        vender(p, &dueno, &est(&lapiz, LIBRERIA, 300, 1, 0), &[pago(TJ, 300)]).await;
+
+        let t = caja::turno_abierto(&mut p.acquire().await.unwrap(), CAJA_1).await.unwrap().unwrap();
+        let x = detalle(p, &dueno, &t.id).await.unwrap().resumen.estadisticas;
+        let k = |u: &str| x.control.iter().find(|c| c.usuario == u).cloned().unwrap_or_default();
+        assert_eq!((k("Luis").descuentos, k("Luis").lineas_quitadas, k("Luis").monto_quitado, k("Luis").precio_libre), (90, 1, 12000, 0));
+        assert_eq!((k("Ana").precio_libre, k("Ana").monto_precio_libre, k("Ana").descuentos), (1, 2500, 0));
+        assert_eq!(x.por_hora.iter().map(|h| h.ventas).sum::<i64>(), 3);
+        assert_eq!(x.tiquete_promedio, (12810 + 2500 + 300) / 3);
+        assert_eq!((x.hoy.ventas, x.hoy.total, x.semana_anterior.ventas), (3, 15610, 0));
+        // Más vendidos: por cantidad, solo del catálogo (la venta simple ya sale en Control).
+        assert_eq!(x.top_productos.iter().map(|t| (t.producto.as_str(), t.cantidad)).collect::<Vec<_>>(), [("Lápiz", 4), ("Calculadora", 1)]);
+        // Con el turno abierto, el cajero no recibe nada de esto.
+        assert_eq!(detalle(p, &cajero, &t.id).await.unwrap().resumen.estadisticas, Default::default());
+    }
+
+    #[tokio::test]
     async fn pedir_factura_una_vez_y_no_en_anuladas() {
         let (bd, _, dueno, cajero) = base_con_usuarios().await;
         let p = &bd.pool;

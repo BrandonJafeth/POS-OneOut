@@ -8,6 +8,7 @@ mod clientes;
 mod config;
 mod desglose;
 mod escpos;
+mod estadisticas;
 mod gaveta;
 mod importacion;
 mod impresoras;

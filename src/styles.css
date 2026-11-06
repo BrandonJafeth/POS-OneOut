@@ -2175,13 +2175,17 @@ mark {
   min-width: 0;
 }
 
+/* Alineado por arriba: la ayuda bajo un monto vacío ("Escriba el monto.") no baja el resto de la fila. */
 .fila-pago.cobro-campos {
   display: grid;
   grid-template-columns: 1.35fr 1fr 1.5fr 48px;
+  align-items: start;
 }
 
+/* El botón queda a la altura de los controles: salta la etiqueta (14px × 1,45) y su separación. */
 .fila-pago.cobro-campos > .btn {
   min-height: 48px;
+  margin-top: calc(14px * 1.45 + 6px);
 }
 
 .cobro-forma {
@@ -3193,6 +3197,22 @@ button.toast-cerrar:hover {
 
 .conteo-z {
   max-width: 360px;
+}
+
+/* Ventas por hora: la barra es el total de esa hora contra la hora más fuerte del turno. */
+.barra-celda {
+  width: 45%;
+}
+
+.tbl-horas td.num {
+  white-space: nowrap;
+}
+
+.barra-hora {
+  display: block;
+  height: 10px;
+  border-radius: var(--radio);
+  background: var(--accent);
 }
 
 td.linea-producto {

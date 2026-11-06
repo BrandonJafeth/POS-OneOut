@@ -190,6 +190,22 @@ export interface Resumen {
   /** Departamentos, detalle, formas de pago y efectivo cuadran entre sí (Rust lo revisa). */
   cuadra: boolean;
   descuadres: string[];
+  /** Solo informa (no entra en el cuadre). Vacío para el cajero con el turno abierto. */
+  estadisticas: Estadisticas;
+}
+
+/** Lectura del día (estadisticas.rs). */
+export interface Estadisticas {
+  /** Por usuario: venta simple (precio a mano), descuentos dados y líneas quitadas antes de cobrar. */
+  control: { usuario: string; precioLibre: number; montoPrecioLibre: number; descuentos: number; lineasQuitadas: number; montoQuitado: number }[];
+  /** Desde qué monto una línea quitada queda anotada. */
+  umbralQuitar: number;
+  porHora: { hora: number; ventas: number; total: number }[];
+  tiquetePromedio: number;
+  /** Toda la caja hoy y el mismo día de la semana anterior, los dos hasta la misma hora. */
+  hoy: { dia: string; ventas: number; total: number };
+  semanaAnterior: { dia: string; ventas: number; total: number };
+  topProductos: { producto: string; cantidad: number; monto: number }[];
 }
 
 export interface Detalle {

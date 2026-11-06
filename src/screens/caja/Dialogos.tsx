@@ -152,7 +152,7 @@ export function CasillasZ(p: { valor: OpcionesCierre; onCambio(v: OpcionesCierre
 }
 
 /**
- * Cierre. El cajero cuenta a ciegas y billete por billete: no ve lo esperado. Al confirmar, el conteo
+ * Cierre. El cajero cuenta a ciegas (total o billete por billete): no ve lo esperado. Al confirmar, el conteo
  * queda bloqueado (solo el dueño reabre) y recién entonces ve el resultado y el Z completo.
  * El dueño revisa además tarjeta/SINPE/transferencias y escribe una nota si no cuadra.
  */
@@ -164,7 +164,7 @@ export function CerrarCaja(p: {
   onCerrar(): void;
   onCerrada(r: ResultadoCierre, o: OpcionesCierre): void;
 }) {
-  const [conteo, setConteo] = useState<ConteoEntrada>(p.ciego ? { cantidades: {}, total: null } : CONTEO_VACIO);
+  const [conteo, setConteo] = useState<ConteoEntrada>(CONTEO_VACIO);
   // El dueño revisa primero tarjeta/SINPE/transferencias contra el datáfono; el cajero no recibe esos montos.
   const [paso, setPaso] = useState<"revisar" | "contar" | "confirmar" | "nota">(!p.ciego && p.pagosElectronicos.length ? "revisar" : "contar");
   const [nota, setNota] = useState("");
@@ -205,11 +205,11 @@ export function CerrarCaja(p: {
         <>
           <p className="muted">
             {p.ciego
-              ? "Cuente todo el efectivo de la gaveta, billete por billete. Al confirmar, el conteo queda guardado y ya no se puede cambiar; después verá el resultado."
+              ? "Cuente todo el efectivo de la gaveta: escriba el total o cuente billete por billete. Al confirmar, el conteo queda guardado y ya no se puede cambiar; después verá el resultado."
               : "Cuente todo el efectivo de la gaveta. Al cerrar verá si cuadra con lo esperado."}
           </p>
           {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {plural(p.esperasAbiertas, "venta", "ventas")} en espera sin cobrar. Se quedan para mañana.</Alert>}
-          <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" soloDenominaciones={p.ciego} />
+          <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" />
           <CasillasZ valor={opciones} onCambio={setOpciones} />
           {error && <Alert tono="error">{error}</Alert>}
           <div className="fila-botones">
@@ -277,6 +277,7 @@ export function CerrarCaja(p: {
 }
 
 function ResumenConteo(p: { denominaciones: number[]; conteo: ConteoEntrada }) {
+  if (p.conteo.total !== null) return null; // escribió el total: no hay detalle que mostrar
   const filas = p.denominaciones.map((d) => [d, p.conteo.cantidades[String(d)] ?? 0] as const).filter(([, n]) => n > 0);
   if (!filas.length) return <p className="muted">No contó ningún billete ni moneda (caja vacía).</p>;
   return (

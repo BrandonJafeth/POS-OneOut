@@ -42,7 +42,7 @@ Cada prueba dice lo que debe pasar. Si algo no coincide, anote el número de la 
 
 ## E. Cerrar caja
 
-1. **Cierre del cajero (ciego).** Como Luis, pulse **Cerrar caja**. → Solo puede contar billete por billete; no ve lo esperado.
+1. **Cierre del cajero (ciego).** Como Luis, pulse **Cerrar caja**. → Puede escribir el total o contar billete por billete; en ningún caso ve lo esperado.
    - Pulse **Listo, revisar el conteo** → muestra lo que contó. **Volver a contar** deja corregir; **Confirmar y cerrar** cierra.
    - Recién ahí ve el resultado ("Cuadra" / "Faltante…") y el cierre Z completo en pantalla, y sale impreso.
 2. **El conteo ya no cambia.** Después de cerrar no hay forma de editar el conteo. Solo Ana, en Turnos, con **Reabrir** (PIN y motivo).
@@ -127,7 +127,7 @@ Objetivo: comprobar en papel el Z con detalle completo y los tiquetes por depart
    - Un cuaderno + 3 impresiones con un descuento al total, pagado mitad SINPE (banco BCR) y mitad efectivo.
    - Una venta con un nombre de producto muy largo (más de 32 letras).
 4. Registre una entrada (¢3.000, "Ingreso de cambio"), una salida (¢500), una "No venta" y un corte sin retiro.
-5. **Cambiar usuario** → Luis. Cierre contando billete por billete. Antes de confirmar, deje las casillas como están.
+5. **Cambiar usuario** → Luis. Cierre escribiendo el total contado. Antes de confirmar, deje las casillas como están.
 6. En el papel revise:
    - Encabezado: negocio, caja, día, abrió Ana (hora), cerró Luis (hora).
    - TOTAL VENTAS igual a la suma de las formas de pago, y "Efectivo esperado" = fondo + contado + entradas − salidas − vueltos.

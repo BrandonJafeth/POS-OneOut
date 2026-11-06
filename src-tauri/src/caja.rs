@@ -9,7 +9,7 @@
 //   propio turno (ni el dueño vende en el de otro; sí puede cerrarlo).
 // - Mientras el turno está abierto, el cajero NO recibe totales de ventas por ningún comando
 //   (ni el esperado): solo lo de la venta que hace y sus propios tiquetes. Al cerrar ve el Z completo.
-// - El conteo del cajero es ciego y por billetes y monedas. Cerrado el turno, el conteo no se edita
+// - El conteo del cajero es ciego (por total o por billetes y monedas). Cerrado el turno, el conteo no se edita
 //   (trigger en la base); solo el dueño reabre, con PIN y motivo, y solo el mismo día.
 // - Efectivo esperado = fondo + efectivo recibido − vueltos + entradas − salidas.
 // - Diferencia = contado − esperado. Desde el umbral queda para revisión del dueño.
@@ -19,6 +19,7 @@ use crate::bitacora;
 use crate::config;
 use crate::desglose::{self, Desglose};
 use crate::escpos;
+use crate::estadisticas::{self, Estadisticas};
 use crate::impresoras;
 use crate::permisos::{puede, sin_permiso, Rol};
 use crate::sesion::Actor;
@@ -164,12 +165,6 @@ pub struct Conteo {
     /// Total escrito de una vez, sin detallar billetes y monedas. Se usa si no hay cantidades.
     #[serde(default)]
     pub total: Option<i64>,
-}
-
-impl Conteo {
-    fn por_total(&self) -> bool {
-        self.cantidades.values().all(|n| *n == 0) && self.total.is_some_and(|t| t > 0)
-    }
 }
 
 pub async fn denominaciones(pool: &SqlitePool) -> Vec<i64> {
@@ -526,6 +521,8 @@ pub struct Resumen {
     #[serde(default = "si")]
     pub cuadra: bool,
     pub descuadres: Vec<String>,
+    /// Control por usuario, ventas por hora, promedio, semana anterior y más vendidos (solo informa).
+    pub estadisticas: Estadisticas,
 }
 
 /// Una diferencia de caja pide nota y revisión si NO es cero y llega al umbral
@@ -737,6 +734,7 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         .map(|f| CorteResumen { id: f.get("id"), fecha: f.get("fecha"), usuario: f.get("usuario"), ventas: f.get("ventas"), total: f.get("total"), efectivo_esperado: f.get("efectivo_esperado"), retiro: f.get("retiro") })
         .collect();
     r.desglose = desglose::calcular(c, &t.id).await?;
+    r.estadisticas = estadisticas::calcular(c, t).await?;
     // Los ajustes no cambian el efectivo de este turno: una devolución en efectivo entra como salida.
     r.efectivo_esperado = r.fondo + r.recibido_efectivo - r.vueltos + r.entradas - r.salidas;
     revisar_cuadre(&mut r);
@@ -858,9 +856,6 @@ pub async fn necesita_nota(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: 
 
 pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo, nota: &str) -> Res<ResultadoCierre> {
     a.exigir("caja", "cerrar la caja")?;
-    if a.rol == Rol::Cajero && conteo.por_total() {
-        return Err("Cuente el efectivo por billetes y monedas.".into());
-    }
     let (contado, detalle_conteo) = total_conteo(conteo, &denominaciones(pool).await)?;
     let nota = texto(nota, 500, "nota", false)?;
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
@@ -1234,8 +1229,7 @@ pub mod tests {
 
         assert_eq!(detalle(p, &dueno, &t.id).await.unwrap().resumen.efectivo_esperado, 27000 + 3000 - 25000);
 
-        // El cajero cuenta a ciegas y por billetes y monedas (no escribiendo el total).
-        assert!(cerrar(p, &cajero, CAJA_1, &Conteo { cantidades: Default::default(), total: Some(5000) }, "").await.unwrap_err().contains("billetes"));
+        // El cajero cuenta a ciegas: no ve lo esperado ni antes de confirmar.
         let mal = conteo(&[(1000, 3)]);
         assert!(!necesita_nota(p, &cajero, CAJA_1, &mal).await.unwrap());
         let r = cerrar(p, &cajero, CAJA_1, &mal, "").await.unwrap();
@@ -1252,7 +1246,8 @@ pub mod tests {
         assert!(reabrir(p, &cajero, &t.id, "246813", "contó mal").await.unwrap_err().contains("permiso"));
         assert!(reabrir(p, &dueno, &t.id, "000000", "contó mal").await.is_err());
         reabrir(p, &dueno, &t.id, "246813", "Contó mal los billetes").await.unwrap();
-        let r = cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 5)]), "").await.unwrap();
+        // Si ya lo contó antes, escribe el total de una vez (sin volver a contar billete por billete).
+        let r = cerrar(p, &cajero, CAJA_1, &Conteo { cantidades: Default::default(), total: Some(5000) }, "").await.unwrap();
         assert_eq!(r.diferencia, Some(0));
         assert!(!r.requiere_revision);
         // Z del cierre nuevo: el primero sale como original; los siguientes, COPIA.

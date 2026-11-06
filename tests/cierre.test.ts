@@ -66,6 +66,24 @@ function detalle(): Detalle {
       conDesglose: true,
       cuadra: true,
       descuadres: [],
+      estadisticas: {
+        control: [
+          { usuario: "Isaias", precioLibre: 0, montoPrecioLibre: 0, descuentos: 105, lineasQuitadas: 0, montoQuitado: 0 },
+          { usuario: "Juarez", precioLibre: 2, montoPrecioLibre: 5300, descuentos: 0, lineasQuitadas: 1, montoQuitado: 12000 },
+        ],
+        umbralQuitar: 5000,
+        porHora: [
+          { hora: 9, ventas: 1, total: 1995 },
+          { hora: 14, ventas: 2, total: 8600 },
+        ],
+        tiquetePromedio: 3532,
+        hoy: { dia: "2026-11-03", ventas: 3, total: 10595 },
+        semanaAnterior: { dia: "2026-10-27", ventas: 4, total: 8476 },
+        topProductos: [
+          { producto: "Copia blanco y negro", cantidad: 40, monto: 1400 },
+          { producto: "Folder carta", cantidad: 2, monto: 300 },
+        ],
+      },
       desglose: {
         cantidad: 47,
         total: 10595,
@@ -125,6 +143,17 @@ describe("reporte Z", () => {
     // El conteo lista todas las denominaciones, también las que fueron 0.
     expect(t).toMatch(/50 mil +0 +¢0/);
     expect(t).toMatch(/5 +1 +¢5/);
+    // Control por usuario y lectura del día.
+    expect(l).toContain(lr("Venta simple / ventas", "50 %"));
+    expect(l).toContain(lr("  Venta simple (2)", "¢5.300"));
+    expect(l).toContain(lr("  Descuentos dados", "¢105"));
+    expect(l).toContain(lr("  Quitado antes de cobrar (1)", "¢12.000"));
+    expect(l).toContain(lr("Tiquete promedio", "¢3.532"));
+    expect(l).toContain(lr("Hoy 03/11 (3)", "¢10.595"));
+    expect(l).toContain(lr("27/10 sem. pasada (4)", "¢8.476"));
+    expect(l).toContain(lr("  Diferencia", "+¢2.119 (25 %)"));
+    expect(l).toContain(lr("14h ########", "2 ¢8.600"));
+    expect(t).toMatch(/^ 1 Copia blanco.* 40 ¢1\.400$/m); // el nombre se corta para caber en 32 columnas
     // Sin la casilla, no va el detalle completo.
     expect(t).not.toContain("DETALLE DE VENTAS");
     expect(l.every((x) => x.length <= 32)).toBe(true);

@@ -10,6 +10,7 @@ import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
+import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
 import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
@@ -50,6 +51,8 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
   const pagos: PagoEntrada[] = filas.map((f) => ({ ...f, monto: f === filaAuto ? restoEfectivo : (leerMontoEntero(f.texto) ?? 0) }));
   // Un monto borrado cuenta como 0 (se ve "Falta"): nunca se cobra un campo vacío como exacto.
   const pagosEfectivos = pagos.filter((x) => x.monto > 0);
+  // Pago dividido: una fila sin monto es un olvido (no un 0), salvo el efectivo que cubre lo que falta.
+  const sinMonto = mixto ? filas.filter((f, i) => f !== filaAuto && pagos[i].monto <= 0) : [];
   const r = useMemo(() => calcularPagos(p.total, pagosEfectivos, p.formas), [p.total, JSON.stringify(pagosEfectivos), p.formas]);
   const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
   const nuevaFila = useRef<HTMLInputElement>(null);
@@ -67,8 +70,10 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
     setTimeout(() => nuevaFila.current?.focus(), 0);
   }
 
+  const listo = r.ok && !sinMonto.length;
+
   async function confirmar() {
-    if (!r.ok || ocupado) return;
+    if (!listo || ocupado) return;
     setOcupado(true);
     setError("");
     try {
@@ -218,6 +223,11 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
             </>
           )}
         </div>
+        {sinMonto.length > 0 && (
+          <Alert tono="aviso">
+            {sinMonto.map((f) => forma(f.formaPagoId)?.nombre).join(" y ")} sin monto: escríbalo o quite {sinMonto.length > 1 ? "esas filas" : "la fila"} con la papelera.
+          </Alert>
+        )}
         {r.errores.length > 0 && <Mensaje error={r.errores.join(". ") + "."} />}
         <Mensaje error={error} />
         <div className="row">
@@ -225,7 +235,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
             Dividir pago
           </Button>
           <span style={{ flex: 1 }} />
-          <Button type="submit" variante="primario" tamano="lg" atajo="Enter" disabled={!r.ok || ocupado}>
+          <Button type="submit" variante="primario" tamano="lg" atajo="Enter" disabled={!listo || ocupado}>
             {ocupado ? "Guardando…" : "Confirmar cobro"}
           </Button>
         </div>

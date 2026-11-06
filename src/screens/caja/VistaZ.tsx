@@ -1,6 +1,7 @@
 // El cierre Z en pantalla: lo mismo que sale en papel (resumen, efectivo, usuarios, departamentos,
 // pagos electrónicos, movimientos, aperturas sin venta, cortes y conteo), en tablas legibles.
 import { ChevronDown } from "lucide-react";
+import { Fragment } from "react";
 import type { Detalle } from "../../db/caja";
 import { DENOMINACIONES, descuadres, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
 import { fechaHora, monto, montoConSigno as signo } from "../../lib/tickets";
@@ -126,6 +127,7 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
           <p className="muted nota-pie">{NOTA_USUARIOS}</p>
         </section>
       </div>
+      <LecturaDia r={r} />
 
       {r.conDesglose && r.desglose.departamentos.length > 0 && (
         <section>
@@ -265,6 +267,88 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
         </>
       )}
       {d.bitacoraOk === false && <Alert tono="error">Al cerrar, la bitácora no pasó la verificación.</Alert>}
+    </div>
+  );
+}
+
+const diaCorto = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+
+/** Control por usuario, lectura del día y más vendidos (lo mismo que el Z impreso). */
+function LecturaDia({ r }: { r: Detalle["resumen"] }) {
+  const x = r.estadisticas;
+  if (!x.control.length && !x.porHora.length) return null;
+  const libre = x.control.reduce((s, c) => s + c.montoPrecioLibre, 0);
+  const max = Math.max(...x.porHora.map((h) => h.total), 1);
+  const { hoy, semanaAnterior: antes } = x;
+  return (
+    <div className="vista-z-columnas">
+      {x.control.length > 0 && (
+        <section>
+          <h3>Control por usuario</h3>
+          <table className="tbl tbl-compacta">
+            <tbody>
+              {r.totalVentas > 0 && libre > 0 && <Fila k="Venta simple / ventas" v={`${Math.round((libre / r.totalVentas) * 100)} %`} />}
+              {x.control.map((c) => (
+                <Fragment key={c.usuario}>
+                  <tr className="total">
+                    <td colSpan={2}>{c.usuario}</td>
+                  </tr>
+                  {c.precioLibre > 0 && <Fila k={`Venta simple (${c.precioLibre})`} v={monto(c.montoPrecioLibre)} />}
+                  {c.descuentos > 0 && <Fila k="Descuentos dados" v={monto(c.descuentos)} />}
+                  {c.lineasQuitadas > 0 && <Fila k={`Quitado antes de cobrar (${c.lineasQuitadas})`} v={monto(c.montoQuitado)} />}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+          {x.control.some((c) => c.lineasQuitadas) && <p className="muted nota-pie">Quitado: solo líneas de {monto(x.umbralQuitar)} o más.</p>}
+        </section>
+      )}
+      {x.porHora.length > 0 && (
+        <section>
+          <h3>Lectura del día</h3>
+          <table className="tbl tbl-compacta">
+            <tbody>
+              <Fila k="Tiquete promedio" v={monto(x.tiquetePromedio)} />
+              <Fila k={`Hoy ${diaCorto(hoy.dia)} (${hoy.ventas})`} v={monto(hoy.total)} />
+              <Fila k={`${diaCorto(antes.dia)}, semana pasada (${antes.ventas})`} v={monto(antes.total)} />
+              {antes.total > 0 && <Fila k="Diferencia" v={`${signo(hoy.total - antes.total)} (${Math.round(((hoy.total - antes.total) / antes.total) * 100)} %)`} />}
+            </tbody>
+          </table>
+          <p className="muted nota-pie">Hasta la misma hora, toda la caja.</p>
+          <h3>Ventas por hora</h3>
+          <table className="tbl tbl-compacta tbl-horas">
+            <tbody>
+              {x.porHora.map((h) => (
+                <tr key={h.hora}>
+                  <td className="mono">{String(h.hora).padStart(2, "0")}h</td>
+                  <td className="barra-celda" aria-hidden>
+                    <span className="barra-hora" style={{ width: `${Math.max(4, (h.total / max) * 100)}%` }} />
+                  </td>
+                  <td className="num">{h.ventas} tiq.</td>
+                  <td className="num">{monto(h.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      {x.topProductos.length > 0 && (
+        <section>
+          <h3>Más vendidos</h3>
+          <table className="tbl tbl-compacta">
+            <tbody>
+              {x.topProductos.map((p, i) => (
+                <tr key={p.producto}>
+                  <td className="muted num">{i + 1}</td>
+                  <td>{p.producto}</td>
+                  <td className="num">{p.cantidad}</td>
+                  <td className="num">{monto(p.monto)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   );
 }
