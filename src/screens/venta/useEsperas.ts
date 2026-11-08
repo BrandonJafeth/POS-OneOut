@@ -35,12 +35,15 @@ export function useEsperas(onError: (msg: string) => void) {
 
   const actual = (): EstadoEspera => esperasRef.current.find((e) => e.id === activaRef.current)?.estado ?? estadoVacio();
 
-  /** Aplica un cambio a la venta activa y lo guarda en la base de inmediato. */
+  /** Aplica un cambio a la venta activa y lo guarda en la base de inmediato, en fila (en orden). */
+  const cola = useRef<Promise<void>>(Promise.resolve());
   const actualizar = useCallback((nuevo: EstadoEspera) => {
     const id = activaRef.current;
     if (!id) return;
     poner(esperasRef.current.map((e) => (e.id === id ? { ...e, estado: nuevo } : e)));
-    guardarEspera(id, nuevo).catch((e) => onError("No se pudo guardar la venta en espera: " + textoError(e)));
+    cola.current = cola.current.then(() =>
+      guardarEspera(id, nuevo).catch((e) => onError("No se pudo guardar la venta en espera: " + textoError(e))),
+    );
   }, []);
 
   async function nueva(): Promise<boolean> {

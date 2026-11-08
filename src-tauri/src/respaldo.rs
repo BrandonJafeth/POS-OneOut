@@ -1,19 +1,33 @@
 // Respaldo cifrado de la base (contiene datos personales: Ley 8968).
 //
-// Formato del archivo .posbak:
-//   "POSBAK01" (8 bytes) | sal (32) | nonce (12) | datos cifrados + etiqueta (AES-256-GCM)
+// Formatos del archivo .posbak (el lector acepta TODOS; un formato nuevo agrega un lector, no
+// reemplaza los anteriores):
+//   v1 "POSBAK01" | sal (32) | nonce (12) | datos cifrados + etiqueta            (hasta 0.1.0, migración 10)
+//   v2 "POSBAK02" | largo (u16 LE) | cabecera JSON | sal (32) | nonce (12) | datos cifrados + etiqueta
+//      cabecera = {"app": versión del programa, "migracion": última migración aplicada}. Va en claro
+//      (para rechazar un respaldo más nuevo antes de pedir nada) pero autenticada por GCM como AAD:
+//      cambiarla hace fallar el descifrado.
 // La clave de 32 bytes (AES-256) sale de la contraseña con Argon2id y la sal aleatoria.
 // GCM además autentica: con una contraseña equivocada o un archivo alterado, descifrar falla
 // en vez de devolver basura.
 
-use aes_gcm::aead::{Aead, Generate, Key, KeyInit};
+use aes_gcm::aead::{Aead, Generate, Key, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::Argon2;
+use serde::{Deserialize, Serialize};
 
-const MAGIA: &[u8; 8] = b"POSBAK01";
+const MAGIA_V1: &[u8; 8] = b"POSBAK01";
+const MAGIA_V2: &[u8; 8] = b"POSBAK02";
 const LARGO_SAL: usize = 32;
 const LARGO_NONCE: usize = 12;
 pub const CONTRASENA_MINIMA: usize = 8;
+
+/// Con qué versión se hizo el respaldo (v2 en adelante; los v1 no la traen).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Cabecera {
+    pub app: String,
+    pub migracion: i64,
+}
 
 fn clave(contrasena: &str, sal: &[u8]) -> Result<Key<Aes256Gcm>, String> {
     let mut k = Key::<Aes256Gcm>::default();
@@ -30,31 +44,57 @@ pub fn validar_contrasena(contrasena: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn cifrar(datos: &[u8], contrasena: &str) -> Result<Vec<u8>, String> {
+/// Escribe siempre el formato más nuevo (v2), con la versión del programa y la migración dada.
+pub fn cifrar(datos: &[u8], contrasena: &str, migracion: i64) -> Result<Vec<u8>, String> {
     validar_contrasena(contrasena)?;
+    let cab = serde_json::to_vec(&Cabecera { app: env!("CARGO_PKG_VERSION").into(), migracion }).map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(MAGIA_V2.len() + 2 + cab.len() + LARGO_SAL + LARGO_NONCE + datos.len() + 16);
+    out.extend_from_slice(MAGIA_V2);
+    out.extend_from_slice(&(cab.len() as u16).to_le_bytes());
+    out.extend_from_slice(&cab);
     // 32 bytes aleatorios del generador del sistema, usados como sal.
     let sal = Key::<Aes256Gcm>::generate();
     let nonce = Nonce::generate();
     let cifrado = Aes256Gcm::new(&clave(contrasena, &sal)?)
-        .encrypt(&nonce, datos)
+        .encrypt(&nonce, Payload { msg: datos, aad: &out })
         .map_err(|_| "No se pudo cifrar el respaldo".to_string())?;
-    let mut out = Vec::with_capacity(MAGIA.len() + LARGO_SAL + LARGO_NONCE + cifrado.len());
-    out.extend_from_slice(MAGIA);
     out.extend_from_slice(&sal);
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&cifrado);
     Ok(out)
 }
 
+/// Dónde termina la parte en claro (magia + cabecera) según el formato, y la cabecera si hay.
+fn partes(archivo: &[u8]) -> Result<(usize, Option<Cabecera>), String> {
+    match archivo.get(..8) {
+        Some(m) if m == MAGIA_V1 => Ok((8, None)),
+        Some(m) if m == MAGIA_V2 => {
+            let largo = archivo.get(8..10).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize).ok_or("Respaldo dañado")?;
+            let cab = archivo.get(10..10 + largo).ok_or("Respaldo dañado")?;
+            let cab: Cabecera = serde_json::from_slice(cab).map_err(|_| "Respaldo dañado".to_string())?;
+            Ok((10 + largo, Some(cab)))
+        }
+        _ => Err("No es un respaldo del POS".into()),
+    }
+}
+
+/// La cabecera, sin contraseña (None: respaldo v1, de antes de que existiera).
+pub fn cabecera(archivo: &[u8]) -> Result<Option<Cabecera>, String> {
+    partes(archivo).map(|(_, c)| c)
+}
+
 pub fn descifrar(archivo: &[u8], contrasena: &str) -> Result<Vec<u8>, String> {
-    let cab = MAGIA.len() + LARGO_SAL + LARGO_NONCE;
-    if archivo.len() < cab || &archivo[..MAGIA.len()] != MAGIA {
+    let (claro, _) = partes(archivo)?;
+    let cab = claro + LARGO_SAL + LARGO_NONCE;
+    if archivo.len() < cab {
         return Err("No es un respaldo del POS".into());
     }
-    let sal = &archivo[MAGIA.len()..MAGIA.len() + LARGO_SAL];
-    let nonce = Nonce::try_from(&archivo[MAGIA.len() + LARGO_SAL..cab]).map_err(|_| "Respaldo dañado".to_string())?;
+    let sal = &archivo[claro..claro + LARGO_SAL];
+    let nonce = Nonce::try_from(&archivo[claro + LARGO_SAL..cab]).map_err(|_| "Respaldo dañado".to_string())?;
+    // v1 no tiene AAD; v2 autentica la magia y la cabecera.
+    let aad: &[u8] = if claro == MAGIA_V1.len() { &[] } else { &archivo[..claro] };
     Aes256Gcm::new(&clave(contrasena, sal)?)
-        .decrypt(&nonce, &archivo[cab..])
+        .decrypt(&nonce, Payload { msg: &archivo[cab..], aad })
         .map_err(|_| "Contraseña incorrecta o respaldo dañado".into())
 }
 
@@ -113,6 +153,12 @@ async fn deserializar(c: &mut SqliteConnection, datos: &[u8]) -> Res<()> {
             return Err("Sin memoria para restaurar".into());
         }
         std::ptr::copy_nonoverlapping(datos.as_ptr(), buf, datos.len());
+        // Una base en modo WAL (bytes 18-19 = 2) no se puede abrir en memoria: se marca como
+        // diario clásico (1), que es lo que significa una vez serializada (sin archivo -wal).
+        if datos.len() > 19 && datos[18] == 2 && datos[19] == 2 {
+            *buf.add(18) = 1;
+            *buf.add(19) = 1;
+        }
         let flags = libsqlite3_sys::SQLITE_DESERIALIZE_FREEONCLOSE | libsqlite3_sys::SQLITE_DESERIALIZE_RESIZEABLE;
         let rc = libsqlite3_sys::sqlite3_deserialize(db, nombre.as_ptr(), buf, datos.len() as i64, datos.len() as i64, flags);
         if rc != libsqlite3_sys::SQLITE_OK {
@@ -149,7 +195,8 @@ pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
     a.exigir("respaldo", "hacer respaldos")?;
     validar_contrasena(contrasena)?;
     let datos = bytes_en_claro(bd).await?;
-    let cifrado = cifrar(&datos, contrasena)?;
+    let migracion: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&bd.pool).await.map_err(e)?;
+    let cifrado = cifrar(&datos, contrasena, migracion)?;
     let destino = carpeta(bd)?.join(format!("respaldo-{}.posbak", chrono::Local::now().format("%Y%m%d-%H%M%S")));
     std::fs::write(&destino, cifrado).map_err(e)?;
     let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -164,7 +211,18 @@ pub async fn ultimo(bd: &Bd, a: &Actor) -> Res<Option<String>> {
     sqlx::query_scalar("SELECT MAX(fecha) FROM bitacora WHERE accion = 'respaldo.crear'").fetch_one(&bd.pool).await.map_err(e)
 }
 
-/// Revisa un respaldo ya descifrado: integridad SQLite y versión de esquema conocida.
+/// Mensaje para un respaldo de una versión que esta instalación no conoce.
+fn mas_nuevo(app: Option<&str>) -> String {
+    let de = app.map(|v| format!(" ({v})")).unwrap_or_default();
+    format!(
+        "Este respaldo se hizo con una versión más nueva del programa{de} que la instalada ({}). Instale esa versión o una más nueva para restaurarlo.",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+/// Revisa un respaldo ya descifrado y lo pone al día, todo en memoria: integridad SQLite, versión
+/// de esquema conocida, migraciones que le falten (cada una en su transacción) y, al final, otra vez
+/// integridad y la cadena de la bitácora. Si algo falla, devuelve el error y nada se escribió.
 /// `ancla`: archivo vacío para abrir la conexión. No puede ser "sqlite::memory:": sqlx la abre con
 /// la marca de memoria y SQLite la hereda en el ATTACH, así pos.db.nuevo nunca se escribiría al disco.
 /// El ancla no recibe datos (sqlite3_deserialize reemplaza "main" en memoria) y se borra al terminar.
@@ -186,8 +244,22 @@ async fn revisar(datos: &[u8], ancla: Option<&Path>) -> Res<SqlitePool> {
         return Err("El respaldo está dañado".into());
     }
     let v: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&pool).await.map_err(|_| "No es un respaldo del POS".to_string())?;
-    if v < 1 || v > crate::bd::MIGRACIONES.last().map(|m| m.0).unwrap_or(0) {
-        return Err("El respaldo es de una versión más nueva del programa".into());
+    if v < 1 {
+        return Err("No es un respaldo del POS".into());
+    }
+    if v > crate::bd::ultima_migracion() {
+        return Err(mas_nuevo(None));
+    }
+    crate::bd::migrar(&pool, None, Path::new(""))
+        .await
+        // Detalle técnico marcado: la pantalla muestra el texto claro (respaldo_migracion) y el técnico, el detalle.
+        .map_err(|err| format!("{}respaldo_migracion: {err}", crate::util::TECNICO))?;
+    let r: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&pool).await.map_err(e)?;
+    if r != "ok" {
+        return Err("El respaldo quedó dañado al ponerlo al día. La base actual no se tocó.".into());
+    }
+    if !bitacora::verificar(&pool).await?.ok {
+        return Err("La bitácora del respaldo fue alterada: no se restaura. La base actual no se tocó.".into());
     }
     Ok(pool)
 }
@@ -196,20 +268,44 @@ async fn revisar(datos: &[u8], ancla: Option<&Path>) -> Res<SqlitePool> {
 /// Solo el dueño, con su PIN en el momento.
 pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena: &str, clave: Option<&[u8; 32]>) -> Res<()> {
     a.exigir("respaldo", "restaurar respaldos")?;
-    usuarios::confirmar_dueno(&bd.pool, a, pin, "restaurar respaldo").await?;
+    if crate::bd::hay_turno_abierto(&bd.pool).await {
+        return Err("Cierre la caja antes de restaurar un respaldo.".into());
+    }
     if archivo.len() > 2_000_000_000 {
         return Err("Archivo demasiado grande".into());
     }
-    let datos = descifrar(archivo, contrasena)?;
+    let cab = cabecera(archivo)?;
+    if let Some(c) = cab.as_ref().filter(|c| c.migracion > crate::bd::ultima_migracion()) {
+        return Err(mas_nuevo(Some(&c.app)));
+    }
+    usuarios::confirmar_dueno(&bd.pool, a, pin, "restaurar respaldo").await?;
+    let datos = match descifrar(archivo, contrasena) {
+        Ok(d) => d,
+        Err(err) => return Err(anotar_fallo(bd, a, &err, cab.as_ref()).await),
+    };
     let ancla = bd.dir.as_ref().ok_or("Sin carpeta de datos")?.join("pos.db.revisando");
     let _ = std::fs::remove_file(&ancla);
     let r = restaurar_en(bd, &datos, &ancla, clave).await;
     borrar_ancla(&ancla);
-    r?;
+    if let Err(err) = r {
+        return Err(anotar_fallo(bd, a, &err, cab.as_ref()).await);
+    }
     let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.restaurar", "respaldo", None, &json!({"bytes": datos.len()})).await?;
+    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.restaurar", "respaldo", None, &json!({"bytes": datos.len(), "cabecera": cab})).await?;
     tx.commit().await.map_err(e)?;
     Ok(())
+}
+
+/// Un intento de restaurar que falló (con el PIN del dueño ya dado) queda en la bitácora: quién,
+/// cuándo y por qué. Devuelve el mismo error para la pantalla.
+async fn anotar_fallo(bd: &Bd, a: &Actor, err: &str, cab: Option<&Cabecera>) -> String {
+    if let Ok(mut tx) = bd.pool.begin_with("BEGIN IMMEDIATE").await {
+        let motivo = err.trim_start_matches(crate::util::TECNICO);
+        if bitacora::registrar(&mut tx, Some(&a.id), "respaldo.restaurar_fallido", "respaldo", None, &json!({"motivo": motivo, "cabecera": cab})).await.is_ok() {
+            let _ = tx.commit().await;
+        }
+    }
+    err.to_string()
 }
 
 fn borrar_ancla(ancla: &Path) {
@@ -318,20 +414,21 @@ pub async fn anotar_restauracion(bd: &Bd, base_anterior: &str, clave: Option<&[u
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]
     fn sin_contrasena_no_hay_respaldo() {
-        assert!(cifrar(b"datos", "").is_err());
-        assert!(cifrar(b"datos", "corta").is_err());
+        assert!(cifrar(b"datos", "", 1).is_err());
+        assert!(cifrar(b"datos", "corta", 1).is_err());
     }
 
     #[test]
     fn ida_y_vuelta() {
         let datos = b"SQLite format 3\0 ... cliente Ana 8888-8888";
-        let c = cifrar(datos, "contrasena-larga").unwrap();
-        assert!(c.starts_with(MAGIA));
+        let c = cifrar(datos, "contrasena-larga", 10).unwrap();
+        assert!(c.starts_with(MAGIA_V2));
+        assert_eq!(cabecera(&c).unwrap(), Some(Cabecera { app: env!("CARGO_PKG_VERSION").into(), migracion: 10 }));
         // El contenido no aparece en claro dentro del archivo.
         assert!(!c.windows(4).any(|w| w == b"8888"));
         assert_eq!(descifrar(&c, "contrasena-larga").unwrap(), datos);
@@ -343,7 +440,7 @@ mod tests {
         sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('P1', 'Lápiz azul', 'lapiz azul', '00000000000000000000000D01', 350)").execute(&bd.pool).await.unwrap();
         let claro = bytes_en_claro(&bd).await.unwrap();
         assert!(claro.starts_with(CABECERA_SQLITE));
-        let archivo = cifrar(&claro, "contrasena-larga").unwrap();
+        let archivo = cifrar(&claro, "contrasena-larga", 1).unwrap();
         assert!(!archivo.windows(10).any(|w| w == b"Lapiz azul" || w == "Lápiz az".as_bytes()));
         // Íntegro: se descifra, se carga y tiene el producto.
         let mem = revisar(&descifrar(&archivo, "contrasena-larga").unwrap(), None).await.unwrap();
@@ -361,13 +458,188 @@ mod tests {
     }
 
     #[test]
+    fn cabecera_autenticada_y_formato_v1_se_sigue_leyendo() {
+        let c = cifrar(b"hola mundo", "contrasena-larga", 10).unwrap();
+        // Cambiar la versión escrita en claro (p. ej. para colar un respaldo "viejo") rompe el descifrado.
+        let pos = c.windows(3).position(|w| w == b"10}").unwrap();
+        let mut malo = c.clone();
+        malo[pos] = b'9';
+        assert_eq!(cabecera(&malo).unwrap().unwrap().migracion, 90);
+        assert!(descifrar(&malo, "contrasena-larga").is_err());
+        // v1 (sin cabecera): se lee igual.
+        let sal = [3u8; 32];
+        let nonce = Nonce::try_from(&[5u8; 12][..]).unwrap();
+        let cif = Aes256Gcm::new(&clave("contrasena-larga", &sal).unwrap()).encrypt(&nonce, &b"hola v1"[..]).unwrap();
+        let v1 = [&MAGIA_V1[..], &sal, &[5u8; 12], &cif].concat();
+        assert_eq!(cabecera(&v1).unwrap(), None);
+        assert_eq!(descifrar(&v1, "contrasena-larga").unwrap(), b"hola v1");
+    }
+
+    /// PRUEBA PERMANENTE (no se borra): cada respaldo de tests/fixtures, hecho con una versión
+    /// anterior, se restaura con esta versión: se pone al día con las migraciones nuevas y conserva
+    /// ventas, turnos, clientes y la bitácora íntegra. Cada versión nueva agrega su fixture.
+    #[tokio::test]
+    async fn respaldos_de_versiones_anteriores_se_restauran() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures");
+        let mut n = 0;
+        for f in std::fs::read_dir(&dir).unwrap() {
+            let ruta = f.unwrap().path();
+            if ruta.extension().is_none_or(|x| x != "posbak") {
+                continue;
+            }
+            n += 1;
+            let archivo = std::fs::read(&ruta).unwrap();
+            let datos = descifrar(&archivo, CONTRASENA_FIXTURE).unwrap_or_else(|err| panic!("{ruta:?}: {err}"));
+            let mem = revisar(&datos, None).await.unwrap_or_else(|err| panic!("{ruta:?}: {err}"));
+            let v: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations").fetch_one(&mem).await.unwrap();
+            assert_eq!(v, crate::bd::ultima_migracion(), "{ruta:?}");
+            for (sql, esperado) in [
+                ("SELECT COUNT(*) FROM ventas WHERE estado = 'completada'", 2),
+                ("SELECT SUM(total) FROM ventas", 3000),
+                ("SELECT COUNT(*) FROM venta_pagos", 2),
+                ("SELECT COUNT(*) FROM caja_turnos WHERE estado = 'cerrado'", 1),
+                ("SELECT COUNT(*) FROM clientes WHERE nombre = 'Cliente Prueba'", 1),
+                ("SELECT COUNT(*) FROM ventas WHERE cliente_id IS NOT NULL", 1),
+            ] {
+                let n: i64 = sqlx::query_scalar(sql).fetch_one(&mem).await.unwrap();
+                assert_eq!(n, esperado, "{ruta:?}: {sql}");
+            }
+            let filas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora").fetch_one(&mem).await.unwrap();
+            assert!(filas > 3, "{ruta:?}");
+            assert!(bitacora::verificar(&mem).await.unwrap().ok, "{ruta:?}");
+            mem.close().await;
+        }
+        assert!(n >= 1, "faltan los respaldos de tests/fixtures");
+    }
+
+    #[tokio::test]
+    async fn respaldo_con_esquema_mas_nuevo_se_rechaza() {
+        let bd = Bd::memoria().await.unwrap();
+        sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (9999, 'futura', 1, x'00', 0)").execute(&bd.pool).await.unwrap();
+        let claro = bytes_en_claro(&bd).await.unwrap();
+        assert!(revisar(&claro, None).await.unwrap_err().contains("más nueva"));
+    }
+
+    /// Contraseña de los respaldos de tests/fixtures (datos de prueba, no reales).
+    pub const CONTRASENA_FIXTURE: &str = "fixture-pruebas-pos";
+
+    /// Base con datos de prueba de todo lo que un respaldo debe conservar: un turno cerrado con
+    /// ventas (efectivo y tarjeta), un cliente con consentimiento y la bitácora encadenada.
+    pub async fn base_de_prueba() -> Bd {
+        use crate::caja::{abrir, cerrar, tests::conteo, CAJA_1};
+        use crate::calculo::{Estado, Linea, PagoEntrada};
+        let (bd, _, dueno, cajero) = crate::usuarios::tests::base_con_usuarios().await;
+        let p = &bd.pool;
+        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('PFIX1', 'Cuaderno de prueba', 'cuaderno de prueba', '00000000000000000000000D01', 1000)").execute(p).await.unwrap();
+        sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7400000000017', 'PFIX1', 'barras')").execute(p).await.unwrap();
+        let cli = crate::clientes::crear(p, &dueno, &crate::clientes::Datos { nombre: "Cliente Prueba".into(), telefono: "8000-0000".into(), ..Default::default() }, true, "1").await.unwrap();
+        abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
+        for (forma, cant) in [("0000000000000000000000FP01", 2), ("0000000000000000000000FP02", 1)] {
+            let l = Linea { id: crate::util::ulid(), producto_id: Some("PFIX1".into()), codigo: None, descripcion: "Cuaderno de prueba".into(), departamento_id: "00000000000000000000000D01".into(), cantidad: cant, precio_unitario: 1000, descuento: 0, tasa_iva: 13.0, exento: false };
+            let mut e = Estado { lineas: vec![l], ..Default::default() };
+            if cant == 1 {
+                e.cliente = serde_json::from_value(json!({"id": cli.id, "nombre": "Cliente Prueba"})).ok();
+            }
+            let esp = crate::ventas::crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+            let pago = PagoEntrada { forma_pago_id: forma.into(), monto: cant * 1000, banco_id: None, referencia: None, ultimos4: None };
+            crate::ventas::cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago]).await.unwrap();
+        }
+        cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 12)]), "").await.unwrap();
+        bd
+    }
+
+    /// Genera el respaldo de tests/fixtures con la versión instalada. Se corre a mano UNA vez por
+    /// versión (cargo test generar_fixture -- --ignored) y el archivo nuevo se agrega: los viejos
+    /// nunca se borran (prueba permanente de que una versión nueva restaura respaldos viejos).
+    #[tokio::test]
+    #[ignore]
+    async fn generar_fixture() {
+        let bd = base_de_prueba().await;
+        let m: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations").fetch_one(&bd.pool).await.unwrap();
+        let archivo = cifrar(&bytes_en_claro(&bd).await.unwrap(), CONTRASENA_FIXTURE, m).unwrap();
+        let ruta = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../tests/fixtures/respaldo-v{}-m{m}.posbak", env!("CARGO_PKG_VERSION")));
+        std::fs::create_dir_all(ruta.parent().unwrap()).unwrap();
+        assert!(!ruta.exists(), "ya existe {ruta:?}: los fixtures no se reemplazan");
+        std::fs::write(&ruta, archivo).unwrap();
+    }
+
+    #[test]
     fn contrasena_equivocada_o_archivo_alterado() {
-        let mut c = cifrar(b"hola mundo", "contrasena-larga").unwrap();
+        let mut c = cifrar(b"hola mundo", "contrasena-larga", 1).unwrap();
         assert!(descifrar(&c, "otra-contrasena").is_err());
         let ultimo = c.len() - 1;
         c[ultimo] ^= 1;
         assert!(descifrar(&c, "contrasena-larga").is_err());
         assert!(descifrar(b"basura", "contrasena-larga").is_err());
+    }
+}
+
+/// Restaurar en disco (sin cifrar: corre en cualquier compilación): caja abierta, versión más nueva,
+/// archivo alterado. Y el arranque de una versión nueva sobre una base vieja.
+#[cfg(test)]
+mod tests_restaurar {
+    use super::*;
+    use crate::caja::{abrir, cerrar, tests::conteo, CAJA_1};
+    use crate::permisos::Rol;
+
+    #[tokio::test]
+    async fn no_restaura_con_caja_abierta_ni_respaldo_mas_nuevo_ni_alterado() {
+        let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
+        let bd = Bd::abrir(&dir, None).await.unwrap();
+        let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
+        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
+        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
+        let archivo = std::fs::read(&ruta).unwrap();
+        assert_eq!(cabecera(&archivo).unwrap().unwrap().migracion, crate::bd::ultima_migracion());
+
+        // Caja abierta: no.
+        abrir(&bd.pool, &dueno, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
+        assert!(restaurar(&bd, &dueno, "246813", &archivo, "contrasena-larga", None).await.unwrap_err().contains("Cierre la caja"));
+        cerrar(&bd.pool, &dueno, CAJA_1, &conteo(&[(1000, 1)]), "").await.unwrap();
+
+        // Hecho con una versión más nueva: rechazo claro, antes de pedir nada más.
+        let futuro = cifrar(&bytes_en_claro(&bd).await.unwrap(), "contrasena-larga", crate::bd::ultima_migracion() + 1).unwrap();
+        assert!(restaurar(&bd, &dueno, "246813", &futuro, "contrasena-larga", None).await.unwrap_err().contains("más nueva"));
+
+        // Alterado: falla y la base actual sigue igual (no hay pos.db.nuevo).
+        let mut malo = archivo.clone();
+        let medio = malo.len() / 2;
+        malo[medio] ^= 1;
+        assert!(restaurar(&bd, &dueno, "246813", &malo, "contrasena-larga", None).await.is_err());
+        assert!(!dir.join("pos.db.nuevo").exists());
+
+        restaurar(&bd, &dueno, "246813", &archivo, "contrasena-larga", None).await.unwrap();
+        assert!(dir.join("pos.db.nuevo").exists());
+        bd.pool.close().await;
+        bd.lectura.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn actualizar_exige_caja_cerrada_y_respalda_antes() {
+        let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vieja = crate::bd::crear_vieja(&dir.join("pos.db"), crate::bd::MIGRACIONES.len() - 1).await;
+        sqlx::query("PRAGMA foreign_keys = OFF").execute(&vieja).await.unwrap();
+        sqlx::query("INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, estado) VALUES ('T', 'S', 'C', 'U', '2026-01-01', 'abierto')").execute(&vieja).await.unwrap();
+        vieja.close().await;
+        let automaticos = dir.join("respaldos-automaticos");
+
+        let err = Bd::abrir(&dir, None).await.err().expect("no debió actualizar");
+        assert!(err.contains("caja abierta"), "{err}");
+        assert!(!automaticos.exists());
+
+        let vieja = crate::bd::crear_vieja(&dir.join("pos.db"), crate::bd::MIGRACIONES.len() - 1).await;
+        sqlx::query("UPDATE caja_turnos SET estado = 'cerrado'").execute(&vieja).await.unwrap();
+        vieja.close().await;
+        let bd = Bd::abrir(&dir, None).await.unwrap();
+        assert_eq!(std::fs::read_dir(&automaticos).unwrap().count(), 1);
+        bd.pool.close().await;
+        bd.lectura.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -12,6 +12,7 @@ mod estadisticas;
 mod gaveta;
 mod importacion;
 mod impresoras;
+mod inventario;
 mod negocio;
 mod permisos;
 mod pin;
@@ -396,9 +397,9 @@ async fn venta_autorizar_descuento(st: St<'_>, espera_id: String, pct: f64, pin:
 }
 
 #[tauri::command]
-async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>) -> Res<ventas::ResultadoCobro> {
+async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>, pin_existencia: Option<String>) -> Res<ventas::ResultadoCobro> {
     let a = st.actor().await?;
-    ventas::cobrar(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos).await
+    ventas::cobrar_con(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos, pin_existencia.as_deref()).await
 }
 
 #[tauri::command]
@@ -581,6 +582,135 @@ async fn importacion_aplicar(st: St<'_>, pin: String, pedido: importacion::Pedid
     importacion::aplicar(st.pool()?, &a, &pin, &pedido).await
 }
 
+// ─────────── Inventario (todo tipado: nada pasa por bd_leer) ───────────
+
+#[tauri::command]
+async fn inventario_lista(st: St<'_>, filtro: inventario::Filtro) -> Res<Value> {
+    let a = st.actor().await?;
+    let (filas, total) = inventario::lista(st.pool()?, &a, caja::CAJA_1, &filtro).await?;
+    Ok(json!({"filas": filas, "total": total}))
+}
+
+#[tauri::command]
+async fn inventario_estado(st: St<'_>, ids: Vec<String>) -> Res<Vec<inventario::FilaInventario>> {
+    let a = st.actor().await?;
+    inventario::estado_de(st.pool()?, &a, caja::CAJA_1, &ids).await
+}
+
+#[tauri::command]
+async fn inventario_existencia(st: St<'_>, ids: Vec<String>) -> Res<Vec<inventario::ExistenciaVenta>> {
+    let a = st.actor().await?;
+    inventario::existencia_venta(st.pool()?, &a, caja::CAJA_1, &ids).await
+}
+
+#[tauri::command]
+async fn inventario_alertas(st: St<'_>) -> Res<i64> {
+    let a = st.actor().await?;
+    inventario::alertas(st.pool()?, &a, caja::CAJA_1).await
+}
+
+#[tauri::command]
+async fn inventario_producto(st: St<'_>, producto_id: String, controla: bool, minimo: i64, costo: Option<i64>) -> Res<()> {
+    let a = st.actor().await?;
+    inventario::producto_guardar(st.pool()?, &a, &producto_id, controla, minimo, costo).await
+}
+
+#[tauri::command]
+async fn inventario_kardex(st: St<'_>, producto_id: String, desde: String, hasta: String) -> Res<Vec<inventario::FilaKardex>> {
+    let a = st.actor().await?;
+    inventario::kardex(st.pool()?, &a, &producto_id, &desde, &hasta).await
+}
+
+#[tauri::command]
+async fn inventario_entrada(st: St<'_>, entrada: inventario::Entrada) -> Res<String> {
+    let a = st.actor().await?;
+    inventario::entrada(st.pool()?, &a, caja::CAJA_1, &entrada).await
+}
+
+#[tauri::command]
+async fn inventario_entrada_obtener(st: St<'_>, id: String) -> Res<Value> {
+    let a = st.actor().await?;
+    inventario::entrada_obtener(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn inventario_ajustar(st: St<'_>, ajuste: inventario::Ajuste, pin: String) -> Res<i64> {
+    let a = st.actor().await?;
+    inventario::ajustar(st.pool()?, &a, caja::CAJA_1, &ajuste, &pin).await
+}
+
+#[tauri::command]
+async fn inventario_conteo_abierto(st: St<'_>) -> Res<Option<inventario::Conteo>> {
+    let a = st.actor().await?;
+    inventario::conteo_abierto(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn inventario_conteo_guardar(st: St<'_>, id: Option<String>, departamento_id: Option<String>, datos: std::collections::HashMap<String, i64>) -> Res<String> {
+    let a = st.actor().await?;
+    inventario::conteo_guardar(st.pool()?, &a, caja::CAJA_1, id.as_deref(), departamento_id.as_deref(), &datos).await
+}
+
+#[tauri::command]
+async fn inventario_conteo_diferencias(st: St<'_>, id: String) -> Res<Vec<inventario::FilaConteo>> {
+    let a = st.actor().await?;
+    inventario::conteo_diferencias(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn inventario_conteo_aplicar(st: St<'_>, id: String, pin: String) -> Res<i64> {
+    let a = st.actor().await?;
+    inventario::conteo_aplicar(st.pool()?, &a, &id, &pin).await
+}
+
+#[tauri::command]
+async fn inventario_conteo_descartar(st: St<'_>, id: String) -> Res<()> {
+    let a = st.actor().await?;
+    inventario::conteo_descartar(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn inventario_inicial(st: St<'_>, filas: Vec<inventario::FilaInicial>, aplicar: bool, pin: Option<String>) -> Res<Vec<inventario::PrevistaInicial>> {
+    let a = st.actor().await?;
+    inventario::inicial(st.pool()?, &a, caja::CAJA_1, &filas, aplicar, pin.as_deref()).await
+}
+
+#[tauri::command]
+async fn inventario_reporte_bajo_minimo(st: St<'_>) -> Res<Vec<inventario::FilaBajoMinimo>> {
+    let a = st.actor().await?;
+    inventario::reporte_bajo_minimo(st.pool()?, &a, caja::CAJA_1).await
+}
+
+#[tauri::command]
+async fn inventario_reporte_valorizado(st: St<'_>) -> Res<inventario::Valorizado> {
+    let a = st.actor().await?;
+    inventario::reporte_valorizado(st.pool()?, &a, caja::CAJA_1).await
+}
+
+#[tauri::command]
+async fn inventario_reporte_movimientos(st: St<'_>, desde: String, hasta: String, tipo: Option<String>) -> Res<Vec<inventario::FilaKardex>> {
+    let a = st.actor().await?;
+    inventario::reporte_movimientos(st.pool()?, &a, &desde, &hasta, tipo.as_deref()).await
+}
+
+#[tauri::command]
+async fn proveedores_listar(st: St<'_>) -> Res<Vec<inventario::Proveedor>> {
+    let a = st.actor().await?;
+    inventario::proveedores(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn proveedor_guardar(st: St<'_>, proveedor: inventario::Proveedor) -> Res<String> {
+    let a = st.actor().await?;
+    inventario::proveedor_guardar(st.pool()?, &a, &proveedor).await
+}
+
+#[tauri::command]
+async fn proveedor_eliminar(st: St<'_>, id: String) -> Res<()> {
+    let a = st.actor().await?;
+    inventario::proveedor_eliminar(st.pool()?, &a, &id).await
+}
+
 // ─────────── Impresoras ───────────
 
 #[tauri::command]
@@ -631,8 +761,14 @@ async fn impresora_ajustes(st: St<'_>, documento: String) -> Res<Option<impresor
 #[tauri::command]
 async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
     let a = st.actor().await?;
+    let mut documento = documento;
     match documento.as_str() {
         "movimiento" => a.exigir("caja", "imprimir comprobantes de caja")?,
+        // Comprobante de entrada de mercadería: sale por la impresora de comprobantes.
+        "entrada" => {
+            a.exigir("inventario", "imprimir comprobantes de inventario")?;
+            documento = "movimiento".into();
+        }
         "etiqueta" => a.exigir("productos", "imprimir etiquetas")?,
         "cierre" => a.exigir("caja.admin", "imprimir reportes de caja")?,
         _ => return Err("Ese documento se imprime desde su pantalla".into()),
@@ -815,6 +951,27 @@ pub fn run() {
             imprimir,
             list_printers,
             print_raw,
+            inventario_lista,
+            inventario_estado,
+            inventario_existencia,
+            inventario_alertas,
+            inventario_producto,
+            inventario_kardex,
+            inventario_entrada,
+            inventario_entrada_obtener,
+            inventario_ajustar,
+            inventario_conteo_abierto,
+            inventario_conteo_guardar,
+            inventario_conteo_diferencias,
+            inventario_conteo_aplicar,
+            inventario_conteo_descartar,
+            inventario_inicial,
+            inventario_reporte_bajo_minimo,
+            inventario_reporte_valorizado,
+            inventario_reporte_movimientos,
+            proveedores_listar,
+            proveedor_guardar,
+            proveedor_eliminar,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar la aplicación Tauri");

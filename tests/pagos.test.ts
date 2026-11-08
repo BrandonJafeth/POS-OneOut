@@ -15,6 +15,10 @@ describe("calcularPagos", () => {
     expect(r.aplicados[1]).toMatchObject({ aplicado: 5000, recibido: 10000, vuelto: 5000 });
   });
   it("tarjeta no pasa del total", () => expect(calcularPagos(8000, [pago("TJ", 9000)], formas).ok).toBe(false));
+  it("venta de ¢0: sin pagos sí, con dinero no (abriría la gaveta)", () => {
+    expect(calcularPagos(0, [], formas).ok).toBe(true);
+    expect(calcularPagos(0, [pago("EF", 1000)], formas).errores.join()).toMatch(/¢0/);
+  });
   it("últimos 4 solo en la forma que los pide", () => {
     expect(calcularPagos(500, [pago("TJ", 500, "1234")], formas).ok).toBe(true);
     expect(calcularPagos(500, [pago("TJ", 500, "12")], formas).ok).toBe(false);

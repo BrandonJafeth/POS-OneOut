@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.1.0, con las migraciones 1 a 9.
+Aplica a la versión 0.1.0, con las migraciones 1 a 11.
 
 ## 1. Modelo de amenazas
 
@@ -41,7 +41,8 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
   - `caja.rs`/`ventas.rs` solo concatenan cláusulas constantes.
 - **La pantalla no puede pedir SQL arbitrario**:
   - `bd_lote` solo acepta ids de `src/db/sentencias.json`, cada uno con su permiso.
-  - `bd_leer` acepta un solo `SELECT`/`WITH`, en un pool `read_only` con `query_only`. Quedan fuera `usuarios`, `clientes`, `bitacora`, `ventas_espera`, `cuentas`, `abonos`, `PRAGMA`, `ATTACH`, `sqlite_master` y las palabras de escritura.
+  - `bd_leer` acepta un solo `SELECT`/`WITH`, en un pool `read_only` con `query_only`, y solo sobre una **lista blanca**: `productos`, `codigos`, `departamentos`, `formas_pago`, `bancos`, `config`, `negocio` y `cajas` (`bd::LECTURA_PERMITIDA`). Cualquier otra tabla del esquema se rechaza, incluidas las que se agreguen en el futuro, sin tocar la lista: ventas, pagos, turnos, clientes, usuarios, bitácora, apartados e inventario. También se rechazan `PRAGMA`, `ATTACH`, `pragma_*()`, `sqlite_*`, `_sqlx_migrations`, las palabras de escritura y las columnas `pin_hash` y `nombre_tiquete`. Cada rechazo queda en la bitácora (`lectura.rechazada`).
+  - Las lecturas sensibles (totales de ventas, turnos, clientes, usuarios, bitácora, inventario) solo salen por comandos tipados que revisan el rol en Rust.
 - **Validación de entradas**: texto con largo máximo y sin caracteres de control (`util::texto`). Hay rangos para montos y cantidades, y el conteo de caja solo acepta las denominaciones configuradas.
 
 ### PIN y acceso
@@ -57,9 +58,14 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
   - Una base vieja sin cifrar se convierte sola al primer arranque con `sqlcipher_export`. La copia en claro se borra cuando la cifrada ya existe.
 - WAL activo y `quick_check` al arrancar y cada 6 horas. Un fallo queda en la bitácora.
 - Antes de cada migración se copia la base a `respaldos-automaticos\`. Esa copia también va cifrada, porque es el archivo cifrado.
+- **No se actualiza con la caja abierta**: si hay migraciones pendientes y un turno abierto, la app no abre y explica cómo volver a la versión anterior para cerrar la caja. Una base de una versión más nueva tampoco se abre (no se "desmigra").
 - **Respaldos sin copias en claro**:
   - La base se exporta a una base en memoria y se serializa (`sqlite3_serialize`). Se cifra con AES-256-GCM y Argon2id, y recién entonces se escribe.
-  - La restauración descifra, revisa la integridad y la versión, y escribe `pos.db.nuevo` ya cifrado. Ese archivo se activa al reiniciar y la base anterior queda guardada.
+  - La restauración descifra, revisa la integridad y la versión, **aplica en memoria las migraciones que le falten** (cada una en su transacción), vuelve a correr `integrity_check` y verifica la cadena de la bitácora. Solo si todo pasa escribe `pos.db.nuevo` ya cifrado; si algo falla, la base actual no se toca y el mensaje lo dice. Ese archivo se activa al reiniciar y la base anterior queda guardada.
+  - No se restaura con la caja abierta.
+  - Cada intento fallido con el PIN del dueño ya dado (contraseña equivocada, archivo alterado, no se pudo poner al día) queda en la bitácora como `respaldo.restaurar_fallido`, con el motivo técnico. La pantalla solo muestra un mensaje claro.
+  - **Formato versionado**: `POSBAK02` lleva en el encabezado la versión del programa y la última migración. El encabezado va en claro (para rechazar un respaldo de una versión más nueva antes de pedir nada) pero autenticado por GCM: cambiarlo hace fallar el descifrado. El lector sigue aceptando `POSBAK01` (sin encabezado). Un formato nuevo agrega un lector; no reemplaza los anteriores.
+  - `tests/fixtures/` guarda un respaldo de prueba por versión (sin datos reales). La prueba que los restaura todos no se borra.
 - Los archivos temporales y el registro no llevan datos personales ni PIN. No hay archivo de log de la app.
 
 ### Bitácora
@@ -68,10 +74,26 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - `verificar()` corre en cada cierre de caja. Si la cadena está rota, el reporte Z lo imprime y queda la entrada `bitacora.alterada`.
 - No guarda datos personales: solo ids, acciones y nombres de campos.
 
+### Venta: sin pérdidas ni gaveta sin rastro
+- Una venta de ¢0 (regalo, descuento total) se registra sin pagos. Si trae dinero «recibido», se rechaza: si no, el efectivo abriría la gaveta sin una venta real (`calculo::pagos` y `lib/venta/pagos.ts`).
+- Las ventas en espera se guardan en la base en cada cambio y en orden (una cola en `useEsperas`): un guardado viejo no pisa a uno nuevo ni deja en la bitácora una «línea quitada» que no pasó.
+- Si una pantalla falla al dibujarse, `ErrorPantalla` muestra un aviso con «Volver a intentar» en vez de dejar la ventana en blanco. Lo cobrado y lo que está en espera ya está en la base.
+- En la versión final un `panic` de Rust cierra el programa (`panic = "abort"`). El código fuera de las pruebas no usa `unwrap` sobre datos de afuera, y cada índice o división se revisa antes. Un cierre a la mitad de un cobro no deja nada a medias: todo va en una transacción.
+
+### Inventario
+- La existencia solo cambia agregando un movimiento al kardex (`inventario::mover`), dentro de la transacción de la venta, la anulación, la entrada, el ajuste o el conteo. Un trigger revisa que la existencia resultante sea la anterior más la cantidad y la copia a `existencias`: la existencia guardada siempre es la suma del kardex.
+- El kardex no se edita ni se borra (triggers `inventario_movimientos_sin_update` y `_sin_delete`).
+- El costo vive en `producto_costos`, fuera de `productos`, para que la lectura de catálogo nunca lo vea.
+- Permiso `inventario` solo para el dueño. El técnico no tiene acceso. El cajero mueve inventario solo vendiendo y, si `venta_mostrar_existencia` está activo, ve cuántas unidades hay (`inventario_existencia`, sin costo).
+- Ajustes, conteos y carga inicial piden el PIN del dueño en el momento. El ajuste exige un motivo de la lista configurable. Vender sin existencia con `permitir_vender_sin_existencia` apagado pide el PIN del dueño (`venta.sin_existencia` en la bitácora).
+- Proveedores: solo nombre, teléfono y notas. La bitácora no guarda el teléfono ni las notas (si el proveedor es una persona, son datos personales). Al eliminar un proveedor se borran su teléfono y sus notas; el nombre queda porque las compras ya registradas lo necesitan como respaldo contable.
+- Si `venta_mostrar_existencia` está apagado, el aviso de venta sin existencia le dice al cajero qué producto falta, pero no cuántas unidades hay.
+- La carga por CSV no acepta decimales disfrazados: «2.5» es un error, no 25. Solo valen separadores de miles bien puestos («1.250»).
+
 ### Caja
 - Hay un solo turno abierto por caja (índice único). Sin un turno abierto de hoy no se cobra.
 - El turno es de la caja (`caja_turno_compartido`, por defecto sí). Cada venta, pago, movimiento, corte, apertura de gaveta y anulación guarda su usuario y su turno. Sin la opción, solo quien abrió vende y mueve efectivo en ese turno (el dueño puede cerrarlo).
-- **Totales ocultos al cajero con el turno abierto** (`caja::ve_totales`): `caja_detalle` le manda solo fondo, movimientos y aperturas sin venta; `caja_turnos` le manda las ventas y el total en `null`; `venta_listar_dia`, `venta_obtener`, `venta_imprimir` y `venta_pendientes_factura` solo le dan sus propios tiquetes; `caja_z` falla con el turno abierto; `caja_corte` es del dueño; y `bd_leer` le rechaza `ventas` y `venta_lineas`. Una salida rechazada por falta de efectivo queda en la bitácora (`caja.salida_rechazada`), para que el mensaje no sirva para adivinar lo esperado sin dejar rastro.
+- **Totales ocultos al cajero con el turno abierto** (`caja::ve_totales`): `caja_detalle` le manda solo fondo, movimientos y aperturas sin venta; `caja_turnos` le manda las ventas y el total en `null`; `venta_listar_dia`, `venta_obtener`, `venta_imprimir` y `venta_pendientes_factura` solo le dan sus propios tiquetes; `caja_z` falla con el turno abierto; `caja_corte` es del dueño; y `bd_leer` no deja leer `ventas` ni `venta_lineas` a nadie. Una salida rechazada por falta de efectivo queda en la bitácora (`caja.salida_rechazada`), para que el mensaje no sirva para adivinar lo esperado sin dejar rastro.
 - **Conteo ciego y bloqueado**: el cajero cuenta (total o billete por billete) sin ver lo esperado; al confirmar se cierra el turno y el trigger `caja_turnos_conteo_bloqueado` impide cambiar conteo, contado, esperado, diferencia o totales de un turno cerrado. Solo `reabrir` (dueño, PIN, motivo, mismo día, último turno) vuelve a abrirlo; el cierre anterior queda en la bitácora.
 - **Cierre Z**: los totales congelados se revisan otra vez al leerlos (departamentos, detalle, formas de pago y efectivo deben cuadrar). Si no cuadran, Rust no imprime. La reimpresión exige el PIN del dueño y la marca "*** COPIA ***" en cada papel.
 - **Anular y corregir pagos**: solo el dueño, con su PIN y motivo (`confirmar_dueno`). La venta anulada no se borra.
@@ -106,7 +128,8 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Borrar todo el archivo de la base**. La bitácora no puede protegerse de eso; lo que lo cubre son los respaldos guardados fuera de la computadora.
 - **Facturación electrónica de Hacienda**. Se hace en otro sistema; aquí solo se marca como hecha.
 - **El instalador no está firmado** con certificado de código. Windows SmartScreen va a avisar. Verifique el SHA-256.
-- **Lectura de catálogo**: `bd_leer` todavía permite a la pantalla leer las tablas no sensibles (productos, config y, para el dueño y el técnico, ventas sin datos de cliente). Pasar esas lecturas a comandos tipados es trabajo pendiente.
+- **Lectura de catálogo**: `bd_leer` sigue existiendo para el catálogo y la configuración pública (lista blanca). Esas tablas no tienen datos personales ni costos.
+- **Volver a una versión anterior del programa**: una base ya migrada no abre con el instalador viejo. Hay que restaurar la copia de `respaldos-automaticos` hecha antes de actualizar (ver PRUEBAS-MANUALES.md, sección P).
 - **Turno compartido**: si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona (el Z lo dice). Para control por cajero, desactive `caja_turno_compartido`.
 - **Gaveta abierta a mano** (llave o botón físico de la gaveta): no pasa por el sistema; solo el arqueo lo detecta.
 - **Un solo puesto**: no hay red ni sincronización. El módulo de nube existe pero no está activo.
@@ -129,9 +152,17 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | El cajero no puede ejecutar comandos del dueño | `caja::tests::abrir_movimientos_y_cerrar` (reabrir), `ventas::tests::turno_cerrado_pagos_inmutables_y_ajustes`, `usuarios::tests::cajero_no_administra_usuarios`, `config::tests::permisos_por_clave`, `clientes::tests::*`, `bd::tests::lote_solo_por_nombre_y_con_permiso` |
 | Bloqueo de PIN | `usuarios::tests::bloqueo_progresivo_y_bitacora` |
 | Se detecta una fila alterada de la bitácora | `bd::tests::bitacora_detecta_fila_alterada_y_no_se_edita_por_sql`, `tests/base.test.ts` (triggers) |
-| Un respaldo alterado no se restaura | `respaldo::tests::respaldo_real_ida_y_vuelta_y_alterado_no_restaura`, `respaldo::tests_disco::base_vieja_se_cifra_y_el_respaldo_restaura_cifrado` |
+| Un respaldo alterado no se restaura | `respaldo::tests::respaldo_real_ida_y_vuelta_y_alterado_no_restaura`, `respaldo::tests_disco::base_vieja_se_cifra_y_el_respaldo_restaura_cifrado`, `respaldo::tests::cabecera_autenticada_y_formato_v1_se_sigue_leyendo` |
+| Respaldos de versiones anteriores se restauran y se ponen al día (prueba permanente) | `respaldo::tests::respaldos_de_versiones_anteriores_se_restauran` (todos los `tests/fixtures/*.posbak`) |
+| Respaldo más nuevo, alterado o con la caja abierta: rechazado sin tocar la base | `respaldo::tests_restaurar::no_restaura_con_caja_abierta_ni_respaldo_mas_nuevo_ni_alterado`, `respaldo::tests::respaldo_con_esquema_mas_nuevo_se_rechaza` |
+| No se actualiza con la caja abierta; copia antes de migrar | `respaldo::tests_restaurar::actualizar_exige_caja_cerrada_y_respalda_antes` |
+| Inventario: venta, anulación, espera, servicios y precio libre | `inventario::tests::venta_baja_anulacion_devuelve_espera_servicio_y_precio_libre_no` |
+| Venta sin existencia bloqueada salvo PIN del dueño | `inventario::tests::sin_existencia_bloquea_salvo_pin_del_dueno` |
+| Entrada, ajuste (motivo y PIN), conteo, carga inicial todo o nada | `inventario::tests::entrada_suma_costo_opcional_precio_y_kardex`, `::ajuste_exige_motivo_y_pin`, `::conteo_a_medias_y_aplicar_diferencias`, `::inventario_inicial_todo_o_nada` |
+| Existencia = suma del kardex; kardex inmutable | `inventario::tests::kardex_no_se_modifica_ni_se_borra_ni_se_descuadra` (y `cuadra()` en cada prueba de inventario) |
+| El cajero no recibe costos ni inventario valorizado; el técnico no entra | `inventario::tests::cajero_no_ve_costos_y_tecnico_no_entra` |
 | Sin solicitudes de red | La CSP solo permite `ipc:`, `on_navigation` y `on_new_window` bloquean, y no hay capacidad HTTP (revisión de configuración; ver la lista de la sección 7). |
-| La pantalla no puede pedir SQL arbitrario | `bd::tests::lectura_solo_select_y_sin_tablas_sensibles`, `bd::tests::lote_solo_por_nombre_y_con_permiso`, `tests/base.test.ts` |
+| La pantalla no puede pedir SQL arbitrario | `bd::tests::lectura_solo_select_y_solo_catalogo`, `bd::tests::lote_solo_por_nombre_y_con_permiso`, `tests/base.test.ts` |
 | Precio o descuento manipulados en la pantalla | `ventas::tests::cobro_exige_turno_y_valida_precio_y_descuento` |
 | El cajero no recibe totales del turno abierto (ningún comando, ni `bd_leer`) | `ventas::tests::cajero_no_recibe_totales_del_turno_abierto` |
 | El cajero no anula ni cambia el pago de una venta cobrada | `ventas::tests::solo_el_dueno_anula_o_cambia_el_pago` |
@@ -143,8 +174,8 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (54 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
-- TypeScript: `npm test` (130 pruebas).
+- Rust: `cd src-tauri && cargo test --lib` (80 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (153 pruebas).
 
 ## 6. Compilar y verificar una entrega
 
@@ -186,4 +217,6 @@ Cualquier cambio en el código produce otro hash: recalcúlelo en cada entrega.
 - [x] `npm audit`, `cargo audit`, `cargo deny` limpios; lockfiles fijados; dependencia sin uso quitada
 - [x] Release con LTO y `strip`; SHA-256 documentado
 - [ ] Firma de código del instalador (requiere comprar un certificado)
-- [ ] Pasar las lecturas de catálogo de `bd_leer` a comandos tipados
+- [x] `bd_leer` limitado a catálogo y configuración pública (lista blanca, rechazos en bitácora)
+- [x] Respaldos versionados: encabezado autenticado, migración al restaurar, fixtures por versión
+- [x] Inventario solo por comandos tipados; kardex inmutable y cuadrado con la existencia

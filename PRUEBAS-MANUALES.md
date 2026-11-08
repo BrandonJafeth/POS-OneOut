@@ -1,4 +1,4 @@
-# Guía de pruebas manuales: caja y seguridad
+# Guía de pruebas manuales: caja, seguridad, inventario y actualización
 
 Esta guía es para probar en la computadora de la caja, con la impresora POS-58 conectada.
 Antes de empezar, cree estos usuarios (con el técnico, Ctrl+Alt+T en la pantalla de entrada):
@@ -70,6 +70,9 @@ Cada prueba dice lo que debe pasar. Si algo no coincide, anote el número de la 
    - Con un PIN equivocado, también se rechaza.
 4. **Restaurar bien.** Use la contraseña correcta y el PIN de Ana. → "Respaldo verificado y listo". Pulse **Reiniciar ahora**; la app vuelve con los datos del respaldo.
 5. **Archivo alterado.** Copie el `.posbak`, cambie un carácter con un editor hexadecimal e intente restaurarlo. → Se rechaza.
+6. **Caja abierta.** Con la caja abierta, intente restaurar. → "Cierre la caja antes de restaurar un respaldo."
+7. **Respaldo de una versión anterior.** Restaure un `.posbak` hecho con la versión anterior del programa. → Se pone al día solo; después de reiniciar están las ventas, los turnos, los clientes, y la bitácora sale "Íntegra".
+8. **Respaldo de una versión más nueva.** Intente restaurar un respaldo hecho con una versión más nueva. → "Este respaldo se hizo con una versión más nueva del programa…". La base actual no cambia.
 
 ## H. Base cifrada
 
@@ -138,3 +141,58 @@ Objetivo: comprobar en papel el Z con detalle completo y los tiquetes por depart
    - Después del Z, un tiquete por cada departamento con ventas, con su encabezado, su detalle, el subtotal por forma de pago y su total.
 7. Reimprima desde Turnos con las casillas desmarcadas. → Pide el PIN de Ana; sale solo el Z, sin detalle ni tiquetes por departamento, y cada papel dice "*** COPIA ***".
 8. Como Ana, en el turno pulse **Exportar PDF**. → Se descarga un PDF carta con el logo, el Z, el detalle completo y cada departamento en su página.
+
+## O. Inventario
+
+Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio (por ejemplo "Fotocopia").
+
+1. **Menú.** Ana ve **Inventario** en el menú; Luis y el técnico no. En **Productos**, Ana ve las columnas Existencia, Mínimo y Estado; el técnico no.
+2. **Datos iniciales.** En **Inventario → Existencias**, filtro "Sin control": están los productos sin código de barras (servicios). Los que tienen código empiezan en 0, estado "Agotado".
+3. **Carga desde CSV.** En **Carga inicial**, elija un CSV con `codigo,existencia,costo` y una fila con un código que no existe. → La vista previa marca el error y el botón **Cargar** queda apagado. Corrija el archivo, vuelva a elegirlo y cargue con el PIN de Ana. → A queda con su existencia; en su **Kardex** aparece "Inventario inicial".
+4. **Entrada de mercadería.** En **Entrada de mercadería**: proveedor (créelo antes en Proveedores), factura "F-1", escanee A tres veces (cantidad 3) y ponga costo ¢400. Escriba un precio nuevo para B. → Pide confirmar el cambio de precio. Guarde.
+   - La existencia de A sube 3; en Existencias, el costo de A es ¢400.
+   - **Imprimir comprobante** sale por la impresora de comprobantes. **Imprimir etiquetas** saca 3 etiquetas de A (B sin código no lleva).
+5. **Vender.** Como Luis, venda 2 de A, 1 Fotocopia y un precio libre (F4). → A baja 2; la fotocopia y el precio libre no aparecen en el kardex. Una venta **en espera** sin cobrar no cambia nada.
+6. **Anular.** Como Ana, anule esa venta. → A vuelve a subir 2; el kardex muestra "Anulación · Tiquete …".
+7. **Vender sin existencia (permitido).** Venda más unidades de B de las que hay. → Se vende; B queda "Negativo" (filtro Negativos).
+8. **Vender sin existencia (bloqueado).** En **Opciones**, apague "Vender aunque no haya existencia". Como Luis, intente vender más de lo que hay. → Pide el PIN del dueño. Con un PIN equivocado, no vende. Con el de Ana, vende. Vuelva a encender la opción.
+9. **Ajuste.** En Existencias → **Ajustar** sobre A: sin motivo, el botón queda apagado; con "Otro" sin escribir el motivo, también. Elija "Daño", diferencia −1, PIN equivocado → rechazado; PIN de Ana → baja 1. La bitácora tiene `inventario.ajuste`.
+10. **Conteo físico.** En **Conteo físico**, elija un departamento y **Empezar conteo**. Escanee A dos veces (contado 2) y escriba un número en otro producto. **Guardar a medias**, salga de la pantalla y vuelva: sigue ahí. Marque "Ver solo diferencias", **Aplicar conteo** con el PIN de Ana. → Las existencias quedan iguales a lo contado; en el kardex, "Ajuste · Conteo".
+11. **Mínimo y alerta.** En A → **Mínimo y costo**, mínimo 5. → A sale "Bajo mínimo" y el menú Inventario muestra un número. En la pantalla de Venta (Luis) no aparece ningún aviso.
+12. **Existencia en la venta.** En Opciones, encienda "Mostrar la existencia en las tarjetas". → En Venta, las tarjetas de productos con control dicen "Hay N" en vez del departamento. Apáguelo.
+13. **Reportes** (Ana): Bajo mínimo con "Pedir" = mínimo × 2 − existencia (cámbielo), Valorizado (los sin costo aparte), Movimientos por fechas y tipo. Exporte CSV y PDF de cada uno: el CSV abre en Excel con tildes; una celda que empiece con "=" sale como texto.
+14. **Kardex por fechas.** En A → Kardex, cambie las fechas: solo salen los movimientos del rango.
+
+## P. Actualizar el programa en la PC del cliente
+
+Hágalo al final del día, con calma. Lleve una memoria USB.
+
+1. **Caja cerrada.** Cierre la caja (Z impreso). Si queda una caja abierta, la versión nueva **no abre** y pide volver a la anterior para cerrarla.
+2. **Respaldo previo.** Como Ana, **Administración → Respaldo → Crear respaldo**. Anote la contraseña aparte.
+3. **Copia a USB.** Copie el `.posbak` recién creado (Documentos\Respaldos POS) a la memoria USB.
+4. **Guarde el instalador anterior** en la USB también (por si hay que volver).
+5. **Verifique el instalador nuevo**: compare su SHA-256 con el que viene en la entrega (SEGURIDAD.md, sección 6).
+6. **Instale** la versión nueva encima de la anterior (no desinstale: los datos quedan en `%APPDATA%\cr.puntodeventa.pos`).
+7. **Primer arranque.** La app se pone al día sola. Antes, deja una copia en `%APPDATA%\cr.puntodeventa.pos\respaldos-automaticos\pos-antes-vN-fecha.db`.
+8. **Verifique**:
+   - Entra con el PIN de cada usuario.
+   - **Técnico → Sistema**: base "Cifrada" y bitácora "Íntegra".
+   - **Ventas del día / Caja → Turnos**: están las ventas y el último Z.
+   - Abra la caja, haga una venta de prueba de ¢5 y anúlela.
+9. **Si algo falla, volver a la versión anterior:**
+   1. Cierre la app.
+   2. Instale el instalador anterior (el de la USB).
+   3. La versión anterior no abre una base ya actualizada ("versión más nueva"). Vaya a `%APPDATA%\cr.puntodeventa.pos\`, renombre `pos.db` a `pos.db.fallida` y copie ahí la copia de `respaldos-automaticos\pos-antes-vN-….db` con el nombre `pos.db`.
+   4. Abra la app y verifique como en el paso 8. Si eso tampoco funciona, restaure el `.posbak` de la USB (Administración → Respaldo).
+   5. Avise al técnico con la fecha y el mensaje que salió.
+
+## Q. Lectura cerrada desde la pantalla (versión de desarrollo)
+
+Solo con `npm run tauri dev` (en la versión final no hay DevTools).
+
+1. Entre como Ana, abra DevTools (F12) y en la consola escriba:
+   `window.__TAURI_INTERNALS__.invoke("bd_leer", { sql: "SELECT * FROM clientes", params: [] })` → error "no está permitido".
+2. Lo mismo con `usuarios`, `ventas`, `existencias`, `inventario_movimientos`, `producto_costos`. → Todas fallan.
+3. Con `"SELECT 1; SELECT 2"` y con `"DELETE FROM productos"`. → Fallan.
+4. En **Técnico → Bitácora** aparecen las entradas `lectura.rechazada`.
+5. Las pantallas de Venta y Productos funcionan igual que antes.

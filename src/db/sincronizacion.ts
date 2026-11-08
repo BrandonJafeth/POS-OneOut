@@ -32,7 +32,11 @@ export function filaParaNube(tabla: string, fila: Record<string, unknown>): Reco
   return Object.fromEntries(permitidas.filter((c) => c in fila).map((c) => [c, fila[c]]));
 }
 
-/** Lo que se subiría: filas cambiadas desde `desde`, por tabla, ya filtradas. */
+/**
+ * Lo que se subiría: filas cambiadas desde `desde`, por tabla, ya filtradas.
+ * shortcut: lee con db().select, que en la app rechaza ventas (bd_leer solo deja catálogo);
+ * al activar la nube, pasar esto a un comando Rust tipado con permiso.
+ */
 export async function cambiosParaNube(desde: string): Promise<Record<string, Record<string, unknown>[]>> {
   const out: Record<string, Record<string, unknown>[]> = {};
   for (const tabla of Object.keys(NUBE_LISTA_BLANCA)) {

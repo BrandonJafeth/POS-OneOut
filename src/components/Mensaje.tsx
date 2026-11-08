@@ -22,6 +22,9 @@ const CONOCIDOS: [RegExp, string][] = [
   [/database is locked|database table is locked|busy/i, "El sistema está terminando otra operación. Espere unos segundos e intente de nuevo."],
   [/FOREIGN KEY constraint failed/i, "Uno de los datos ya no existe (quizás se borró en otra pantalla). Vuelva a cargar e intente de nuevo."],
   [/disk is full|no space/i, "El disco de la computadora está lleno. Avise al administrador."],
+  [/respaldo_migracion/i, "No se pudo poner el respaldo al día con esta versión del programa. La base actual no se tocó. Avise al técnico (el detalle quedó en la bitácora)."],
+  [/movimientos de inventario no se pueden/i, "Los movimientos de inventario no se pueden modificar ni borrar. Para corregir, haga un ajuste."],
+  [/no cuadra con el kardex/i, "La existencia cambió mientras tanto. Vuelva a cargar e intente de nuevo."],
 ];
 
 let verDetalle = false;

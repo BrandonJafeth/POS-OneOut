@@ -61,6 +61,11 @@ export interface ConfigApp {
   pin_min_cajero: number;
   /** Minutos sin uso tras los que se bloquea la sesión. */
   sesion_inactividad_min: number;
+  /** Vender sin existencia (queda negativa). false = hace falta el PIN del dueño. */
+  permitir_vender_sin_existencia: boolean;
+  /** La tarjeta del producto en la venta muestra la existencia. */
+  venta_mostrar_existencia: boolean;
+  inventario_motivos_ajuste: string[];
 }
 
 /** Valores por defecto si una clave falta en la base (los mismos que siembra la migración). */
@@ -100,6 +105,9 @@ export const CONFIG_DEFECTO: ConfigApp = {
   pin_min_dueno: 6,
   pin_min_cajero: 4,
   sesion_inactividad_min: 10,
+  permitir_vender_sin_existencia: true,
+  venta_mostrar_existencia: false,
+  inventario_motivos_ajuste: ["Conteo", "Daño", "Merma", "Regalo", "Error de registro", "Otro"],
 };
 
 /** Todas las claves tal como están en la base (para el editor técnico). */

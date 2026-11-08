@@ -1,5 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import {
+  Boxes,
   FileText,
   Landmark,
   Moon,
@@ -15,11 +16,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { crearSesion, SesionCtx } from "./app/sesion";
+import ErrorPantalla from "./components/ErrorPantalla";
 import { MARCA_TECNICA, mostrarDetalleTecnico, textoError } from "./components/Mensaje";
 import { estadoCaja, type EstadoCaja } from "./db/caja";
 import { guardarConfig, leerConfig, type ConfigApp } from "./db/config";
 import { iniciarBase } from "./db/iniciar";
 import { cerrarSesion, estadoSistema, tocarSesion } from "./db/usuarios";
+import { alertasInventario } from "./db/inventario";
 import { pendientesFactura } from "./db/ventas";
 import { alPerderSesion, SESION_EXPIRADA } from "./lib/invocar";
 import { puede, type Permiso } from "./lib/permisos";
@@ -28,6 +31,7 @@ import Administracion from "./screens/Administracion";
 import Caja from "./screens/Caja";
 import CambiarPinObligatorio from "./screens/CambiarPinObligatorio";
 import Clientes from "./screens/Clientes";
+import Inventario from "./screens/Inventario";
 import ConfigTecnica from "./screens/ConfigTecnica";
 import Login from "./screens/Login";
 import PendientesFactura from "./screens/PendientesFactura";
@@ -42,7 +46,7 @@ import { ConfirmarProvider } from "./ui/Confirmar";
 import { ToastProvider } from "./ui/Toast";
 import { aplicarTema } from "./ui/tema";
 
-export type Pagina = "venta" | "caja" | "ventas" | "productos" | "clientes" | "facturas" | "admin" | "config";
+export type Pagina = "venta" | "caja" | "ventas" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
 
 interface Seccion {
   id: Pagina;
@@ -57,6 +61,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja"] },
   { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["venta"] },
   { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
+  { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario"] },
   { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes"] },
   { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas"] },
 ];
@@ -205,6 +210,12 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
   // Arranca en la primera sección que el rol puede usar (Venta para cajero y dueño).
   useEffect(() => setPagina(principal[0]?.id ?? avanzado[0]?.id ?? "admin"), []);
   const [facturas, setFacturas] = useState(0);
+  // Aviso discreto al dueño (nunca al cajero en la venta): productos en su mínimo o por debajo.
+  const [bajoMinimo, setBajoMinimo] = useState(0);
+  useEffect(() => {
+    if (!sesion.puede("inventario")) return;
+    alertasInventario().then(setBajoMinimo, () => setBajoMinimo(0));
+  }, [pagina]);
 
   useEffect(() => {
     void recargarCaja().catch(() => undefined);
@@ -249,6 +260,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     caja: <Caja />,
     ventas: <VentasHoy />,
     productos: <Productos />,
+    inventario: <Inventario />,
     clientes: <Clientes />,
     facturas: <PendientesFactura />,
     admin: <Administracion />,
@@ -267,6 +279,11 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
       {s.id === "facturas" && facturas > 0 && (
         <span className="nav-contador" aria-label={`${facturas} pendientes`}>
           {facturas}
+        </span>
+      )}
+      {s.id === "inventario" && bajoMinimo > 0 && (
+        <span className="nav-contador" aria-label={`${bajoMinimo} bajo mínimo`}>
+          {bajoMinimo}
         </span>
       )}
     </Button>
@@ -313,7 +330,10 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
             </Button>
           </div>
         </aside>
-        <main className="contenido">{paginas[pagina]}</main>
+        <main className="contenido">
+          {/* key: al cambiar de sección, un error anterior no se queda pegado. */}
+          <ErrorPantalla key={pagina}>{paginas[pagina]}</ErrorPantalla>
+        </main>
       </div>
     </SesionCtx.Provider>
   );

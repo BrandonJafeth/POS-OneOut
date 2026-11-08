@@ -41,6 +41,9 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         c if c.starts_with("importacion_") => &["productos.importar"],
         c if c.starts_with("caja_") => &["caja.admin", "config.tecnica"],
         "departamentos_color" => &["departamentos", "config.tecnica"],
+        // Inventario: solo el dueño (el técnico no tiene acceso a inventario).
+        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => &["inventario"],
+        c if c.starts_with("inventario_") => &["inventario"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }
 }
@@ -71,6 +74,11 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         "caja_no_venta_umbral" => entero(0, 1000),
         "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
         "sesion_inactividad_min" => entero(1, 240),
+        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => si_no(),
+        "inventario_motivos_ajuste" => match v.as_array() {
+            Some(l) if !l.is_empty() && l.len() <= 30 && l.iter().all(|x| x.as_str().is_some_and(|t| !t.trim().is_empty() && t.chars().count() <= 40)) => Ok(()),
+            _ => Err("Motivos de ajuste: una lista de textos cortos".into()),
+        },
         // El tiquete no es comprobante fiscal: la leyenda que lo dice no puede quedar vacía.
         "texto_no_factura" => match v.as_str() {
             Some(t) if t.trim().chars().count() >= 10 => Ok(()),

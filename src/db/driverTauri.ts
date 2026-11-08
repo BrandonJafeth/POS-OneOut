@@ -1,4 +1,5 @@
-// Driver de la app: lecturas con bd_leer (un SELECT, solo lectura) y escrituras con bd_lote
+// Driver de la app: lecturas con bd_leer (un SELECT de solo lectura, solo tablas de catálogo y
+// configuración pública: LECTURA_PERMITIDA en bd.rs) y escrituras con bd_lote
 // (operaciones por nombre, en una transacción). Ver src-tauri/src/bd.rs.
 import { invocar } from "../lib/invocar";
 import type { Driver, Fila, Valor } from "./conexion";

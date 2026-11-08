@@ -35,15 +35,17 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (8, "impresoras", include_str!("../../src/db/migraciones/0008_impresoras.sql")),
     (9, "turno_compartido_cierre", include_str!("../../src/db/migraciones/0009_turno_compartido_cierre.sql")),
     (10, "da_vuelto_con_turno", include_str!("../../src/db/migraciones/0010_da_vuelto_con_turno.sql")),
+    (11, "inventario", include_str!("../../src/db/migraciones/0011_inventario.sql")),
 ];
 
 #[derive(Debug)]
-struct Lista;
+/// Las primeras N migraciones (todas en la app; menos en pruebas, para simular una base vieja).
+struct Lista(usize);
 
 impl MigrationSource<'static> for Lista {
     fn resolve(self) -> futures_core::future::BoxFuture<'static, Result<Vec<Migration>, sqlx::error::BoxDynError>> {
         Box::pin(async move {
-            Ok(MIGRACIONES
+            Ok(MIGRACIONES[..self.0]
                 .iter()
                 .map(|(v, d, sql)| Migration::new(*v, (*d).into(), MigrationType::ReversibleUp, (*sql).into(), false))
                 .collect())
@@ -135,10 +137,18 @@ impl Bd {
 
     /// Una consulta de solo lectura pedida por la pantalla (ver validar_lectura).
     pub async fn leer(&self, actor: &Actor, sql: &str, params: &[Value]) -> Res<Vec<Map<String, Value>>> {
-        validar_lectura(sql)?;
-        // El cajero no recibe ventas por aquí (sumaría los totales del turno abierto): solo por comandos.
-        if actor.rol == crate::permisos::Rol::Cajero {
-            validar_lectura_cajero(sql)?;
+        // Las tablas reales del esquema: una tabla nueva (inventario, apartados…) queda fuera sola.
+        let tablas: Vec<String> = sqlx::query_scalar("SELECT lower(name) FROM sqlite_master WHERE type IN ('table', 'view')")
+            .fetch_all(&self.lectura)
+            .await
+            .map_err(e)?;
+        if let Err(err) = validar_lectura(sql, &tablas) {
+            // Nadie usa SQL a mano desde la pantalla: un rechazo es un error de programa o un intento.
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+            let motivo = err.trim_start_matches(crate::util::TECNICO).to_string();
+            bitacora::registrar(&mut tx, Some(&actor.id), "lectura.rechazada", "bd", None, &serde_json::json!({"motivo": motivo})).await?;
+            tx.commit().await.map_err(e)?;
+            return Err(err);
         }
         let mut q = sqlx::query(sql);
         for p in params {
@@ -199,15 +209,38 @@ async fn integridad(pool: &SqlitePool) -> Res<()> {
     Ok(())
 }
 
-/// Aplica migraciones pendientes; antes, copia la base a respaldos-automaticos.
-async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -> Res<()> {
+pub fn ultima_migracion() -> i64 {
+    MIGRACIONES.last().map(|m| m.0).unwrap_or(0)
+}
+
+/// ¿Hay un turno de caja abierto? (sin la tabla o la columna, de una base muy vieja: no)
+pub async fn hay_turno_abierto(pool: &SqlitePool) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM caja_turnos WHERE estado = 'abierto' AND eliminado_en IS NULL")
+        .fetch_one(pool)
+        .await
+        .is_ok_and(|n| n > 0)
+}
+
+/// Aplica migraciones pendientes. Con `dir` (la base de la app, al arrancar una versión nueva):
+/// no actualiza con la caja abierta y antes copia la base a respaldos-automaticos.
+/// Sin `dir`: bases en memoria (pruebas y restauración de respaldos).
+pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -> Res<()> {
     let aplicadas: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
-    let ultima = MIGRACIONES.last().map(|m| m.0).unwrap_or(0);
+    let ultima = ultima_migracion();
+    if aplicadas > ultima {
+        return Err(format!(
+            "Esta base es de una versión más nueva del programa que la instalada ({}). Instale la versión más nueva o restaure la copia de respaldos-automaticos hecha antes de actualizar.",
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
     if let Some(d) = dir {
         if aplicadas > 0 && aplicadas < ultima {
+            if hay_turno_abierto(pool).await {
+                return Err("Hay una caja abierta. Para actualizar: vuelva a instalar la versión anterior, cierre la caja y luego instale esta versión.".into());
+            }
             sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(pool).await.map_err(e)?;
             let carpeta = d.join("respaldos-automaticos");
             std::fs::create_dir_all(&carpeta).map_err(e)?;
@@ -215,9 +248,18 @@ async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -> Res<()> {
             std::fs::copy(ruta, carpeta.join(format!("pos-antes-v{}-{marca}.db", aplicadas + 1))).map_err(e)?;
         }
     }
-    Migrator::new(Lista).await.map_err(e)?.run(pool).await.map_err(e)?;
+    Migrator::new(Lista(MIGRACIONES.len())).await.map_err(e)?.run(pool).await.map_err(e)?;
     bitacora::encadenar_pendientes(pool).await?;
     Ok(())
+}
+
+/// Base en disco como la dejaría una versión vieja del programa (solo las primeras `n` migraciones).
+#[cfg(test)]
+pub async fn crear_vieja(ruta: &Path, n: usize) -> SqlitePool {
+    let o = SqliteConnectOptions::new().filename(ruta).create_if_missing(true).journal_mode(SqliteJournalMode::Wal);
+    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(o).await.unwrap();
+    Migrator::new(Lista(n)).await.unwrap().run(&pool).await.unwrap();
+    pool
 }
 
 /// Convierte una base sin cifrar (de versiones anteriores) en una cifrada, con sqlcipher_export.
@@ -253,10 +295,15 @@ async fn cifrar_existente(ruta: &Path, clave: &[u8; 32]) -> Res<()> {
     Ok(())
 }
 
+/// Lo único que la pantalla puede leer con SQL propio: catálogo y configuración pública.
+/// Ventas, caja, clientes, usuarios, bitácora, apartados e inventario: solo por comandos tipados.
+pub const LECTURA_PERMITIDA: &[&str] = &["productos", "codigos", "departamentos", "formas_pago", "bancos", "config", "negocio", "cajas"];
+
 /// Reglas de la lectura que puede pedir la pantalla:
-/// una sola sentencia, que empiece con SELECT o WITH, sin tablas sensibles ni comandos peligrosos.
+/// una sola sentencia, que empiece con SELECT o WITH, sin comandos peligrosos y que solo nombre
+/// tablas de LECTURA_PERMITIDA (`tablas`: todas las del esquema; cualquier otra se rechaza).
 /// Además corre en un pool read_only + query_only, así que aunque esto fallara no podría escribir.
-pub fn validar_lectura(sql: &str) -> Res<()> {
+pub fn validar_lectura(sql: &str, tablas: &[String]) -> Res<()> {
     let t = sql.trim().trim_end_matches(';').trim();
     if t.contains(';') {
         return Err(format!("{}Lectura rechazada: una sola consulta", crate::util::TECNICO));
@@ -272,25 +319,20 @@ pub fn validar_lectura(sql: &str) -> Res<()> {
         _ => return Err(format!("{}Lectura rechazada: solo SELECT", crate::util::TECNICO)),
     }
     const PROHIBIDAS: &[&str] = &[
-        // ventas_espera guarda el cliente de la venta (nombre, teléfono); cuentas/abonos, notas del apartado.
-        // Caja y pagos: solo por comandos tipados (cierre ciego, turnos ajenos, últimos 4 dígitos).
-        "caja_turnos", "caja_movimientos", "caja_ajustes", "cierres_dia", "venta_pagos", "venta_pago_correcciones", "nombre_tiquete",
-        // Cortes, gaveta e impresoras: solo por comandos.
-        "caja_cortes", "gaveta_aperturas", "impresoras", "impresora_destinos",
-        "usuarios", "clientes", "bitacora", "pin_hash", "ventas_espera", "cuentas", "cuenta_lineas", "abonos", "insert", "update", "delete", "drop", "create", "alter", "replace",
-        "attach", "detach", "pragma", "vacuum", "load_extension", "sqlite_master", "sqlite_schema", "_sqlx_migrations",
+        "insert", "update", "delete", "drop", "create", "alter", "replace", "attach", "detach", "pragma", "vacuum", "reindex", "analyze", "load_extension",
+        // Columnas que no deben salir aunque la tabla esté permitida.
+        "pin_hash", "nombre_tiquete",
     ];
-    if let Some(p) = palabras.iter().find(|w| PROHIBIDAS.contains(&w.as_str())) {
-        return Err(format!("{}Lectura rechazada: «{p}» no está permitido desde la pantalla", crate::util::TECNICO));
-    }
-    Ok(())
-}
-
-/// Además, para el cajero: nada de ventas ni sus líneas (con eso sumaría lo vendido en el turno
-/// abierto). Sus tiquetes le llegan por venta_listar_dia / venta_obtener, que ya filtran.
-pub fn validar_lectura_cajero(sql: &str) -> Res<()> {
-    let prohibidas = ["ventas", "venta_lineas"];
-    if let Some(p) = sql.to_lowercase().split(|c: char| !(c.is_alphanumeric() || c == '_')).find(|w| prohibidas.contains(w)) {
+    // Un identificador SQLite siempre contiene su nombre literal (con o sin comillas), así que
+    // revisar palabra por palabra alcanza para saber qué tablas nombra la consulta.
+    let rechazo = palabras.iter().find(|w| {
+        PROHIBIDAS.contains(&w.as_str())
+            || w.starts_with("pragma_") // funciones tabla: pragma_table_info('usuarios')
+            || w.starts_with("sqlite_")
+            || w.starts_with("_sqlx")
+            || (tablas.contains(w) && !LECTURA_PERMITIDA.contains(&w.as_str()))
+    });
+    if let Some(p) = rechazo {
         return Err(format!("{}Lectura rechazada: «{p}» no está permitido desde la pantalla", crate::util::TECNICO));
     }
     Ok(())
@@ -341,34 +383,60 @@ mod tests {
         Actor { id: "U".into(), rol, nombre: "x".into() }
     }
 
-    #[test]
-    fn lectura_solo_select_y_sin_tablas_sensibles() {
-        assert!(validar_lectura("SELECT * FROM productos WHERE id = ?").is_ok());
-        assert!(validar_lectura("with x as (select 1) select * from x").is_ok());
+    #[tokio::test]
+    async fn lectura_solo_select_y_solo_catalogo() {
+        let bd = Bd::memoria().await.unwrap();
+        sqlx::query("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES ('U', 'x', 'dueno', 'x')").execute(&bd.pool).await.unwrap();
+        // Las consultas que hoy hace la pantalla (src/db) siguen pasando.
+        for bien in [
+            "SELECT * FROM productos WHERE id = ?",
+            "SELECT p.*, d.nombre AS departamento, (SELECT group_concat(c.codigo, ' ') FROM codigos c WHERE c.producto_id = p.id) AS lista_codigos FROM productos p JOIN departamentos d ON d.id = p.departamento_id WHERE p.eliminado_en IS NULL LIMIT ? OFFSET ?",
+            "SELECT * FROM formas_pago WHERE eliminado_en IS NULL AND activo = 1 ORDER BY orden, nombre",
+            "SELECT * FROM bancos WHERE eliminado_en IS NULL",
+            "SELECT clave, valor FROM config ORDER BY clave",
+            "SELECT * FROM negocio WHERE id = 1",
+            "SELECT * FROM cajas WHERE id = ? AND eliminado_en IS NULL",
+            "with x as (select 1) select * from x",
+        ] {
+            let params: Vec<Value> = (0..bien.matches('?').count()).map(|_| Value::from(1)).collect();
+            bd.leer(&actor(Rol::Dueno), bien, &params).await.unwrap_or_else(|err| panic!("{bien}: {err}"));
+        }
         for malo in [
             "DELETE FROM productos",
             "SELECT 1; DROP TABLE ventas",
+            "SELECT * FROM productos; SELECT * FROM usuarios",
+            "INSERT INTO productos (id) VALUES ('x')",
             "SELECT pin_hash FROM usuarios",
             "SELECT * FROM clientes",
+            "SELECT * FROM \"Clientes\"",
+            "SELECT * FROM main.[usuarios]",
             "SELECT * FROM bitacora",
+            "SELECT SUM(total) FROM ventas",
+            "SELECT * FROM venta_lineas",
+            "SELECT * FROM productos p JOIN ventas v ON 1",
             "SELECT datos FROM ventas_espera",
-            "SELECT monto_esperado, diferencia FROM caja_turnos",
+            "SELECT * FROM caja_turnos",
             "SELECT ultimos4 FROM venta_pagos",
-            "SELECT destino FROM impresoras",
-            "SELECT * FROM gaveta_aperturas",
-            "SELECT total FROM caja_cortes",
+            "SELECT * FROM cuentas",
+            "SELECT * FROM abonos",
+            "SELECT * FROM impresoras",
+            "SELECT * FROM pragma_table_info('usuarios')",
             "PRAGMA key = 'x'",
             "ATTACH DATABASE 'x' AS y",
             "UPDATE config SET valor = '100' WHERE clave = 'descuento_max_pct'",
             "SELECT * FROM sqlite_master",
+            "SELECT * FROM _sqlx_migrations",
         ] {
-            assert!(validar_lectura(malo).is_err(), "debió rechazar: {malo}");
+            for rol in [Rol::Cajero, Rol::Dueno, Rol::Tecnico] {
+                assert!(bd.leer(&actor(rol), malo, &[]).await.is_err(), "debió rechazar: {malo}");
+            }
         }
-        // Ventas: el cajero no; el dueño sí (reportes, sincronización futura sin datos personales).
-        for sql in ["SELECT SUM(total) FROM ventas WHERE turno_id = 'x'", "SELECT SUM(l.total) FROM venta_lineas l", "WITH x AS (SELECT total FROM VENTAS) SELECT * FROM x"] {
-            assert!(validar_lectura(sql).is_ok());
-            assert!(validar_lectura_cajero(sql).is_err(), "{sql}");
-        }
+        // Cada rechazo queda en la bitácora (sin el SQL completo).
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'lectura.rechazada'").fetch_one(&bd.pool).await.unwrap();
+        assert!(n >= 24 * 3, "{n}");
+        // Una tabla nueva cualquiera queda fuera sin tocar la lista.
+        sqlx::query("CREATE TABLE tabla_nueva (x)").execute(&bd.pool).await.unwrap();
+        assert!(bd.leer(&actor(Rol::Dueno), "SELECT * FROM tabla_nueva", &[]).await.is_err());
     }
 
     #[tokio::test]

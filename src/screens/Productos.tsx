@@ -4,6 +4,7 @@ import { useSesion } from "../app/sesion";
 import { useConfirmar } from "../ui/Confirmar";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { listarDepartamentos } from "../db/departamentos";
+import { estadoInventario, type FilaInventario } from "../db/inventario";
 import { buscarProductos, marcarFavorito, marcarFavoritos, productoPorCodigo } from "../db/productos";
 import { monto } from "../lib/tickets";
 import { useEscaner } from "../lib/useEscaner";
@@ -14,6 +15,7 @@ import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
 import CodigoNuevo from "./productos/CodigoNuevo";
 import Importar, { type FiltroProductosImportados } from "./productos/Importar";
+import { EstadoBadge } from "./inventario/Existencias";
 import ProductoEditor from "./productos/ProductoEditor";
 
 const POR_PAGINA = 50;
@@ -34,6 +36,13 @@ export default function Productos() {
   const [importando, setImportando] = useState(false);
   const [error, setError] = useState("");
   const consulta = useRef(0);
+  // Existencia, mínimo y estado: solo para quien maneja inventario (el técnico no; el cajero no entra aquí).
+  const verInventario = puede("inventario");
+  const [inv, setInv] = useState<Record<string, FilaInventario>>({});
+  useEffect(() => {
+    if (!verInventario || !filas.length) return;
+    estadoInventario(filas.map((f) => f.id)).then((l) => setInv(Object.fromEntries(l.map((x) => [x.productoId, x]))), () => undefined);
+  }, [filas]);
 
   useEffect(() => {
     listarDepartamentos().then(setDepartamentos, (e) => setError(textoError(e)));
@@ -193,6 +202,13 @@ export default function Productos() {
               <th>Departamento</th>
               <th className="num">Precio</th>
               <th>Códigos</th>
+              {verInventario && (
+                <>
+                  <th className="num">Existencia</th>
+                  <th className="num">Mínimo</th>
+                  <th>Estado</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -220,6 +236,13 @@ export default function Productos() {
                 <td>{p.departamento}</td>
                 <td className="num">{monto(p.precio)}</td>
                 <td className="mono muted">{p.codigos.join(" ")}</td>
+                {verInventario && (
+                  <>
+                    <td className="num">{inv[p.id]?.controla ? inv[p.id].existencia : "—"}</td>
+                    <td className="num">{inv[p.id]?.minimo || "—"}</td>
+                    <td>{inv[p.id] && <EstadoBadge estado={inv[p.id].estado} />}</td>
+                  </>
+                )}
               </FilaClic>
             ))}
           </tbody>

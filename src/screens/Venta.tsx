@@ -14,7 +14,8 @@ import PinDueno from "../components/PinDueno";
 import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
-import { autorizarDescuento, cobrarVenta, type ResultadoCobro } from "../db/ventas";
+import { existenciaVenta } from "../db/inventario";
+import { autorizarDescuento, cobrarVenta, SIN_EXISTENCIA, type ResultadoCobro } from "../db/ventas";
 import { conMiles, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
@@ -49,6 +50,7 @@ export default function Venta() {
   const [lineaSel, setLineaSel] = useState<string | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [pendiente, setPendiente] = useState<EstadoEspera | null>(null); // cambio que espera PIN de dueño
+  const [sinExistencia, setSinExistencia] = useState<{ pagos: PagoEntrada[]; mensaje: string } | null>(null);
   const [cobrada, setCobrada] = useState<(ResultadoCobro & { errorImpresion?: string; errorGaveta?: string }) | null>(null);
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
@@ -56,6 +58,15 @@ export default function Venta() {
   const tabs = useEsperas(setError);
   const { esperas, activa, activaId, setActivaId, actual, actualizar } = tabs;
   const { productos, total: totalCatalogo, cargando, buscando, sel, setSel, orden, cambiarOrden, grilla, finGrilla, alternarFavorito } = useCatalogo(texto, filtro, setError);
+  // Existencia en las tarjetas: solo si la configuración lo pide (por defecto no, para no saturar).
+  const [existencias, setExistencias] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!config.venta_mostrar_existencia || !productos.length) return setExistencias({});
+    existenciaVenta(productos.slice(0, 500).map((p) => p.id)).then(
+      (l) => setExistencias(Object.fromEntries(l.map((x) => [x.productoId, x.existencia]))),
+      () => setExistencias({}),
+    );
+  }, [productos, config.venta_mostrar_existencia]);
 
   const estado = activa?.estado ?? estadoVacio();
   const t = useMemo(() => calcularTotales(estado, config.redondeo_total), [estado, config.redondeo_total]);
@@ -184,9 +195,18 @@ export default function Venta() {
 
   // ── Cobro
   // La venta ya quedó guardada al cobrar: si la impresora o la gaveta fallan, se avisa y se sigue.
-  async function cobrar(pagos: PagoEntrada[]) {
+  async function cobrar(pagos: PagoEntrada[], pinExistencia?: string) {
     if (!activa) return;
-    const r = await cobrarVenta(actor, activa.id, estado, pagos);
+    let r: ResultadoCobro;
+    try {
+      r = await cobrarVenta(actor, activa.id, estado, pagos, pinExistencia);
+    } catch (e) {
+      // Sin existencia y la configuración no deja vender así: el dueño autoriza con su PIN.
+      const m = e instanceof Error ? e.message : "";
+      if (!pinExistencia && m.startsWith(SIN_EXISTENCIA)) return setSinExistencia({ pagos, mensaje: m.slice(SIN_EXISTENCIA.length) });
+      throw e;
+    }
+    setSinExistencia(null);
     let errorImpresion: string | undefined;
     let errorGaveta: string | undefined;
     if (config.imprime_tiquete) {
@@ -409,11 +429,11 @@ export default function Venta() {
               <button
                 className={["tile", buscando && i === sel ? "sel" : "", enVenta.has(p.id) ? "en-venta" : ""].join(" ")}
                 onClick={() => (agregarProducto(p), alBuscador())}
-                aria-label={`Agregar ${p.nombre}, ${monto(p.precio)}`}
+                aria-label={`Agregar ${p.nombre}, ${monto(p.precio)}${p.id in existencias ? (existencias[p.id] > 0 ? `, hay ${existencias[p.id]}` : ", agotado") : ""}`}
               >
                 <span className="tile-nombre">{p.nombre}</span>
                 <span className="tile-pie">
-                  <span className="tile-dep">{p.departamento}</span>
+                  <span className="tile-dep">{p.id in existencias ? (existencias[p.id] > 0 ? `Hay ${existencias[p.id]}` : "Agotado") : p.departamento}</span>
                   <span className="tile-precio">{monto(p.precio)}</span>
                 </span>
               </button>
@@ -562,6 +582,9 @@ export default function Venta() {
         <NoVenta motivos={caja.noVentaMotivos} onCerrar={() => (setDialogo(null), alBuscador())} onListo={() => (setDialogo(null), toast.ok("Gaveta abierta. Quedó anotado."), alBuscador())} />
       )}
       {dialogo === "cobro" && <Cobro total={t.total} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
+      {sinExistencia && (
+        <PinDueno motivo={sinExistencia.mensaje} onCerrar={() => setSinExistencia(null)} onPin={(pin) => cobrar(sinExistencia.pagos, pin)} />
+      )}
       {pendiente && (
         <PinDueno
           motivo={`El descuento (${calcularTotales(pendiente, config.redondeo_total).pctDescuento.toFixed(1)} %) pasa su máximo de ${tope} %.`}

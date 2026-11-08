@@ -45,6 +45,7 @@ const DUENO: &[&str] = &[
     "respaldo",
     "facturas",
     "impresoras",
+    "inventario",
 ];
 // El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
 const TECNICO: &[&str] = &[

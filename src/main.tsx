@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import ErrorPantalla from "./components/ErrorPantalla";
 import "@fontsource-variable/public-sans";
 import "./styles.css";
 
@@ -20,6 +21,8 @@ window.addEventListener("drop", (e) => e.preventDefault());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <ErrorPantalla todo>
+      <App />
+    </ErrorPantalla>
   </React.StrictMode>,
 );

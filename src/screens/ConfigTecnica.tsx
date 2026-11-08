@@ -189,6 +189,7 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   caja: "Caja: abrir, movimientos, no venta, cerrar (conteo ciego)",
   "caja.admin": "Caja: totales en vivo, cortes, todos los turnos, reabrir, anular",
   impresoras: "Impresoras y gaveta",
+  inventario: "Inventario: existencias, entradas, ajustes, conteos, costos",
 };
 
 function Permisos() {

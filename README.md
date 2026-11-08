@@ -1,8 +1,20 @@
-# Punto de Venta (fase 1)
+# Punto de Venta
 
 App de escritorio (Tauri v2 + React + TypeScript + SQLite) para Librería y Bazar Chagui, pensada para reutilizarse en otros negocios: lo que cambia entre negocios es **configuración**, no código.
 
-Fase 1: base de datos, usuarios y roles, datos del negocio, catálogo, importación CSV, códigos internos y etiquetas. La venta llega en la fase 2. El prototipo de hardware quedó dentro de **Configuración → Hardware**.
+## Fases
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| 0. Prototipo de hardware | Lector, POS-58, code pages, gaveta; elegir Tauri (quedó en **Configuración → Hardware**) | ✅ Hecho |
+| 1. Base | Base de datos, roles, datos del negocio, catálogo, importación CSV, códigos internos, etiquetas | ✅ Hecho |
+| 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, pendientes de factura, seguridad | 🟡 Casi completa |
+| 3. Apartados y créditos | Apartados con abonos (Chaguí) y crédito (otros negocios), según banderas por negocio | ⏳ Siguiente |
+| 4. Inventario | Existencias, entradas de mercadería, ajustes con motivo, mínimos y alertas, venta sin stock configurable | ⏳ |
+| 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ |
+| 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ |
+
+Fuera de este alcance (módulos aparte): factura electrónica de Hacienda, sincronización con la nube o varias cajas en red, crédito (fiado) para Chaguí.
 
 ## Comandos
 

@@ -196,6 +196,11 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
             sin_vuelto += p.monto;
         }
     }
+    // Venta de ¢0 (regalo, descuento total): sin dinero. Si no, el efectivo "recibido" abre la
+    // gaveta sin venta real (una "no venta" que no quedaría registrada como tal).
+    if total == 0 && !entradas.is_empty() {
+        errores.push("La venta es de ¢0: no reciba dinero. Borre el monto del pago".into());
+    }
     if sin_vuelto > total {
         errores.push("Tarjeta, SINPE y transferencia no dan vuelto: no pueden pasar del total".into());
     }
@@ -236,6 +241,14 @@ mod tests {
     }
     fn p(f: &str, m: i64) -> PagoEntrada {
         PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None }
+    }
+
+    #[test]
+    fn venta_de_cero_sin_dinero() {
+        // Sin pagos: se registra (regalo o descuento total).
+        assert!(pagos(0, &[], &formas()).errores.is_empty());
+        // Con efectivo "recibido": rechazada (abriría la gaveta sin venta real).
+        assert!(pagos(0, &[p("EF", 1000)], &formas()).errores.iter().any(|e| e.contains("¢0")));
     }
 
     #[test]

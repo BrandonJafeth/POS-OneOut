@@ -43,9 +43,12 @@ export interface ResultadoCobro {
   abrirGaveta: boolean;
 }
 
+/** Rust rechaza el cobro con este prefijo si falta existencia y la configuración no deja vender sin ella. */
+export const SIN_EXISTENCIA = "SIN_EXISTENCIA: ";
+
 /** Sin caja abierta de hoy, Rust lo rechaza ("La caja está cerrada…"). */
-export function cobrarVenta(_actor: Actor, esperaId: string, estado: EstadoEspera, pagos: PagoEntrada[]): Promise<ResultadoCobro> {
-  return invocar<ResultadoCobro>("venta_cobrar", { esperaId, estado, pagos });
+export function cobrarVenta(_actor: Actor, esperaId: string, estado: EstadoEspera, pagos: PagoEntrada[], pinExistencia?: string): Promise<ResultadoCobro> {
+  return invocar<ResultadoCobro>("venta_cobrar", { esperaId, estado, pagos, pinExistencia: pinExistencia ?? null });
 }
 
 // ─────────── Consultas ───────────

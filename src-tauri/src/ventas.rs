@@ -15,6 +15,7 @@ use crate::bitacora;
 use crate::caja::{self, Turno};
 use crate::calculo::{self, Estado, Forma, PagoEntrada};
 use crate::config;
+use crate::inventario;
 use crate::permisos::{puede, sin_permiso, Rol};
 use crate::sesion::Actor;
 use crate::usuarios;
@@ -247,7 +248,14 @@ pub struct ResultadoCobro {
     pub abrir_gaveta: bool,
 }
 
+#[cfg(test)]
 pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada]) -> Res<ResultadoCobro> {
+    cobrar_con(pool, a, caja_id, espera_id, est, pagos, None).await
+}
+
+/// `pin_existencia`: PIN del dueño para vender sin existencia cuando la configuración no lo permite
+/// (la pantalla lo pide al recibir el error SIN_EXISTENCIA y reintenta).
+pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>) -> Res<ResultadoCobro> {
     a.exigir("venta", "vender")?;
     if est.lineas.is_empty() {
         return Err("La venta no tiene productos".into());
@@ -258,6 +266,11 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
     let paso = config::entero(pool, "redondeo_total", 5).await;
     let tope = tope_descuento(pool, a.rol).await;
     let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
+    // El PIN se revisa antes de la transacción (la verificación escribe intentos fallidos).
+    let sin_existencia_por = match pin_existencia.filter(|p| !p.is_empty()) {
+        Some(pin) => Some(usuarios::autorizar_dueno(pool, pin, "vender sin existencia", &a.id).await?),
+        None => None,
+    };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
 
@@ -289,6 +302,17 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
         }
     }
     let e2 = Estado { lineas, ..est.clone() };
+    // Inventario: precio libre (sin producto) y servicios (sin control) no mueven existencia.
+    let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
+    let controladas = inventario::controladas(&mut tx, &e2.lineas.iter().map(|l| (l.producto_id.clone(), l.cantidad)).collect::<Vec<_>>()).await?;
+    let mut sin_existencia = vec![];
+    if !config::booleano_con(&mut tx, "permitir_vender_sin_existencia", true).await {
+        let ve_cantidad = puede(a.rol, "inventario") || config::booleano_con(&mut tx, "venta_mostrar_existencia", false).await;
+        sin_existencia = inventario::faltantes(&mut tx, &sucursal, &controladas, ve_cantidad).await?;
+        if !sin_existencia.is_empty() && sin_existencia_por.is_none() {
+            return Err(format!("{}No hay existencia de: {}. Para vender igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, sin_existencia.join(", ")));
+        }
+    }
     let tot = calculo::totales(&e2, paso);
     let mut autorizado_por = None;
     if tot.pct_descuento > tope + 1e-9 {
@@ -412,6 +436,10 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
         .execute(&mut *tx)
         .await
         .map_err(e)?;
+    inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
+    if !sin_existencia.is_empty() {
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
+    }
     if let Some(d) = &autorizado_por {
         bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (tot.pct_descuento * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
     }
@@ -856,6 +884,9 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         .await
         .map_err(e)?;
     let mut det = json!({"numero": numero, "total": total, "motivo": motivo, "autorizadoPor": dueno});
+    // Devuelve al inventario lo que la venta sacó, ligado a la venta original.
+    let turno_anulacion = actual.as_ref().map(|t| t.id.clone()).or(v.get::<Option<String>, _>("turno_id"));
+    inventario::devolver_anulacion(&mut tx, venta_id, &a.id, turno_anulacion.as_deref(), &ahora).await?;
     if let Some(actual) = actual {
         if !(0..=total).contains(&devolucion_efectivo) {
             return Err("La devolución no puede pasar del total de la venta".into());

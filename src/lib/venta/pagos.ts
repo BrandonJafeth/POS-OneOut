@@ -38,6 +38,8 @@ export function calcularPagos(total: number, pagos: PagoEntrada[], formas: Forma
     if (p.ultimos4 && !(f.pideUltimos4 && /^\d{4}$/.test(p.ultimos4))) errores.push(`${f.nombre}: los últimos 4 dígitos son 4 números`);
     if (!f.daVuelto) sinVuelto += p.monto;
   }
+  // Igual que calculo.rs: una venta de ¢0 no recibe dinero (abriría la gaveta sin venta real).
+  if (total === 0 && pagos.some((p) => p.monto > 0)) errores.push("La venta es de ¢0: no reciba dinero. Borre el monto del pago");
   if (sinVuelto > total) errores.push("Tarjeta, SINPE y transferencia no dan vuelto: no pueden pasar del total");
 
   const pagado = pagos.reduce((s, p) => s + (Number.isFinite(p.monto) ? p.monto : 0), 0);
