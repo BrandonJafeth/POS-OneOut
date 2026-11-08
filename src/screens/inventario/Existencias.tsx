@@ -111,7 +111,7 @@ export default function Existencias() {
           <thead>
             <tr>
               <th>Producto</th>
-              <th>Departamento</th>
+              <th className="col-sec">Departamento</th>
               <th>Estado</th>
               <th className="num">Existencia</th>
               <th className="num">Mínimo</th>
@@ -124,11 +124,11 @@ export default function Existencias() {
           <tbody>
             {filas.map((f) => (
               <tr key={f.productoId}>
-                <td>
+                <td className="nombre-celda">
                   <strong>{f.nombre}</strong>
                   {f.codigos && <div className="muted mono">{f.codigos}</div>}
                 </td>
-                <td>{f.departamento}</td>
+                <td className="col-sec">{f.departamento}</td>
                 <td>
                   <EstadoBadge estado={f.estado} />
                 </td>
@@ -136,14 +136,14 @@ export default function Existencias() {
                 <td className="num">{f.minimo || "—"}</td>
                 <td className="num">{f.costo == null ? "—" : monto(f.costo)}</td>
                 <td>
-                  <div className="row" style={{ flexWrap: "nowrap", gap: 8 }}>
-                    <Button icono={SlidersHorizontal} onClick={() => setDialogo({ tipo: "ajuste", fila: f })} aria-label={`Ajustar ${f.nombre}`}>
+                  <div className="acciones">
+                    <Button icono={SlidersHorizontal} title="Ajustar existencia" onClick={() => setDialogo({ tipo: "ajuste", fila: f })} aria-label={`Ajustar ${f.nombre}`}>
                       Ajustar
                     </Button>
-                    <Button icono={History} onClick={() => setDialogo({ tipo: "kardex", fila: f })} aria-label={`Kardex de ${f.nombre}`}>
+                    <Button icono={History} title="Kardex" onClick={() => setDialogo({ tipo: "kardex", fila: f })} aria-label={`Kardex de ${f.nombre}`}>
                       Kardex
                     </Button>
-                    <Button icono={Save} onClick={() => setDialogo({ tipo: "ficha", fila: f })} aria-label={`Mínimo y costo de ${f.nombre}`}>
+                    <Button icono={Save} title="Mínimo y costo" onClick={() => setDialogo({ tipo: "ficha", fila: f })} aria-label={`Mínimo y costo de ${f.nombre}`}>
                       Mínimo y costo
                     </Button>
                   </div>

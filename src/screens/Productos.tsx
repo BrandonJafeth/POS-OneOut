@@ -203,9 +203,9 @@ export default function Productos() {
                 <span className="sr-only">Favorito</span>
               </th>
               <th>Nombre</th>
-              <th>Departamento</th>
+              <th className="col-sec">Departamento</th>
               <th className="num">Precio</th>
-              <th>Códigos</th>
+              <th className="col-sec">Códigos</th>
               {verInventario && (
                 <>
                   <th className="num">Existencia</th>
@@ -236,10 +236,10 @@ export default function Productos() {
                     <Star size={18} aria-hidden />
                   </button>
                 </td>
-                <td>{p.nombre}</td>
-                <td>{p.departamento}</td>
+                <td className="nombre-celda">{p.nombre}</td>
+                <td className="col-sec">{p.departamento}</td>
                 <td className="num">{monto(p.precio)}</td>
-                <td className="mono muted">{p.codigos.join(" ")}</td>
+                <td className="mono muted col-sec">{p.codigos.join(" ")}</td>
                 {verInventario && (
                   <>
                     <td className="num">{inv[p.id]?.controla ? inv[p.id].existencia : "—"}</td>

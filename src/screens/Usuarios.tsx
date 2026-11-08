@@ -65,20 +65,21 @@ export default function Usuarios() {
                 <td className="acciones">
                   {administrable(u) && (
                     <>
-                      <Button icono={Pencil} onClick={() => setDialogo({ tipo: "nombre", usuario: u })}>
+                      <Button icono={Pencil} title="Renombrar" onClick={() => setDialogo({ tipo: "nombre", usuario: u })}>
                         Renombrar
                       </Button>
-                      <Button icono={KeyRound} onClick={() => setDialogo({ tipo: "pin", usuario: u })}>
+                      <Button icono={KeyRound} title="Cambiar PIN" onClick={() => setDialogo({ tipo: "pin", usuario: u })}>
                         Cambiar PIN
                       </Button>
                       {u.id !== yo.id && (
                         <>
-                          <Button icono={Power} onClick={() => accion(() => editarUsuario(actor, u.id, { activo: !u.activo }))}>
+                          <Button icono={Power} title={u.activo ? "Desactivar" : "Activar"} onClick={() => accion(() => editarUsuario(actor, u.id, { activo: !u.activo }))}>
                             {u.activo ? "Desactivar" : "Activar"}
                           </Button>
                           <Button
                             variante="peligro"
                             icono={Trash2}
+                            title="Eliminar"
                             onClick={async () =>
                               (await confirmar({ titulo: `¿Eliminar a ${u.nombre}?`, texto: "Ya no podrá entrar. Sus ventas quedan registradas.", aceptar: "Eliminar usuario", peligro: true })) &&
                               accion(() => eliminarUsuario(actor, u.id))

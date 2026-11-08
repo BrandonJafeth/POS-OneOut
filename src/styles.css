@@ -3225,3 +3225,112 @@ button.toast-cerrar:hover {
 td.linea-producto {
   font-weight: 650;
 }
+
+/* ───────── Ventana angosta (escritorio de 1024 a 1280 px) ─────────
+   La app se usa maximizada en monitores de 1366 px o más, pero también en ventana o en pantallas
+   chicas. Nada se esconde del todo: el menú queda en íconos (con su nombre al pasar el mouse y
+   para el lector de pantalla) y las tablas se acomodan al ancho de SU tarjeta. */
+
+@media (max-width: 1280px) {
+  .app {
+    grid-template-columns: 76px 1fr;
+  }
+
+  .lateral {
+    padding: var(--e3) var(--e2);
+  }
+
+  .lateral-marca,
+  .lateral-usuario {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* El texto se oculta con font-size 0: sigue siendo el nombre accesible del botón. */
+  .nav-item {
+    position: relative;
+    justify-content: center;
+    padding: var(--e2);
+  }
+
+  .nav-item .btn-texto {
+    flex: none;
+    font-size: 0;
+  }
+
+  .nav-item .nav-contador {
+    position: absolute;
+    top: 3px;
+    right: 6px;
+    min-width: 18px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .caja-indicador {
+    justify-content: center;
+    min-height: 44px;
+    padding: var(--e2);
+  }
+
+  .caja-indicador .punto {
+    width: 12px;
+    height: 12px;
+  }
+
+  .caja-indicador .caja-texto {
+    font-size: 0;
+  }
+
+  .contenido {
+    padding: var(--e4);
+  }
+}
+
+/* Tablas: la tarjeta mide su ancho. Si aun así no cabe, la tabla se desliza dentro de la tarjeta
+   (nunca la página entera ni los botones cortados contra el borde). */
+.card:has(> .tbl),
+.card:has(> .tabla-scroll) {
+  container-type: inline-size;
+  overflow-x: auto;
+}
+
+/* El nombre no se parte en tres líneas por culpa de las columnas de al lado. */
+.tbl td.nombre-celda {
+  min-width: 13em;
+}
+
+.tbl .acciones {
+  flex-wrap: nowrap;
+}
+
+/* Poco ancho: los botones de la fila quedan solo con su ícono (el texto sigue para el lector de
+   pantalla y el nombre aparece al pasar el mouse). */
+@container (max-width: 1150px) {
+  .acciones .btn:has(> svg) {
+    width: 44px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .acciones .btn:has(> svg) .btn-texto {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* Menos ancho todavía: fuera las columnas secundarias (el dato sigue en el detalle o en la ficha). */
+@container (max-width: 960px) {
+  .tbl .col-sec {
+    display: none;
+  }
+}

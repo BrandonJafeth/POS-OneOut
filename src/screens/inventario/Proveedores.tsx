@@ -45,7 +45,7 @@ export default function Proveedores() {
                 <td>{p.telefono}</td>
                 <td>{p.notas}</td>
                 <td>
-                  <div className="row" style={{ flexWrap: "nowrap", gap: 8 }}>
+                  <div className="acciones">
                     <Button onClick={() => setEditando(p)} aria-label={`Editar ${p.nombre}`}>
                       Editar
                     </Button>

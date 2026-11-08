@@ -267,12 +267,21 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     config: <ConfigTecnica />,
   };
 
+  const textoCaja = !caja?.turno
+    ? "Caja cerrada"
+    : caja.deOtroDia
+      ? `Caja abierta desde el ${caja.turno.dia}`
+      : caja.puedeUsar
+        ? `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
+        : `Caja de ${caja.turno.usuarioApertura.split(" ")[0]} · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`;
+
   const boton = (s: Seccion) => (
     <Button
       key={s.id}
       icono={s.icono}
       className={pagina === s.id ? "nav-item activo" : "nav-item"}
       aria-current={pagina === s.id ? "page" : undefined}
+      title={s.texto}
       onClick={() => setPagina(s.id)}
     >
       {s.texto}
@@ -295,15 +304,13 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
         <aside className="lateral" aria-label="Menú">
           <div className="lateral-marca">{p.nombreNegocio || "Punto de venta"}</div>
           {usaCaja && caja && (
-            <button className={caja.turno && !caja.deOtroDia && caja.puedeUsar ? "caja-indicador abierta" : "caja-indicador"} onClick={() => setPagina("caja")}>
+            <button
+              className={caja.turno && !caja.deOtroDia && caja.puedeUsar ? "caja-indicador abierta" : "caja-indicador"}
+              title={textoCaja}
+              onClick={() => setPagina("caja")}
+            >
               <span className="punto" aria-hidden />
-              {caja.turno
-                ? caja.deOtroDia
-                  ? `Caja abierta desde el ${caja.turno.dia}`
-                  : caja.puedeUsar
-                    ? `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
-                    : `Caja de ${caja.turno.usuarioApertura.split(" ")[0]} · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
-                : "Caja cerrada"}
+              <span className="caja-texto">{textoCaja}</span>
             </button>
           )}
           <nav aria-label="Principal">{principal.map(boton)}</nav>
@@ -317,7 +324,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
               <strong>{p.usuario.nombre}</strong>
               <div className="muted">{ROL_NOMBRE[p.usuario.rol]}</div>
             </div>
-            <Button icono={p.config.tema === "oscuro" ? Sun : Moon} className="nav-item" onClick={cambiarTema}>
+            <Button icono={p.config.tema === "oscuro" ? Sun : Moon} className="nav-item" title={p.config.tema === "oscuro" ? "Tema claro" : "Tema oscuro"} onClick={cambiarTema}>
               {p.config.tema === "oscuro" ? "Tema claro" : "Tema oscuro"}
             </Button>
             <Button
