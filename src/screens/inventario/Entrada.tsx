@@ -58,9 +58,13 @@ export default function EntradaMercaderia() {
 
   async function porCodigo(codigo: string) {
     setError("");
-    const p = await productoPorCodigo(codigo);
-    if (p) agregar(p);
-    else setError(`No hay ningún producto con el código ${codigo}. Créelo en Productos.`);
+    try {
+      const p = await productoPorCodigo(codigo);
+      if (p) agregar(p);
+      else setError(`No hay ningún producto con el código ${codigo}. Créelo en Productos.`);
+    } catch (e) {
+      setError(textoError(e));
+    }
   }
   useEscaner((c) => void porCodigo(c), { activo: !hecha, debounceMs: config.escaner_debounce_ms });
 

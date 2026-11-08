@@ -16,6 +16,7 @@ import {
   obtenerProducto,
   quitarCodigo,
 } from "../../db/productos";
+import { estadoInventario } from "../../db/inventario";
 import { isValidEan13 } from "../../lib/ean13";
 import { leerMontoEntero } from "../../lib/texto";
 import { colones } from "../../lib/tickets";
@@ -39,7 +40,7 @@ interface Props {
 }
 
 export default function ProductoEditor({ productoId, departamentos, codigoInicial, onCerrar, onCambio }: Props) {
-  const { actor, config } = useSesion();
+  const { actor, config, puede } = useSesion();
   const confirmar = useConfirmar();
   const [id, setId] = useState(productoId);
   const [prod, setProd] = useState<ProductoConCodigos | null>(null);
@@ -162,7 +163,10 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
 
   async function eliminar() {
     if (!id) return;
-    if (!(await confirmar({ titulo: `¿Eliminar "${nombre}"?`, texto: "Deja de aparecer en el catálogo y en la venta. Las ventas anteriores no cambian.", aceptar: "Eliminar producto", peligro: true }))) return;
+    // Si tiene unidades, que el dueño sepa que dejan de contarse en el inventario.
+    const inv = puede("inventario") ? (await estadoInventario([id]).catch(() => []))[0] : undefined;
+    const conUnidades = inv?.controla && inv.existencia !== 0 ? ` Tiene ${inv.existencia} unidad(es) en inventario: dejan de contarse en el inventario valorizado (su kardex se conserva).` : "";
+    if (!(await confirmar({ titulo: `¿Eliminar "${nombre}"?`, texto: `Deja de aparecer en el catálogo y en la venta. Las ventas anteriores no cambian.${conUnidades}`, aceptar: "Eliminar producto", peligro: true }))) return;
     try {
       await eliminarProducto(actor, id);
       onCambio();

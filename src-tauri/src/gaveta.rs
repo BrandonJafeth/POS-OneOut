@@ -45,9 +45,22 @@ pub async fn por_venta(pool: &SqlitePool, a: &Actor, venta_id: &str) -> Res<()> 
     let comp = caja::compartido(&mut tx).await;
     caja::puede_operar(a, &t, comp)?;
     sqlx::query("UPDATE ventas SET gaveta_abierta_en = ? WHERE id = ?").bind(ahora_iso()).bind(venta_id).execute(&mut *tx).await.map_err(e)?;
-    impresoras::pulso_gaveta(&mut tx, &caja_id).await?;
-    tx.commit().await.map_err(e)?;
-    Ok(())
+    let r = impresoras::pulso_gaveta(&mut tx, &caja_id).await;
+    cerrar(tx, r).await
+}
+
+/// Termina la apertura: si el pulso salió, se guarda. Si la impresora no contestó a tiempo, el pulso
+/// pudo llegar tarde y abrir la gaveta: se guarda igual (nunca una apertura sin registro) y se avisa.
+/// Si falló de otra forma (sin impresora, desconectada), no se abrió: no queda nada.
+async fn cerrar(tx: sqlx::Transaction<'_, sqlx::Sqlite>, r: Res<()>) -> Res<()> {
+    match r {
+        Ok(()) => tx.commit().await.map_err(e),
+        Err(m) if m.contains(impresoras::SIN_RESPUESTA) => {
+            tx.commit().await.map_err(e)?;
+            Err(format!("{m} Si la gaveta se abrió, quedó registrado."))
+        }
+        Err(m) => Err(m),
+    }
 }
 
 /// "No venta": abrir la gaveta sin vender (cambiar billetes…), con un motivo de la lista.
@@ -80,10 +93,9 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
     .await
     .map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "gaveta.no_venta", "caja_turno", Some(&t.id), &json!({"aperturaId": id, "motivo": motivo, "nota": nota})).await?;
-    // Si la gaveta no abre, no queda registro (la transacción se deshace).
-    impresoras::pulso_gaveta(&mut tx, caja_id).await?;
-    tx.commit().await.map_err(e)?;
-    Ok(())
+    // Si la gaveta no abre, no queda registro (la transacción se deshace); ver cerrar().
+    let r = impresoras::pulso_gaveta(&mut tx, caja_id).await;
+    cerrar(tx, r).await
 }
 
 /// Orden del dueño: abre la gaveta con su PIN (sirve aunque la caja esté cerrada).
@@ -115,9 +127,8 @@ pub async fn orden_dueno(pool: &SqlitePool, a: &Actor, caja_id: &str, pin: &str,
     .await
     .map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "gaveta.orden_dueno", "caja", Some(caja_id), &json!({"aperturaId": id, "turnoId": turno, "motivo": motivo, "autorizadoPor": dueno})).await?;
-    impresoras::pulso_gaveta(&mut tx, caja_id).await?;
-    tx.commit().await.map_err(e)?;
-    Ok(())
+    let r = impresoras::pulso_gaveta(&mut tx, caja_id).await;
+    cerrar(tx, r).await
 }
 
 #[derive(Serialize, Debug)]

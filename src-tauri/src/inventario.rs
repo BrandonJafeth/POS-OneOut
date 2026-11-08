@@ -1044,15 +1044,16 @@ mod tests {
 
     async fn prod(p: &SqlitePool, nombre: &str, controla: bool) -> String {
         let id = ulid();
-        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio, controla_inventario) VALUES (?, ?, ?, ?, 1000, ?)")
+        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, ?, ?, ?, 1000)")
             .bind(&id)
             .bind(nombre)
             .bind(nombre.to_lowercase())
             .bind(DEP)
-            .bind(controla as i64)
             .execute(p)
             .await
             .unwrap();
+        // Nuevo = sin control (migración 12); aquí se fija a mano lo que pide cada prueba.
+        sqlx::query("UPDATE productos SET controla_inventario = ? WHERE id = ?").bind(controla as i64).bind(&id).execute(p).await.unwrap();
         id
     }
 
@@ -1361,6 +1362,25 @@ mod tests {
             .await;
         assert!(r.is_err());
         cuadra(p).await;
+    }
+
+    #[tokio::test]
+    async fn producto_nuevo_controla_solo_con_su_primer_codigo_de_barras() {
+        let (bd, _, dueno, _) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let controla = |id: &'static str| async move { sqlx::query_scalar::<_, i64>("SELECT controla_inventario FROM productos WHERE id = ?").bind(id).fetch_one(p).await.unwrap() };
+        for id in ["SERV", "LAPIZ"] {
+            sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, 'x', 'x', ?, 100)").bind(id).bind(DEP).execute(p).await.unwrap();
+        }
+        // Servicio con código interno: sin control (el cajero lo vende aunque no haya "existencia").
+        sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('imp01', 'SERV', 'interno')").execute(p).await.unwrap();
+        assert_eq!(controla("SERV").await, 0);
+        sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7401234567895', 'LAPIZ', 'barras')").execute(p).await.unwrap();
+        assert_eq!(controla("LAPIZ").await, 1);
+        // El dueño lo apaga: un segundo código de barras no lo vuelve a encender.
+        producto_guardar(p, &dueno, "LAPIZ", false, 0, None).await.unwrap();
+        sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7409999999995', 'LAPIZ', 'barras')").execute(p).await.unwrap();
+        assert_eq!(controla("LAPIZ").await, 0);
     }
 
     #[tokio::test]

@@ -271,12 +271,34 @@ pub async fn ajustes(pool: &SqlitePool, caja_id: &str, documento: &str) -> Res<O
     }))
 }
 
+/// Marca del error de una impresora que no contestó a tiempo (el trabajo pudo salir igual, tarde).
+pub const SIN_RESPUESTA: &str = "no contestó a tiempo";
+#[cfg(not(test))]
+const LIMITE_IMPRESION: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+const LIMITE_IMPRESION: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Corre el envío en otro hilo y espera como mucho LIMITE_IMPRESION. Se imprime dentro de una
+/// transacción: sin límite, una impresora USB trabada (sin papel, colgada) dejaba la base tomada y
+/// ningún cobro podía guardarse. shortcut: el hilo trabado queda esperando al driver; se libera al reiniciar.
+fn con_limite(i: &Impresora, datos: &[u8]) -> Res<()> {
+    let (conexion, destino, baudios, datos) = (i.conexion.clone(), i.destino.clone(), i.baudios as u32, datos.to_vec());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(printer::enviar(&conexion, &destino, baudios, &datos));
+    });
+    rx.recv_timeout(LIMITE_IMPRESION).unwrap_or_else(|_| Err(SIN_RESPUESTA.into()))
+}
+
 /// Manda bytes YA validados a una impresora. Error en palabras simples (con detalle opcional).
 fn mandar(i: &Impresora, datos: &[u8], con_detalle: bool) -> Res<()> {
     if !printer::detectar().contains(&i.conexion, &i.destino) {
         return Err(format!("No se encuentra la impresora «{}». Revise que esté conectada y encendida.", i.nombre));
     }
-    printer::enviar(&i.conexion, &i.destino, i.baudios as u32, datos).map_err(|err| {
+    con_limite(i, datos).map_err(|err| {
+        if err == SIN_RESPUESTA {
+            return format!("La impresora «{}» {SIN_RESPUESTA}. Revise que tenga papel y esté bien conectada; puede que el trabajo salga con atraso.", i.nombre);
+        }
         let base = format!("La impresora «{}» no respondió. Revise que esté encendida, con papel y bien conectada.", i.nombre);
         if con_detalle {
             format!("{base} Detalle: {err}")
@@ -343,6 +365,34 @@ pub mod tests {
         }
         asignar(p, dueno, CAJA_1, "etiqueta", Some(&ib)).await.unwrap();
         (a, b)
+    }
+
+    #[tokio::test]
+    async fn impresora_trabada_no_traba_la_caja_y_la_gaveta_queda_registrada() {
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let (a, _) = dos_impresoras(p, &dueno, "TRABA").await;
+        crate::caja::abrir(p, &cajero, CAJA_1, &crate::caja::tests::conteo(&[(1000, 5)])).await.unwrap();
+        printer::simulada::trabar(&a, true);
+        // El envío vuelve a tiempo con un mensaje claro, sin esperar al driver.
+        let antes = std::time::Instant::now();
+        let err = enviar(p, CAJA_1, "tiquete", b"Hola\n").await.unwrap_err();
+        assert!(err.contains(SIN_RESPUESTA) && err.contains("papel"), "{err}");
+        assert!(antes.elapsed() < std::time::Duration::from_secs(1));
+        // La gaveta no confirmó pero pudo abrirse: la apertura queda registrada (nunca sin rastro).
+        let err = crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.unwrap_err();
+        assert!(err.contains("quedó registrado"), "{err}");
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas").fetch_one(p).await.unwrap();
+        assert_eq!(n, 1);
+        // Mientras tanto la base sigue libre: se puede escribir.
+        crate::ventas::crear_espera(p, &cajero, CAJA_1, &Default::default()).await.unwrap();
+        // Impresora apagada (no recibió nada): la apertura NO se registra.
+        printer::simulada::trabar(&a, false);
+        printer::simulada::apagar(&a, true);
+        assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.is_err());
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas").fetch_one(p).await.unwrap();
+        assert_eq!(n, 1);
+        printer::simulada::apagar(&a, false);
     }
 
     #[tokio::test]

@@ -18,6 +18,7 @@ describe("calcularPagos", () => {
   it("venta de ¢0: sin pagos sí, con dinero no (abriría la gaveta)", () => {
     expect(calcularPagos(0, [], formas).ok).toBe(true);
     expect(calcularPagos(0, [pago("EF", 1000)], formas).errores.join()).toMatch(/¢0/);
+    expect(calcularPagos(500, [pago("TJ", 500), pago("EF", 1000)], formas).errores.join()).toMatch(/quite el efectivo/);
   });
   it("últimos 4 solo en la forma que los pide", () => {
     expect(calcularPagos(500, [pago("TJ", 500, "1234")], formas).ok).toBe(true);

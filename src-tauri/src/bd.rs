@@ -36,6 +36,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (9, "turno_compartido_cierre", include_str!("../../src/db/migraciones/0009_turno_compartido_cierre.sql")),
     (10, "da_vuelto_con_turno", include_str!("../../src/db/migraciones/0010_da_vuelto_con_turno.sql")),
     (11, "inventario", include_str!("../../src/db/migraciones/0011_inventario.sql")),
+    (12, "control_por_codigo", include_str!("../../src/db/migraciones/0012_control_por_codigo.sql")),
 ];
 
 #[derive(Debug)]

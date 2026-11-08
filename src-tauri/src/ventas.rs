@@ -861,7 +861,7 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
     let dueno = usuarios::confirmar_dueno(pool, a, pin, "anular venta").await?;
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let v = sqlx::query("SELECT numero, total, estado, turno_id FROM ventas WHERE id = ? AND eliminado_en IS NULL").bind(venta_id).fetch_one(&mut *tx).await.map_err(e)?;
+    let v = sqlx::query("SELECT numero, total, estado, turno_id, factura_emitida, factura_referencia FROM ventas WHERE id = ? AND eliminado_en IS NULL").bind(venta_id).fetch_one(&mut *tx).await.map_err(e)?;
     if v.get::<String, _>("estado") == "anulada" {
         return Err("La venta ya está anulada".into());
     }
@@ -884,6 +884,10 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         .await
         .map_err(e)?;
     let mut det = json!({"numero": numero, "total": total, "motivo": motivo, "autorizadoPor": dueno});
+    // Con factura electrónica hecha, falta la nota de crédito en el otro sistema: queda anotado.
+    if v.get::<i64, _>("factura_emitida") == 1 {
+        det["facturaEmitida"] = json!(v.get::<Option<String>, _>("factura_referencia"));
+    }
     // Devuelve al inventario lo que la venta sacó, ligado a la venta original.
     let turno_anulacion = actual.as_ref().map(|t| t.id.clone()).or(v.get::<Option<String>, _>("turno_id"));
     inventario::devolver_anulacion(&mut tx, venta_id, &a.id, turno_anulacion.as_deref(), &ahora).await?;
@@ -987,7 +991,7 @@ pub async fn marcar_factura(pool: &SqlitePool, a: &Actor, venta_id: &str, refere
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let n = sqlx::query(
         "UPDATE ventas SET factura_emitida = 1, factura_referencia = ?, factura_marcada_por = ?, factura_marcada_en = ?, actualizado_en = ?
-         WHERE id = ? AND requiere_factura = 1 AND factura_emitida = 0",
+         WHERE id = ? AND requiere_factura = 1 AND factura_emitida = 0 AND estado = 'completada'",
     )
     .bind(&r)
     .bind(&a.id)
@@ -999,7 +1003,7 @@ pub async fn marcar_factura(pool: &SqlitePool, a: &Actor, venta_id: &str, refere
     .map_err(e)?
     .rows_affected();
     if n == 0 {
-        return Err("Esa venta no está pendiente de factura".into());
+        return Err("Esa venta no está pendiente de factura (quizás ya se marcó o se anuló)".into());
     }
     bitacora::registrar(&mut tx, Some(&a.id), "venta.factura_emitida", "venta", Some(venta_id), &json!({"referencia": r})).await?;
     tx.commit().await.map_err(e)?;
@@ -1049,6 +1053,47 @@ mod tests {
     async fn vender(p: &SqlitePool, a: &Actor, e: &Estado, pagos: &[PagoEntrada]) -> ResultadoCobro {
         let esp = crear_espera(p, a, CAJA_1, e).await.unwrap();
         cobrar(p, a, CAJA_1, &esp.id, e, pagos).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn factura_anulacion_y_anonimizar_sin_perder_datos_fiscales() {
+        let (bd, _, dueno, luis) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let (pid, dep) = producto(p, 1000).await;
+        abrir(p, &luis, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+        let cli = crate::clientes::crear(p, &dueno, &crate::clientes::Datos { nombre: "Ana Mora".into(), telefono: "8000-0000".into(), ..Default::default() }, true, "1").await.unwrap();
+        let mut e = est(&pid, &dep, 1000, 1, 0);
+        e.cliente = Some(crate::calculo::ClienteBasico { id: cli.id.clone(), nombre: "Ana Mora".into(), telefono: None, cedula: None });
+        e.nombre_tiquete = Some("Ana Mora".into());
+        e.requiere_factura = true;
+        let v = vender(p, &luis, &e, &[pago(EF, 1000)]).await;
+        // Con la factura pendiente no se anonimiza (Hacienda necesita los datos).
+        assert!(crate::clientes::anonimizar(p, &dueno, &cli.id, "246813", "solicitud_titular").await.unwrap_err().contains("pendiente(s) de factura"));
+        marcar_factura(p, &dueno, &v.venta_id, "FE-001").await.unwrap();
+        // Anular con factura hecha: queda anotada (falta la nota de crédito afuera).
+        anular(p, &dueno, CAJA_1, &v.venta_id, "246813", "Cliente devolvió todo", 0).await.unwrap();
+        let d: String = sqlx::query_scalar("SELECT detalle FROM bitacora WHERE accion = 'venta.anular'").fetch_one(p).await.unwrap();
+        assert!(d.contains("FE-001"), "{d}");
+        // Una venta anulada no se puede marcar como facturada.
+        let mut e2 = e.clone();
+        e2.nombre_tiquete = None;
+        let v2 = vender(p, &luis, &e2, &[pago(EF, 1000)]).await;
+        anular(p, &dueno, CAJA_1, &v2.venta_id, "246813", "Error de digitación", 0).await.unwrap();
+        assert!(marcar_factura(p, &dueno, &v2.venta_id, "FE-002").await.unwrap_err().contains("anuló"));
+        // Ahora sí se anonimiza, y el nombre impreso en sus tiquetes también se borra.
+        crate::clientes::anonimizar(p, &dueno, &cli.id, "246813", "solicitud_titular").await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas WHERE nombre_tiquete IS NOT NULL").fetch_one(p).await.unwrap();
+        assert_eq!(n, 0);
+        let datos: Vec<String> = sqlx::query_scalar("SELECT datos FROM ventas_espera").fetch_all(p).await.unwrap();
+        assert!(datos.iter().all(|x| !x.contains("Ana Mora")), "{datos:?}");
+    }
+
+    #[test]
+    fn cantidad_fuera_de_rango_con_mensaje_claro() {
+        let mut l = linea("P", "Lápiz", "D", 100, 100_001, 0);
+        assert!(crate::calculo::validar_linea(&l).unwrap_err().contains("de 1 a 100.000"));
+        l.cantidad = 0;
+        assert!(crate::calculo::validar_linea(&l).unwrap_err().contains("de 1 a 100.000"));
     }
 
     #[tokio::test]

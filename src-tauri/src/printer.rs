@@ -314,6 +314,7 @@ pub mod simulada {
     struct Estado {
         instaladas: Vec<(String, String)>,
         apagadas: HashSet<String>,
+        trabadas: HashSet<String>,
         trabajos: HashMap<String, Vec<Vec<u8>>>,
     }
 
@@ -330,6 +331,11 @@ pub mod simulada {
 
     pub fn apagar(destino: &str, apagada: bool) {
         con(|e| if apagada { e.apagadas.insert(destino.into()) } else { e.apagadas.remove(destino) });
+    }
+
+    /// Trabada: recibe el trabajo pero no contesta (como una USB sin papel).
+    pub fn trabar(destino: &str, trabada: bool) {
+        con(|e| if trabada { e.trabadas.insert(destino.into()) } else { e.trabadas.remove(destino) });
     }
 
     pub fn trabajos(destino: &str) -> Vec<Vec<u8>> {
@@ -355,6 +361,11 @@ pub mod simulada {
     }
 
     pub fn enviar(_conexion: &str, destino: &str, _baudios: u32, data: &[u8]) -> Result<(), String> {
+        if con(|e| e.trabadas.contains(destino)) {
+            con(|e| e.trabajos.entry(destino.into()).or_default().push(data.to_vec()));
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            return Ok(());
+        }
         con(|e| {
             if e.apagadas.contains(destino) {
                 return Err("StartDocPrinter falló (código 1801)".into());

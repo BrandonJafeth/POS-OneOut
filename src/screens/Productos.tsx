@@ -80,8 +80,12 @@ export default function Productos() {
 
   async function abrirPorCodigo(codigo: string) {
     setError("");
-    const p = await productoPorCodigo(codigo);
-    setDialogo(p ? { tipo: "editar", id: p.id } : { tipo: "codigoNuevo", codigo });
+    try {
+      const p = await productoPorCodigo(codigo);
+      setDialogo(p ? { tipo: "editar", id: p.id } : { tipo: "codigoNuevo", codigo });
+    } catch (e) {
+      setError(textoError(e));
+    }
   }
 
   // En esta pantalla, escanear abre el producto o pregunta por el código nuevo.

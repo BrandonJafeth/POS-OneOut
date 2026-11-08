@@ -38,6 +38,9 @@ import { fondoPildora, textoSobre } from "../ui/departamentos";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | null;
 
+/** Igual que calculo.rs (validar_linea): unidades por línea. */
+const MAX_CANTIDAD = 100_000;
+
 export default function Venta() {
   const { actor, usuario, config, puede, caja, recargarCaja, irA } = useSesion();
   const toast = useToast();
@@ -135,7 +138,11 @@ export default function Venta() {
   // ── Lector: en cualquier parte de la pantalla (salvo con un diálogo abierto).
   useEscaner(
     async (c) => {
-      if (!(await porCodigo(c))) setAviso(`El código ${c} no está registrado. Use Venta simple o asócielo en Productos.`);
+      try {
+        if (!(await porCodigo(c))) setAviso(`El código ${c} no está registrado. Use Venta simple o asócielo en Productos.`);
+      } catch (e) {
+        setError(textoError(e));
+      }
     },
     { activo: !modal && !!activa, debounceMs: config.escaner_debounce_ms },
   );
@@ -145,6 +152,7 @@ export default function Venta() {
     const cantidad = m ? Math.max(1, Number(m[1])) : 1;
     const q = (m ? m[2] : texto).trim();
     if (!q) return;
+    if (cantidad > MAX_CANTIDAD) return setAviso("La cantidad máxima por línea es 100.000.");
     // Código escrito a mano (alfanumérico, p. ej. 07toc) → directo.
     if (await porCodigo(q, cantidad)) return setTexto("");
     if (buscando && productos[sel]) {
@@ -674,7 +682,7 @@ function LineaTiquete(p: {
     if (d === null || d > bruto(l)) return p.onError(modo === "%" ? "El porcentaje va de 0 a 100." : `El descuento no puede pasar de ${monto(bruto(l))}.`);
     if (d !== l.descuento) p.onCambio({ descuento: d });
   };
-  const cantidad = (c: number) => c >= 1 && p.onCambio({ cantidad: c, descuento: Math.min(l.descuento, c * l.precioUnitario) });
+  const cantidad = (c: number) => c >= 1 && c <= MAX_CANTIDAD && p.onCambio({ cantidad: c, descuento: Math.min(l.descuento, c * l.precioUnitario) });
 
   return (
     <li className={p.abierta ? "linea sel" : "linea"}>
@@ -703,7 +711,7 @@ function LineaTiquete(p: {
               <Minus size={16} aria-hidden />
             </button>
           )}
-          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 ? cantidad(Number(v)) : p.onError("La cantidad debe ser 1 o más."))} />
+          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : p.onError("La cantidad debe ser un número entero de 1 a 100.000."))} />
           <button aria-label={`Una más de ${l.descripcion}`} onClick={() => cantidad(l.cantidad + 1)}>
             <Plus size={16} aria-hidden />
           </button>

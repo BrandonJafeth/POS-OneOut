@@ -40,6 +40,7 @@ export function calcularPagos(total: number, pagos: PagoEntrada[], formas: Forma
   }
   // Igual que calculo.rs: una venta de ¢0 no recibe dinero (abriría la gaveta sin venta real).
   if (total === 0 && pagos.some((p) => p.monto > 0)) errores.push("La venta es de ¢0: no reciba dinero. Borre el monto del pago");
+  else if (sinVuelto >= total && pagos.some((p) => p.monto > 0 && porId.get(p.formaPagoId)?.daVuelto)) errores.push("La tarjeta, SINPE o transferencia ya pagan todo: quite el efectivo");
   if (sinVuelto > total) errores.push("Tarjeta, SINPE y transferencia no dan vuelto: no pueden pasar del total");
 
   const pagado = pagos.reduce((s, p) => s + (Number.isFinite(p.monto) ? p.monto : 0), 0);

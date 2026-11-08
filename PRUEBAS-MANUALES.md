@@ -163,6 +163,18 @@ Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio
 13. **Reportes** (Ana): Bajo mínimo con "Pedir" = mínimo × 2 − existencia (cámbielo), Valorizado (los sin costo aparte), Movimientos por fechas y tipo. Exporte CSV y PDF de cada uno: el CSV abre en Excel con tildes; una celda que empiece con "=" sale como texto.
 14. **Kardex por fechas.** En A → Kardex, cambie las fechas: solo salen los movimientos del rango.
 
+15. **Producto nuevo.** Cree "Impresión B/N" sin código de barras. → Estado "Sin control"; con «vender sin existencia» apagado, Luis lo vende sin PIN. Cree otro con código de barras. → Queda con control (Agotado).
+16. **Eliminar con existencias.** Elimine un producto con unidades. → La confirmación dice cuántas unidades dejan de contarse.
+
+## R. Casos límite de venta y clientes
+
+1. **Venta de ¢0 con dinero.** Haga una venta que quede en ¢0 (descuento total autorizado) y escriba ¢1.000 en efectivo. → "La venta es de ¢0: no reciba dinero…"; la gaveta no se abre. Sin monto, se registra.
+2. **Cantidad enorme.** En el buscador escriba `999999*` y un código. → "La cantidad máxima por línea es 100.000."
+3. **Anonimizar con factura pendiente.** Venda a un cliente pidiendo factura y, sin marcarla, intente anonimizarlo. → Lo rechaza y dice por qué. Marque la factura y anonimice: en Ventas del día, el tiquete ya no muestra su nombre.
+4. **Anular una venta facturada.** → Aviso rojo de nota de crédito; en la bitácora, `venta.anular` lleva la referencia de la factura.
+
+5. **Impresora sin papel.** Quite el papel (o desconecte la USB a medio tiquete) y cobre. → En unos 10 s avisa que la impresora no contestó; la venta queda guardada y la siguiente venta se cobra normal. Con «No venta», si la gaveta no contesta, el aviso dice que quedó registrado.
+
 ## P. Actualizar el programa en la PC del cliente
 
 Hágalo al final del día, con calma. Lleve una memoria USB.

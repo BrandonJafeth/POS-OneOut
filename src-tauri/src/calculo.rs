@@ -79,7 +79,7 @@ pub fn validar_linea(l: &Linea) -> Res<()> {
         return Err("Descripción de línea inválida".into());
     }
     if !(1..=100_000).contains(&l.cantidad) {
-        return Err(format!("\"{d}\": la cantidad debe ser un entero mayor que 0"));
+        return Err(format!("\"{d}\": la cantidad debe ser un número entero de 1 a 100.000"));
     }
     if !(0..=100_000_000).contains(&l.precio_unitario) {
         return Err(format!("\"{d}\": precio inválido"));
@@ -200,6 +200,9 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
     // gaveta sin venta real (una "no venta" que no quedaría registrada como tal).
     if total == 0 && !entradas.is_empty() {
         errores.push("La venta es de ¢0: no reciba dinero. Borre el monto del pago".into());
+    } else if sin_vuelto >= total && entradas.iter().any(|p| forma(&p.forma_pago_id).is_some_and(|f| f.da_vuelto)) {
+        // Mismo hueco: tarjeta por todo + "efectivo" que vuelve entero como vuelto abre la gaveta.
+        errores.push("La tarjeta, SINPE o transferencia ya pagan todo: quite el efectivo".into());
     }
     if sin_vuelto > total {
         errores.push("Tarjeta, SINPE y transferencia no dan vuelto: no pueden pasar del total".into());
@@ -249,6 +252,10 @@ mod tests {
         assert!(pagos(0, &[], &formas()).errores.is_empty());
         // Con efectivo "recibido": rechazada (abriría la gaveta sin venta real).
         assert!(pagos(0, &[p("EF", 1000)], &formas()).errores.iter().any(|e| e.contains("¢0")));
+        // Tarjeta por el total + efectivo que vuelve entero: no (la gaveta se abriría sin dinero real).
+        assert!(pagos(500, &[p("TJ", 500), p("EF", 1000)], &formas()).errores.iter().any(|e| e.contains("quite el efectivo")));
+        // Mixto de verdad: sí.
+        assert!(pagos(500, &[p("TJ", 300), p("EF", 1000)], &formas()).errores.is_empty());
     }
 
     #[test]

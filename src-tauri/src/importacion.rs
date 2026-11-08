@@ -362,6 +362,15 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
     Ok(Some(codigo))
 }
 
+/// Error de una fila para el dueño: los de la base (técnicos) en palabras simples.
+fn amigable(m: &str) -> String {
+    match m.strip_prefix(crate::util::TECNICO) {
+        None => m.to_string(),
+        Some(t) if t.contains("UNIQUE") => "Otro producto ya tiene ese id o código: revise que no esté repetido".into(),
+        Some(_) => "No se pudo guardar esta fila. Si se repite, avise al técnico".into(),
+    }
+}
+
 pub async fn aplicar(pool: &SqlitePool, a: &Actor, pin: &str, p: &Pedido) -> Res<Resultado> {
     a.exigir("productos.importar", "importar productos")?;
     if p.modo != "todo" && p.modo != "validas" {
@@ -423,8 +432,8 @@ pub async fn aplicar(pool: &SqlitePool, a: &Actor, pin: &str, p: &Pedido) -> Res
                 }
             }
             // En "todo" el error corta aquí y la transacción se deshace al soltarla.
-            Err(m) if p.modo == "todo" => return Err(format!("No se importó nada (fila {}: {}).", it.fila, m.trim_start_matches(crate::util::TECNICO))),
-            Err(m) => fallidos.push(Fallo { fila: it.fila, mensaje: m.trim_start_matches(crate::util::TECNICO).to_string() }),
+            Err(m) if p.modo == "todo" => return Err(format!("No se importó nada (fila {}: {}).", it.fila, amigable(&m))),
+            Err(m) => fallidos.push(Fallo { fila: it.fila, mensaje: amigable(&m) }),
         }
     }
     fallidos.sort_by_key(|f| f.fila);
@@ -490,6 +499,13 @@ mod tests {
             s += &format!("id-{i}{sep}p-{i}{sep}\" Producto  ñandú {i}, \"\"especial\"\" \"{sep}{}{sep}{estado}{sep}simple{sep}{}{sep}true{sep}null{sep}{cats}\n", 150 + i * 75, i < 281);
         }
         s
+    }
+
+    #[test]
+    fn errores_de_fila_en_palabras_simples() {
+        assert_eq!(amigable("Nombre vacío"), "Nombre vacío");
+        assert!(amigable(&format!("{}UNIQUE constraint failed: productos.web_id", crate::util::TECNICO)).contains("repetido"));
+        assert!(!amigable(&format!("{}disk I/O error", crate::util::TECNICO)).contains("disk"));
     }
 
     #[test]

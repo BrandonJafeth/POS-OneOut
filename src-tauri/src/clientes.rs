@@ -112,10 +112,19 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, d: &Datos, consentimiento: bool
         return Err("Sin el consentimiento del cliente no se pueden guardar sus datos".into());
     }
     let l = validar(d)?;
+    // Mínimos datos por rol: las notas son del dueño (el cajero ve nombre, teléfono, cédula y correo).
+    if l.notas.is_some() && !crate::permisos::puede(a.rol, "clientes") {
+        return Err("Las notas del cliente solo las escribe el dueño".into());
+    }
     let version = texto(version_aviso, 20, "versión del aviso", true)?;
     let id = ulid();
     let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    // El consentimiento vale para el aviso VIGENTE: si cambió mientras tanto, hay que mostrarlo otra vez.
+    let vigente: String = sqlx::query_scalar("SELECT aviso_privacidad_version FROM negocio WHERE id = 1").fetch_optional(&mut *tx).await.map_err(e)?.unwrap_or_else(|| "1".into());
+    if version != vigente {
+        return Err("El aviso de privacidad cambió. Cierre esta ventana y vuelva a mostrárselo al cliente.".into());
+    }
     sqlx::query(
         "INSERT INTO clientes (id, nombre, nombre_busqueda, tipo_identificacion, cedula, telefono, correo, notas,
            consentimiento_datos, consentimiento_fecha, consentimiento_version, creado_en, actualizado_en)
@@ -309,6 +318,15 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
     usuarios::confirmar_dueno(pool, a, pin, "anonimizar cliente").await?;
     let pendientes = cuentas_con_saldo(pool, a, id).await?.len();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    // Hacienda necesita sus datos para la factura: primero se hace (o se marca), después se anonimiza.
+    let facturas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas WHERE cliente_id = ? AND requiere_factura = 1 AND factura_emitida = 0 AND estado = 'completada'")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(e)?;
+    if facturas > 0 {
+        return Err(format!("No se puede anonimizar: tiene {facturas} venta(s) pendiente(s) de factura electrónica. Hágalas y márquelas en «Facturas pendientes» primero."));
+    }
     if pendientes > 0 {
         bitacora::registrar(&mut tx, Some(&a.id), "cliente.anonimizar_rechazado", "cliente", Some(id), &json!({"razon": "saldo", "cuentas": pendientes})).await?;
         tx.commit().await.map_err(e)?;
@@ -326,7 +344,9 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
         .map_err(e)?;
     sqlx::query("UPDATE cuentas SET notas = '', actualizado_en = ? WHERE cliente_id = ?").bind(&ahora).bind(id).execute(&mut *tx).await.map_err(e)?;
     // Las ventas (en espera y ya cobradas) guardan una copia del cliente con nombre, teléfono y cédula.
-    sqlx::query("UPDATE ventas_espera SET datos = json_set(datos, '$.cliente', NULL) WHERE json_extract(datos, '$.cliente.id') = ?").bind(id).execute(&mut *tx).await.map_err(e)?;
+    sqlx::query("UPDATE ventas_espera SET datos = json_set(datos, '$.cliente', NULL, '$.nombreTiquete', NULL) WHERE json_extract(datos, '$.cliente.id') = ?").bind(id).execute(&mut *tx).await.map_err(e)?;
+    // El nombre impreso en sus tiquetes también es un dato suyo.
+    sqlx::query("UPDATE ventas SET nombre_tiquete = NULL WHERE cliente_id = ? AND nombre_tiquete IS NOT NULL").bind(id).execute(&mut *tx).await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "cliente.anonimizar", "cliente", Some(id), &json!({"motivo": motivo})).await?;
     tx.commit().await.map_err(e)?;
     Ok(())
@@ -364,6 +384,20 @@ mod tests {
 
     fn datos() -> Datos {
         Datos { nombre: "María Rojas".into(), telefono: "8888-1234".into(), cedula: Some("1-1111-1111".into()), correo: Some("maria@correo.cr".into()), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn cajero_sin_notas_y_consentimiento_del_aviso_vigente() {
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let con_notas = Datos { notas: Some("debe plata".into()), ..datos() };
+        assert!(crear(p, &cajero, &con_notas, true, "1").await.unwrap_err().contains("dueño"));
+        crear(p, &cajero, &datos(), true, "1").await.unwrap();
+        crear(p, &dueno, &Datos { nombre: "Otro".into(), ..con_notas }, true, "1").await.unwrap();
+        // Aviso cambiado (versión 2): un consentimiento dado sobre el aviso viejo no sirve.
+        sqlx::query("UPDATE negocio SET aviso_privacidad_version = '2' WHERE id = 1").execute(p).await.unwrap();
+        assert!(crear(p, &cajero, &datos(), true, "1").await.unwrap_err().contains("aviso"));
+        crear(p, &cajero, &datos(), true, "2").await.unwrap();
     }
 
     #[tokio::test]

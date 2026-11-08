@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.1.0, con las migraciones 1 a 11.
+Aplica a la versión 0.1.0, con las migraciones 1 a 12.
 
 ## 1. Modelo de amenazas
 
@@ -75,12 +75,25 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - No guarda datos personales: solo ids, acciones y nombres de campos.
 
 ### Venta: sin pérdidas ni gaveta sin rastro
+- Si la tarjeta, SINPE o transferencia ya pagan todo, no se acepta efectivo además: volvería entero como vuelto y abriría la gaveta sin dinero real.
 - Una venta de ¢0 (regalo, descuento total) se registra sin pagos. Si trae dinero «recibido», se rechaza: si no, el efectivo abriría la gaveta sin una venta real (`calculo::pagos` y `lib/venta/pagos.ts`).
 - Las ventas en espera se guardan en la base en cada cambio y en orden (una cola en `useEsperas`): un guardado viejo no pisa a uno nuevo ni deja en la bitácora una «línea quitada» que no pasó.
 - Si una pantalla falla al dibujarse, `ErrorPantalla` muestra un aviso con «Volver a intentar» en vez de dejar la ventana en blanco. Lo cobrado y lo que está en espera ya está en la base.
 - En la versión final un `panic` de Rust cierra el programa (`panic = "abort"`). El código fuera de las pruebas no usa `unwrap` sobre datos de afuera, y cada índice o división se revisa antes. Un cierre a la mitad de un cobro no deja nada a medias: todo va en una transacción.
 
+### Impresión y gaveta
+- Cada envío a una impresora tiene un tiempo límite de 10 s (`impresoras::con_limite`). Se imprime dentro de la transacción: sin límite, una USB trabada (sin papel) dejaba la base tomada y ningún cobro se guardaba.
+- Si el pulso de la gaveta no contesta a tiempo, pudo llegar tarde y abrirla: la apertura se registra igual y se avisa. Si la impresora no recibió nada (apagada, sin gaveta), no queda registro.
+
+### Clientes y facturas
+- El consentimiento vale para el aviso de privacidad vigente: si el aviso cambió, Rust rechaza el registro con la versión vieja.
+- El cajero no puede guardar notas del cliente (solo el dueño), aunque llame al comando directo.
+- No se anonimiza un cliente con ventas pendientes de factura electrónica (Hacienda necesita sus datos): primero se hace la factura y se marca.
+- Anonimizar también borra el nombre impreso en sus tiquetes (`ventas.nombre_tiquete`) y en las ventas en espera.
+- Una venta anulada no se puede marcar como facturada. Si se anula una venta que ya tenía factura, la bitácora guarda la referencia de la factura (falta la nota de crédito en el sistema de facturación; la pantalla lo avisa).
+
 ### Inventario
+- Un producto nuevo (a mano o importado) empieza sin control; su primer código de barras lo pone bajo control (migración 12). Así un servicio nuevo no queda bloqueado en la venta si se apaga «vender sin existencia».
 - La existencia solo cambia agregando un movimiento al kardex (`inventario::mover`), dentro de la transacción de la venta, la anulación, la entrada, el ajuste o el conteo. Un trigger revisa que la existencia resultante sea la anterior más la cantidad y la copia a `existencias`: la existencia guardada siempre es la suma del kardex.
 - El kardex no se edita ni se borra (triggers `inventario_movimientos_sin_update` y `_sin_delete`).
 - El costo vive en `producto_costos`, fuera de `productos`, para que la lectura de catálogo nunca lo vea.
@@ -174,7 +187,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (80 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- Rust: `cd src-tauri && cargo test --lib` (86 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
 - TypeScript: `npm test` (153 pruebas).
 
 ## 6. Compilar y verificar una entrega
