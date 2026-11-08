@@ -4,13 +4,15 @@ import { FileDown, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import Mensaje, { textoError } from "../../components/Mensaje";
 import { NOMBRE_TIPO, rangoDias, reporteBajoMinimo, reporteMovimientos, reporteValorizado, type FilaBajoMinimo, type FilaKardex, type TipoMovimiento, type Valorizado } from "../../db/inventario";
-import { CABECERA_KARDEX, exportarCsv, exportarPdf, filaKardex } from "../../lib/inventario";
+import { CABECERA_KARDEX, exportarCsv, exportarPdf, filaKardex, pdfMovimientos } from "../../lib/inventario";
+import type { Bloque } from "../../lib/pdf";
 import { monto } from "../../lib/tickets";
 import Button from "../../ui/Button";
 import Field from "../../ui/Field";
 import { useToast } from "../../ui/Toast";
 
-function Exportar(p: { nombre: string; titulo: string; cabecera: string[]; filas: (string | number)[][]; onError(m: string): void }) {
+/** CSV con los números crudos (para Excel); PDF con colones, resumen y totales. */
+function Exportar(p: { nombre: string; titulo: string; subtitulo: string; cabecera: string[]; filas: (string | number)[][]; pdf: () => Bloque[]; onError(m: string): void }) {
   const toast = useToast();
   const hacer = async (f: () => Promise<string>) => {
     try {
@@ -24,7 +26,7 @@ function Exportar(p: { nombre: string; titulo: string; cabecera: string[]; filas
       <Button icono={FileDown} disabled={!p.filas.length} onClick={() => hacer(() => exportarCsv(p.nombre, [p.cabecera, ...p.filas]))}>
         CSV
       </Button>
-      <Button icono={FileText} disabled={!p.filas.length} onClick={() => hacer(() => exportarPdf(p.nombre, p.titulo, p.cabecera, p.filas))}>
+      <Button icono={FileText} disabled={!p.filas.length} onClick={() => hacer(() => exportarPdf(p.nombre, p.titulo, p.subtitulo, p.pdf()))}>
         PDF
       </Button>
     </div>
@@ -80,7 +82,35 @@ function BajoMinimo(p: { onError(m: string): void }) {
           </tbody>
         </table>
       )}
-      <Exportar nombre="inventario-bajo-minimo" titulo="Productos bajo mínimo" cabecera={["Producto", "Departamento", "Existencia", "Mínimo", "Pedir"]} filas={filas.map((f) => [f.nombre, f.departamento, f.existencia, f.minimo, cant(f)])} onError={p.onError} />
+      <Exportar
+        nombre="inventario-bajo-minimo"
+        titulo="Productos bajo mínimo"
+        subtitulo="Pedido sugerido = mínimo × 2 − existencia (ajustado a mano donde se cambió)"
+        cabecera={["Producto", "Departamento", "Existencia", "Mínimo", "Pedir"]}
+        filas={filas.map((f) => [f.nombre, f.departamento, f.existencia, f.minimo, Number(cant(f)) || 0])}
+        pdf={() => [
+          {
+            tipo: "resumen",
+            items: [
+              { etiqueta: "Productos", valor: String(filas.length) },
+              { etiqueta: "Agotados o negativos", valor: String(filas.filter((f) => f.existencia <= 0).length) },
+              { etiqueta: "Unidades a pedir", valor: filas.reduce((s, f) => s + (Number(cant(f)) || 0), 0).toLocaleString("es-CR") },
+            ],
+          },
+          {
+            tipo: "tabla",
+            columnas: [
+              { titulo: "Producto", ancho: 6 },
+              { titulo: "Departamento", ancho: 3 },
+              { titulo: "Existencia", ancho: 1.6, derecha: true },
+              { titulo: "Mínimo", ancho: 1.4, derecha: true },
+              { titulo: "Pedir", ancho: 1.4, derecha: true },
+            ],
+            filas: filas.map((f) => [f.nombre, f.departamento, f.existencia, f.minimo, Number(cant(f)) || 0]),
+          },
+        ]}
+        onError={p.onError}
+      />
     </section>
   );
 }
@@ -89,7 +119,45 @@ function ValorizadoReporte(p: { onError(m: string): void }) {
   const [v, setV] = useState<Valorizado | null>(null);
   useEffect(() => void reporteValorizado().then(setV, (e) => p.onError(textoError(e))), []);
   if (!v) return null;
-  const filas: (string | number)[][] = [...v.porDepartamento.map((d) => [d.departamento, d.unidades, d.valor]), ["TOTAL", "", v.total]];
+  const unidades = v.porDepartamento.reduce((s, d) => s + d.unidades, 0);
+  const filas: (string | number)[][] = [...v.porDepartamento.map((d) => [d.departamento, d.unidades, d.valor]), ["TOTAL", unidades, v.total]];
+  const pdf = (): Bloque[] => [
+    {
+      tipo: "resumen",
+      items: [
+        { etiqueta: "Valor del inventario", valor: monto(v.total) },
+        { etiqueta: "Unidades con costo", valor: unidades.toLocaleString("es-CR") },
+        { etiqueta: "Productos sin costo", valor: String(v.sinCosto.length) },
+      ],
+    },
+    { tipo: "seccion", titulo: "Por departamento", nota: "Existencia × último costo. Las existencias negativas cuentan como cero." },
+    {
+      tipo: "tabla",
+      columnas: [
+        { titulo: "Departamento", ancho: 6 },
+        { titulo: "Unidades", ancho: 2, derecha: true },
+        { titulo: "% del valor", ancho: 2, derecha: true },
+        { titulo: "Valor", ancho: 2.6, derecha: true },
+      ],
+      filas: v.porDepartamento.map((d) => [d.departamento, d.unidades.toLocaleString("es-CR"), v.total ? `${((d.valor / v.total) * 100).toFixed(1)} %` : "—", monto(d.valor)]),
+      total: ["Total", unidades.toLocaleString("es-CR"), v.total ? "100 %" : "—", monto(v.total)],
+      vacio: "Ningún producto tiene existencia y costo.",
+    },
+    ...(v.sinCosto.length
+      ? ([
+          { tipo: "seccion", titulo: "Con existencia y sin costo", nota: "No entran en el total. Póngales el costo en Inventario → Existencias → Mínimo y costo." },
+          {
+            tipo: "tabla",
+            columnas: [
+              { titulo: "Producto", ancho: 6 },
+              { titulo: "Departamento", ancho: 3 },
+              { titulo: "Existencia", ancho: 2, derecha: true },
+            ],
+            filas: v.sinCosto.map((s) => [s.nombre, s.departamento, s.existencia]),
+          },
+        ] as Bloque[])
+      : []),
+  ];
   return (
     <section className="card">
       <h2>Inventario valorizado</h2>
@@ -136,8 +204,10 @@ function ValorizadoReporte(p: { onError(m: string): void }) {
       <Exportar
         nombre="inventario-valorizado"
         titulo="Inventario valorizado"
+        subtitulo={`Al ${new Date().toLocaleDateString("es-CR", { dateStyle: "long" })}`}
         cabecera={["Departamento", "Unidades", "Valor"]}
         filas={[...filas, ...(v.sinCosto.length ? [["Sin costo:", "", ""], ...v.sinCosto.map((s) => [s.nombre, s.existencia, ""])] : [])]}
+        pdf={pdf}
         onError={p.onError}
       />
     </section>
@@ -175,7 +245,15 @@ function Movimientos(p: { onError(m: string): void }) {
         </Field>
       </div>
       <p className="muted">{filas.length} movimiento(s).</p>
-      <Exportar nombre={`inventario-movimientos-${desde}-${hasta}`} titulo={`Movimientos de inventario ${desde} a ${hasta}`} cabecera={CABECERA_KARDEX} filas={filas.map(filaKardex)} onError={p.onError} />
+      <Exportar
+        nombre={`inventario-movimientos-${desde}-${hasta}`}
+        titulo="Movimientos de inventario"
+        subtitulo={`Del ${desde} al ${hasta}${tipo ? ` · solo ${NOMBRE_TIPO[tipo].toLowerCase()}` : ""}`}
+        cabecera={CABECERA_KARDEX}
+        filas={filas.map(filaKardex)}
+        pdf={() => pdfMovimientos(filas, true)}
+        onError={p.onError}
+      />
     </section>
   );
 }

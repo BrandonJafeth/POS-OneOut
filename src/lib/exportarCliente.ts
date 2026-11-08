@@ -3,7 +3,8 @@ import type { ExportacionCliente } from "../db/clientes";
 import { TIPO_IDENTIFICACION } from "../tipos";
 import { celdaSegura } from "./csv";
 import { invocar } from "./invocar";
-import { crearPdf, type LineaPdf } from "./pdf";
+import type { Negocio } from "../tipos";
+import { crearDocumento } from "./pdf";
 import { monto } from "./tickets";
 
 const fecha = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-CR") : "");
@@ -38,21 +39,52 @@ export function csvCliente(e: ExportacionCliente): Uint8Array {
   return new TextEncoder().encode(texto);
 }
 
-export function pdfCliente(e: ExportacionCliente, responsable: string): Uint8Array {
-  const l: LineaPdf[] = [
-    { texto: "Datos personales registrados", negrita: true },
-    { texto: `Responsable: ${responsable}` },
-    { texto: `Generado: ${fecha(new Date().toISOString())}` },
-    { texto: "" },
-    ...campos(e).map(([k, v]) => ({ texto: `${k}: ${v}` })),
-    { texto: "" },
-    { texto: "Apartados y créditos", negrita: true },
-    ...(e.cuentas.length ? e.cuentas.map((k) => ({ texto: `${fecha(k.fecha)} · ${k.tipo} · total ${monto(k.total)} · saldo ${monto(k.saldo)} · ${k.estado}` })) : [{ texto: "Ninguno" }]),
-    { texto: "" },
-    { texto: "Compras", negrita: true },
-    ...(e.ventas.length ? e.ventas.map((v) => ({ texto: `${fecha(v.fecha)} · tiquete ${v.numero} · ${monto(v.total)}` })) : [{ texto: "Ninguna" }]),
-  ];
-  return crearPdf(l);
+export function pdfCliente(e: ExportacionCliente, n: Pick<Negocio, "nombreComercial" | "responsableTratamiento" | "logo">): Uint8Array {
+  const saldo = e.cuentas.reduce((s, k) => s + k.saldo, 0);
+  return crearDocumento({
+    negocio: n.nombreComercial || "Punto de venta",
+    titulo: "Datos personales registrados",
+    subtitulo: `Responsable del tratamiento: ${n.responsableTratamiento || n.nombreComercial || "—"} · Ley 8968`,
+    logo: n.logo,
+    bloques: [
+      {
+        tipo: "resumen",
+        items: [
+          { etiqueta: "Compras", valor: String(e.ventas.length) },
+          { etiqueta: "Apartados y créditos", valor: String(e.cuentas.length) },
+          { etiqueta: "Saldo pendiente", valor: monto(saldo) },
+        ],
+      },
+      { tipo: "seccion", titulo: "Datos de la persona" },
+      { tipo: "datos", pares: campos(e) },
+      { tipo: "seccion", titulo: "Apartados y créditos" },
+      {
+        tipo: "tabla",
+        columnas: [
+          { titulo: "Fecha", ancho: 3 },
+          { titulo: "Tipo", ancho: 2 },
+          { titulo: "Estado", ancho: 2 },
+          { titulo: "Total", ancho: 2, derecha: true },
+          { titulo: "Saldo", ancho: 2, derecha: true },
+        ],
+        filas: e.cuentas.map((k) => [fecha(k.fecha), k.tipo, k.estado, monto(k.total), monto(k.saldo)]),
+        vacio: "No tiene apartados ni créditos.",
+      },
+      { tipo: "seccion", titulo: "Compras" },
+      {
+        tipo: "tabla",
+        columnas: [
+          { titulo: "Tiquete", ancho: 2 },
+          { titulo: "Fecha", ancho: 4 },
+          { titulo: "Total", ancho: 2, derecha: true },
+        ],
+        filas: e.ventas.map((v) => [v.numero, fecha(v.fecha), monto(v.total)]),
+        total: e.ventas.length ? ["Total", "", monto(e.ventas.reduce((s, v) => s + v.total, 0))] : undefined,
+        vacio: "No tiene compras registradas a su nombre.",
+      },
+      { tipo: "texto", texto: "Documento entregado al titular de los datos (derecho de acceso). Puede pedir que se corrijan o que se anonimicen.", tenue: true },
+    ],
+  });
 }
 
 /** Descarga (WebView2 lo guarda en Descargas). */

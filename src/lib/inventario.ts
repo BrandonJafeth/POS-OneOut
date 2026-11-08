@@ -8,7 +8,7 @@ import { csvSeguro } from "./csv";
 import { descargar } from "./exportarCliente";
 import { etiquetaProducto } from "./impresion";
 import { invocar } from "./invocar";
-import { crearPdf } from "./pdf";
+import { crearDocumento, type Bloque } from "./pdf";
 import { columnas, cortar, fechaHora, lr, monto, sep2, wrap } from "./tickets";
 
 /** Comprobante de una entrada de mercadería, por la impresora de comprobantes. */
@@ -54,15 +54,10 @@ export async function exportarCsv(nombre: string, filas: (string | number)[][]):
   return descargar(`${nombre}.csv`, csvSeguro(filas.map((f) => f.map(String))));
 }
 
-export async function exportarPdf(nombre: string, titulo: string, encabezado: string[], filas: (string | number)[][]): Promise<string> {
-  const lineas = [
-    { texto: titulo, negrita: true },
-    { texto: `Generado: ${new Date().toLocaleString("es-CR")}` },
-    { texto: "" },
-    { texto: encabezado.join(" · "), negrita: true },
-    ...filas.map((f) => ({ texto: f.join(" · ") })),
-  ];
-  return descargar(`${nombre}.pdf`, crearPdf(lineas));
+/** PDF de un reporte con el encabezado del negocio (nombre y logo). */
+export async function exportarPdf(nombre: string, titulo: string, subtitulo: string, bloques: Bloque[]): Promise<string> {
+  const n = await obtenerNegocio();
+  return descargar(`${nombre}.pdf`, crearDocumento({ negocio: n.nombreComercial || "Punto de venta", titulo, subtitulo, logo: n.logo, bloques }));
 }
 
 export const filaKardex = (f: FilaKardex): (string | number)[] => [
@@ -76,4 +71,49 @@ export const filaKardex = (f: FilaKardex): (string | number)[] => [
   f.referencia ?? "",
   f.usuario,
 ];
+/** Resumen y tabla de movimientos. `conProducto`: varias cosas mezcladas (reporte) o un solo producto (kardex). */
+export function pdfMovimientos(filas: FilaKardex[], conProducto: boolean): Bloque[] {
+  const entra = filas.filter((f) => f.cantidad > 0).reduce((s, f) => s + f.cantidad, 0);
+  const sale = filas.filter((f) => f.cantidad < 0).reduce((s, f) => s - f.cantidad, 0);
+  const d2 = (n: number) => String(n).padStart(2, "0");
+  const fecha = (iso: string) => {
+    const d = new Date(iso);
+    return `${d2(d.getDate())}/${d2(d.getMonth() + 1)}/${d2(d.getFullYear() % 100)} ${d2(d.getHours())}:${d2(d.getMinutes())}`;
+  };
+  const signo = (n: number) => (n > 0 ? `+${n}` : String(n));
+  return [
+    {
+      tipo: "resumen",
+      items: [
+        { etiqueta: "Movimientos", valor: filas.length.toLocaleString("es-CR") },
+        { etiqueta: "Unidades que entraron", valor: `+${entra.toLocaleString("es-CR")}` },
+        { etiqueta: "Unidades que salieron", valor: `−${sale.toLocaleString("es-CR")}` },
+        ...(conProducto ? [] : [{ etiqueta: "Existencia actual", valor: filas.length ? String(filas[0].existencia) : "—" }]),
+      ],
+    },
+    {
+      tipo: "tabla",
+      columnas: [
+        { titulo: "Fecha", ancho: 2.3 },
+        ...(conProducto ? [{ titulo: "Producto", ancho: 3.6 }] : []),
+        { titulo: "Tipo", ancho: 1.7 },
+        { titulo: "Cant.", ancho: 1, derecha: true },
+        { titulo: "Queda", ancho: 1.1, derecha: true },
+        { titulo: "Motivo / referencia", ancho: conProducto ? 3.5 : 5.4 },
+        { titulo: "Usuario", ancho: 1.4 },
+      ],
+      filas: filas.map((f) => [
+        fecha(f.fecha),
+        ...(conProducto ? [f.producto] : []),
+        f.tipo === "inicial" ? "Inicial" : NOMBRE_TIPO[f.tipo],
+        signo(f.cantidad),
+        f.existencia,
+        [f.motivo, f.referencia].filter(Boolean).join(" · "),
+        f.usuario,
+      ]),
+      vacio: "Sin movimientos en esas fechas.",
+    },
+  ];
+}
+
 export const CABECERA_KARDEX = ["Fecha", "Producto", "Tipo", "Cantidad", "Existencia", "Costo unitario", "Motivo", "Referencia", "Usuario"];

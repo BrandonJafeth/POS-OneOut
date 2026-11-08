@@ -59,11 +59,14 @@ describe("exportación del titular", () => {
     const csv = new TextDecoder("utf-8", { ignoreBOM: true }).decode(csvCliente(e));
     expect(csv.startsWith("\uFEFFCampo,Valor")).toBe(true);
     expect(csv).toContain("Teléfono,8888-1234");
-    const pdf = pdfCliente(e, "Librería Chagui");
+    const pdf = pdfCliente(e, { nombreComercial: "Librería Chagui", responsableTratamiento: "Chagui S.A.", logo: null });
     const txt = new TextDecoder("latin1").decode(pdf);
     expect(txt.startsWith("%PDF-1.4")).toBe(true);
     expect(txt.trimEnd().endsWith("%%EOF")).toBe(true);
-    expect(txt).toContain("(Teléfono: 8888-1234)");
+    // Etiqueta y valor van en columnas, con sus tildes en WinAnsi.
+    expect(txt).toContain("(Teléfono)");
+    expect(txt).toContain("(8888-1234)");
+    expect(txt).toContain("(Página 1 de 1)");
     const xref = Number(/startxref\n(\d+)/.exec(txt)![1]);
     expect(txt.slice(xref, xref + 4)).toBe("xref");
   });

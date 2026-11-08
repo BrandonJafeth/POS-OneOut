@@ -69,7 +69,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
       const datos = await datosParaExportar(actor, c!.id, formato);
       const base = `datos-cliente-${c!.id.slice(-6)}`;
       const ruta =
-        formato === "csv" ? await descargar(`${base}.csv`, csvCliente(datos)) : await descargar(`${base}.pdf`, pdfCliente(datos, (await obtenerNegocio()).responsableTratamiento));
+        formato === "csv" ? await descargar(`${base}.csv`, csvCliente(datos)) : await descargar(`${base}.pdf`, pdfCliente(datos, await obtenerNegocio()));
       toast.ok("Archivo guardado. Entrégueselo solo al titular de los datos.", ruta);
     } catch (e) {
       setError(textoError(e));

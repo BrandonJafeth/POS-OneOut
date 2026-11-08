@@ -16,7 +16,8 @@ export function pdfCierre(n: Negocio, d: Detalle, o: { copia: boolean; denominac
   }
   const t = d.turno;
   return crearPdfReporte({
-    titulo: `${n.nombreComercial || "Punto de venta"} · Cierre de caja`,
+    negocio: n.nombreComercial || "Punto de venta",
+    titulo: o.copia ? "Cierre de caja (copia)" : "Cierre de caja",
     subtitulo: `${t.caja || "Caja"} · Día ${t.dia} · abrió ${fechaHora(new Date(t.abiertoEn)).slice(0, 16)}${t.cerradoEn ? ` · cerró ${fechaHora(new Date(t.cerradoEn)).slice(0, 16)}` : ""}`,
     logo: n.logo,
     lineas: cuerpo.map((l) => ({ texto: l.t, negrita: l.b, centro: l.centro, salto: l.salto })),

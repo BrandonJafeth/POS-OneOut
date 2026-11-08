@@ -376,6 +376,10 @@ pub async fn ajustar(pool: &SqlitePool, a: &Actor, caja_id: &str, aj: &Ajuste, p
     if cantidad == 0 {
         return Err("La cantidad es igual a la del sistema: no hay nada que ajustar".into());
     }
+    // Un ajuste dice lo que hay de verdad: nunca puede dejar la existencia en negativo.
+    if actual + cantidad < 0 {
+        return Err(format!("Con ese ajuste quedarían {} unidades. Hay {}: como mucho puede restar {}.", actual + cantidad, actual, actual.max(0)));
+    }
     let fecha = ahora_iso();
     activar_control(&mut tx, &aj.producto_id, &fecha).await?;
     let nueva = mover(&mut tx, &Mov { producto_id: &aj.producto_id, sucursal_id: &suc, tipo: "ajuste", cantidad, costo: None, motivo: &motivo, ref_tipo: None, ref_id: None, usuario_id: &a.id, turno_id: None, fecha: &fecha }).await?;
@@ -1136,6 +1140,9 @@ mod tests {
         let uno = est(vec![linea(Some(&lapiz), 1)]);
         let esp1 = crear_espera(p, &cajero, CAJA_1, &uno).await.unwrap();
         cobrar(p, &cajero, CAJA_1, &esp1.id, &uno, &efectivo(&uno)).await.unwrap();
+        // El dueño tampoco vende sin existencia "porque sí": también pide PIN (el suyo) y queda anotado.
+        let esp_d = crear_espera(p, &dueno, CAJA_1, &e).await.unwrap();
+        assert!(cobrar(p, &dueno, CAJA_1, &esp_d.id, &e, &efectivo(&e)).await.unwrap_err().starts_with(SIN_EXISTENCIA));
         cobrar_con(p, &cajero, CAJA_1, &esp.id, &e, &efectivo(&e), Some(PIN_DUENO)).await.unwrap();
         assert_eq!(hay(p, &lapiz).await, -2);
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'venta.sin_existencia'").fetch_one(p).await.unwrap();
@@ -1287,8 +1294,13 @@ mod tests {
         let a1 = prod(p, "Alfa", true).await;
         let futura = Entrada { proveedor_id: None, factura: String::new(), fecha: "2999-01-01".into(), lineas: vec![LineaEntrada { producto_id: a1.clone(), cantidad: 1, costo_unitario: None, precio_nuevo: None }], actualizar_costo: false };
         assert!(entrada(p, &dueno, CAJA_1, &futura).await.unwrap_err().contains("todavía no llega"));
-        let neg = Ajuste { producto_id: a1, nueva: Some(-1), diferencia: None, motivo: "Daño".into(), detalle: String::new() };
+        let neg = Ajuste { producto_id: a1.clone(), nueva: Some(-1), diferencia: None, motivo: "Daño".into(), detalle: String::new() };
         assert!(ajustar(p, &dueno, CAJA_1, &neg, PIN_DUENO).await.unwrap_err().contains("de 0 a 1.000.000"));
+        // Restar más de lo que hay tampoco: un ajuste nunca deja la existencia en negativo.
+        ajustar(p, &dueno, CAJA_1, &Ajuste { producto_id: a1.clone(), nueva: Some(3), diferencia: None, motivo: "Conteo".into(), detalle: String::new() }, PIN_DUENO).await.unwrap();
+        let mucho = Ajuste { producto_id: a1.clone(), nueva: None, diferencia: Some(-10), motivo: "Daño".into(), detalle: String::new() };
+        assert!(ajustar(p, &dueno, CAJA_1, &mucho, PIN_DUENO).await.unwrap_err().contains("quedarían -7"));
+        assert_eq!(hay(p, &a1).await, 3);
     }
 
     #[tokio::test]

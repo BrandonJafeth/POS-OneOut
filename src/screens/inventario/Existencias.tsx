@@ -19,7 +19,7 @@ import {
   type FilaKardex,
   type FiltroInventario,
 } from "../../db/inventario";
-import { CABECERA_KARDEX, exportarCsv, filaKardex } from "../../lib/inventario";
+import { CABECERA_KARDEX, exportarCsv, exportarPdf, filaKardex, pdfMovimientos } from "../../lib/inventario";
 import { monto } from "../../lib/tickets";
 import type { Departamento } from "../../tipos";
 import Badge, { type Tono } from "../../ui/Badge";
@@ -252,6 +252,18 @@ function KardexDialogo(p: { fila: FilaInventario; onCerrar(): void }) {
           }}
         >
           Exportar CSV
+        </Button>
+        <Button
+          disabled={!filas.length}
+          onClick={async () => {
+            try {
+              toast.ok(`Guardado en ${await exportarPdf(`kardex-${desde}-${hasta}`, `Kardex: ${p.fila.nombre}`, `Del ${desde} al ${hasta}${p.fila.codigos ? ` · ${p.fila.codigos}` : ""}`, pdfMovimientos(filas, false))}`);
+            } catch (e) {
+              setError(textoError(e));
+            }
+          }}
+        >
+          Exportar PDF
         </Button>
       </div>
       <Mensaje error={error} />
