@@ -1,4 +1,16 @@
 /** Minúsculas, sin tildes ni diéresis, espacios simples. "Lápiz  HB" → "lapiz hb". La ñ pasa a n. */
+/**
+ * Nombre como se guarda y se ve: tildes "pegadas" (NFC: así la impresora térmica las imprime),
+ * sin caracteres invisibles ni de control, espacios simples, sin bordes.
+ */
+export function limpiarNombre(s: string): string {
+  return s
+    .normalize("NFC")
+    .replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function normalizar(s: string): string {
   return s
     .normalize("NFD")

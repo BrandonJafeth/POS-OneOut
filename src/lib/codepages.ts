@@ -74,7 +74,8 @@ export function encode(text: string, cp: CodePage): { bytes: number[]; missing: 
   const map = encodeMap(cp);
   const bytes: number[] = [];
   const missing: string[] = [];
-  for (const ch of text) {
+  // Una tilde suelta (e + ◌́) no existe en la impresora: se pega a su letra antes (NFC).
+  for (const ch of text.normalize("NFC")) {
     const c = ch.codePointAt(0)!;
     if (c >= 0x20 && c < 0x7f) bytes.push(c);
     else {

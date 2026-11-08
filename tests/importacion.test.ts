@@ -23,6 +23,15 @@ function ctx(existentes: ProductoExistente[] = [], extra: Partial<Contexto> = {}
   return { existentes, codigos: [], favoritosActuales: 0, departamentos: DEPS, departamentoDefecto: D("12"), ...extra };
 }
 
+describe("códigos internos en la importación", () => {
+  it("por defecto no se genera ninguno (el código de barras se escanea después)", () => {
+    const plan = crearPlan(leerCsvWeb(csvWeb()), ctx(), op());
+    expect(plan.nuevos.length).toBe(719);
+    expect(plan.nuevos.every((i) => i.codigo === null)).toBe(true);
+    expect(plan.actualizar.every((i) => !i.cambios.includes("codigo"))).toBe(true);
+  });
+});
+
 function op(extra: Partial<Opciones> = {}): Opciones {
   return { reglas: REGLAS_DEFECTO, respuestas: {}, sugerenciasAceptadas: new Set(), limitarFavoritos: true, pisar: { departamento: false, favorito: false }, ...extra };
 }
@@ -156,7 +165,7 @@ describe("reglas", () => {
 
 describe("plan de importación", () => {
   it("el CSV completo: 719 a crear, 718 activos, 1 inactivo, códigos únicos, 40 favoritos", () => {
-    const plan = crearPlan(leerCsvWeb(csvWeb()), ctx(), op());
+    const plan = crearPlan(leerCsvWeb(csvWeb()), ctx(), op({ codigosInternos: true }));
     expect(plan.total).toBe(719);
     expect(plan.nuevos).toHaveLength(719);
     expect(plan.errores).toEqual([]);
@@ -284,7 +293,7 @@ describe("plan de importación", () => {
         { ...base, id: "p9", webId: "w9", slug: "borrado", nombre: "Borrado", precio: 1, eliminado: true },
         { ...base, id: "p3", webId: null, slug: null, nombre: "Cartulina", precio: 1, eliminado: false },
       ]),
-      op(),
+      op({ codigosInternos: true }),
     );
     expect(plan.actualizar).toMatchObject([{ productoId: "p1", webId: "NUEVO-ID", codigo: "01lap" }]);
     expect(plan.actualizar[0].cambios).toEqual(["precio", "codigo", "slug", "categorias"]);

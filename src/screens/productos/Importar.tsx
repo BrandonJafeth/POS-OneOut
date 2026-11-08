@@ -77,9 +77,9 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
   const plan = useMemo<Plan | null>(
     () =>
       fuente && ctx
-        ? crearPlan(fuente, ctx, { reglas, respuestas, sugerenciasAceptadas: aceptadas, limitarFavoritos, pisar })
+        ? crearPlan(fuente, ctx, { reglas, respuestas, sugerenciasAceptadas: aceptadas, limitarFavoritos, pisar, codigosInternos: config.importacion_codigos_internos })
         : null,
-    [fuente, ctx, reglas, respuestas, aceptadas, limitarFavoritos, pisar],
+    [fuente, ctx, reglas, respuestas, aceptadas, limitarFavoritos, pisar, config.importacion_codigos_internos],
   );
   const porCategoria = useMemo(() => {
     const m = new Map<string, number>();
@@ -444,6 +444,23 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
                 <span className="muted">Entran las que están bien y al final se listan las que fallaron.</span>
               </span>
             </label>
+          </fieldset>
+
+          <fieldset className="opciones-pisar">
+            <legend>Códigos</legend>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={config.importacion_codigos_internos}
+                onChange={(e) => guardarConfig(actor, "importacion_codigos_internos", e.target.checked).then(recargarConfig, (err) => setError(textoError(err)))}
+              />
+              Generar un código interno a los productos que no tienen (por ejemplo «07toc»)
+            </label>
+            <p className="muted">
+              {config.importacion_codigos_internos
+                ? "Cada producto nuevo sin código interno recibe uno. La opción queda guardada para la próxima importación."
+                : "Sin códigos automáticos: el código de barras se agrega después escaneándolo en Productos. La opción queda guardada."}
+            </p>
           </fieldset>
 
           {plan.actualizar.length + plan.sinCambios > 0 && (

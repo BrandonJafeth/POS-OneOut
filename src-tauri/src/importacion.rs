@@ -80,11 +80,7 @@ fn detectar_separador(t: &str) -> u8 {
     if punto_coma > comas { b';' } else { b',' }
 }
 
-/// Caracteres invisibles que no tienen nada que hacer en un nombre: control (C0/C1, incluido ESC),
-/// ancho cero y marcas de dirección (pueden disfrazar el texto).
-fn invisible(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
-}
+use crate::util::invisible;
 
 /// Sin caracteres de control (saltos y tabs pasan a espacio), espacios simples, sin bordes.
 pub fn limpiar(s: &str) -> String {

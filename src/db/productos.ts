@@ -2,7 +2,7 @@
 import type { Actor, Codigo, Producto, ProductoConCodigos, ProductoLista, TipoCodigo } from "../tipos";
 import { codigoInterno } from "../lib/ean13";
 import { puede, SinPermiso } from "../lib/permisos";
-import { ahoraIso, normalizar } from "../lib/texto";
+import { ahoraIso, limpiarNombre, normalizar } from "../lib/texto";
 import { ulid } from "../lib/ulid";
 import { bitacora } from "./bitacora";
 import { bool, db, textoONull, type Sentencia } from "./conexion";
@@ -211,7 +211,7 @@ export async function crearProducto(
       id: "producto.crear",
       params: [
         id,
-        datos.nombre.trim(),
+        limpiarNombre(datos.nombre),
         normalizar(datos.nombre),
         datos.departamentoId,
         datos.precio,
@@ -223,7 +223,7 @@ export async function crearProducto(
         ahora,
       ],
     },
-    bitacora(actor.id, "producto.crear", "producto", id, { nombre: datos.nombre.trim(), precio: datos.precio, departamentoId: datos.departamentoId }),
+    bitacora(actor.id, "producto.crear", "producto", id, { nombre: limpiarNombre(datos.nombre), precio: datos.precio, departamentoId: datos.departamentoId }),
   ];
   for (const c of codigos) sentencias.push(...(await sentenciasCodigo(actor, id, limpiarCodigo(c.codigo), c.tipo, !!opc.moverCodigos)));
   await db().lote(sentencias);
@@ -234,7 +234,7 @@ export async function editarProducto(actor: Actor, id: string, cambios: Partial<
   permitir(actor);
   const p = await obtenerProducto(id);
   if (!p) throw new Error("Producto no encontrado");
-  const n = { ...p, ...cambios, nombre: (cambios.nombre ?? p.nombre).trim(), cabys: (cambios.cabys ?? p.cabys) || null };
+  const n = { ...p, ...cambios, nombre: limpiarNombre(cambios.nombre ?? p.nombre), cabys: (cambios.cabys ?? p.cabys) || null };
   validarDatos(n);
   const antes: Record<string, unknown> = {};
   const despues: Record<string, unknown> = {};

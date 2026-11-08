@@ -66,6 +66,8 @@ export interface ConfigApp {
   /** La tarjeta del producto en la venta muestra la existencia. */
   venta_mostrar_existencia: boolean;
   inventario_motivos_ajuste: string[];
+  /** La importación genera códigos internos a los productos que no tienen (por defecto no). */
+  importacion_codigos_internos: boolean;
 }
 
 /** Valores por defecto si una clave falta en la base (los mismos que siembra la migración). */
@@ -108,6 +110,7 @@ export const CONFIG_DEFECTO: ConfigApp = {
   permitir_vender_sin_existencia: true,
   venta_mostrar_existencia: false,
   inventario_motivos_ajuste: ["Conteo", "Daño", "Merma", "Regalo", "Error de registro", "Otro"],
+  importacion_codigos_internos: false,
 };
 
 /** Todas las claves tal como están en la base (para el editor técnico). */

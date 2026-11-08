@@ -1,7 +1,7 @@
 // Formas de pago y bancos: configuración de cada negocio (nada fijo en el código).
 import type { Actor, Banco, FormaPago, TipoFormaPago } from "../tipos";
 import { puede, SinPermiso } from "../lib/permisos";
-import { ahoraIso } from "../lib/texto";
+import { ahoraIso, limpiarNombre } from "../lib/texto";
 import { ulid } from "../lib/ulid";
 import { bitacora } from "./bitacora";
 import { bool, db } from "./conexion";
@@ -48,7 +48,7 @@ export async function guardarFormaPago(actor: Actor, f: Omit<FormaPago, "id"> & 
   await db().lote([
     {
       id: "forma_pago.guardar",
-      params: [id, f.codigo.toUpperCase(), f.nombre.trim(), f.tipo, f.requiereBanco, f.requiereReferencia, f.daVuelto, f.pideUltimos4, f.orden, f.activo, ahora, ahora],
+      params: [id, f.codigo.toUpperCase(), limpiarNombre(f.nombre), f.tipo, f.requiereBanco, f.requiereReferencia, f.daVuelto, f.pideUltimos4, f.orden, f.activo, ahora, ahora],
     },
     bitacora(actor.id, "forma_pago.guardar", "forma_pago", id, { ...f, id }),
   ]);
@@ -63,7 +63,7 @@ export async function guardarBanco(actor: Actor, b: Omit<Banco, "id"> & { id?: s
   await db().lote([
     {
       id: "banco.guardar",
-      params: [id, b.nombre.trim(), b.abreviatura.trim().slice(0, 12), b.orden, b.activo, ahora, ahora],
+      params: [id, limpiarNombre(b.nombre), limpiarNombre(b.abreviatura).slice(0, 12), b.orden, b.activo, ahora, ahora],
     },
     bitacora(actor.id, "banco.guardar", "banco", id, { ...b, id }),
   ]);

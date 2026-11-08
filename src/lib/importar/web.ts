@@ -47,6 +47,7 @@ export function fuenteDesdeTabla(cabecera: string[], filas: FilaTabla[]): Fuente
 /** Misma limpieza que importacion::limpiar en Rust: sin caracteres de control, espacios simples. */
 export function limpiarCelda(s: string): string {
   return s
+    .normalize("NFC")
     .replace(/[\p{Cc}​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();

@@ -74,7 +74,7 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         "caja_no_venta_umbral" => entero(0, 1000),
         "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
         "sesion_inactividad_min" => entero(1, 240),
-        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => si_no(),
+        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" | "importacion_codigos_internos" => si_no(),
         "inventario_motivos_ajuste" => match v.as_array() {
             Some(l) if !l.is_empty() && l.len() <= 30 && l.iter().all(|x| x.as_str().is_some_and(|t| !t.trim().is_empty() && t.chars().count() <= 40)) => Ok(()),
             _ => Err("Motivos de ajuste: una lista de textos cortos".into()),

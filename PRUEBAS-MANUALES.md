@@ -172,6 +172,8 @@ Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio
 2. **Cantidad enorme.** En el buscador escriba `999999*` y un código. → "La cantidad máxima por línea es 100.000."
 3. **Anonimizar con factura pendiente.** Venda a un cliente pidiendo factura y, sin marcarla, intente anonimizarlo. → Lo rechaza y dice por qué. Marque la factura y anonimice: en Ventas del día, el tiquete ya no muestra su nombre.
 4. **Anular una venta facturada.** → Aviso rojo de nota de crédito; en la bitácora, `venta.anular` lleva la referencia de la factura.
+5. **Importar sin códigos internos.** En Productos → Importar, deje apagado «Generar un código interno…» (viene apagado). → Los productos nuevos quedan sin código; se les escanea el código de barras después. Enciéndalo y vuelva a importar: reciben código interno. La opción queda guardada.
+6. **Nombres con espacios o tildes raras.** Cree un producto «Café   con  leche» copiando el nombre de una página web. → Se guarda «Café con leche»; buscar «cafe con leche» lo encuentra y el tiquete imprime la tilde bien.
 
 5. **Impresora sin papel.** Quite el papel (o desconecte la USB a medio tiquete) y cobre. → En unos 10 s avisa que la impresora no contestó; la venta queda guardada y la siguiente venta se cobra normal. Con «No venta», si la gaveta no contesta, el aviso dice que quedó registrado.
 

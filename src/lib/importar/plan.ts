@@ -52,6 +52,8 @@ export interface Opciones {
   /** Filas cuya sugerencia de nombre aceptó el dueño. */
   sugerenciasAceptadas: ReadonlySet<number>;
   limitarFavoritos: boolean;
+  /** Generar un código interno a los que no tienen uno (por defecto no: se escanea su código de barras). */
+  codigosInternos?: boolean;
   /** Reemplazar lo que el dueño editó en el POS (por defecto no). */
   pisar: { departamento: boolean; favorito: boolean };
 }
@@ -320,10 +322,10 @@ export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones
   else for (const i of elegidos) i.favorito = true;
   plan.favoritos = { destacados: plan.validos.filter((i) => i.destacado).length, marcados: elegidos.size, cupo };
 
-  // Códigos internos, en el orden del archivo para que sean estables.
+  // Códigos internos (solo si se pidió), en el orden del archivo para que sean estables.
   const usados = new Set(ctx.codigos.map((c) => c.toLowerCase()));
   const tieneInterno = new Map(ctx.existentes.map((e) => [e.id, e.tieneInterno]));
-  for (const i of plan.validos) {
+  for (const i of op.codigosInternos ? plan.validos : []) {
     if (i.productoId && tieneInterno.get(i.productoId)) continue;
     i.codigo = codigoLibre(codigoBase(deps.get(i.departamentoId)?.codigo ?? "", i.nombre), usados);
   }

@@ -53,16 +53,31 @@ pub fn dia_local() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// Minúsculas, sin tildes ni diéresis, espacios simples (igual que normalizar() del frontend).
+/// Caracteres invisibles que no tienen nada que hacer en un texto: control (C0/C1, incluido ESC),
+/// ancho cero y marcas de dirección (pueden disfrazar un nombre).
+pub fn invisible(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+}
+
+/// Tilde "suelta" (Unicode descompuesto, como llega al copiar de una web o de una Mac: e + ◌́).
+fn marca(c: char) -> bool {
+    ('\u{0300}'..='\u{036f}').contains(&c)
+}
+
+/// Minúsculas, sin tildes ni diéresis, espacios simples (igual que normalizar() del frontend, que
+/// quita toda marca con NFD): sirve para buscar, así que las dos tienen que dar lo mismo.
 pub fn normalizar(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars().flat_map(|c| c.to_lowercase()) {
         let c = match c {
-            'á' | 'à' | 'ä' | 'â' | 'ã' => 'a',
+            c if marca(c) => continue,
+            c if invisible(c) => ' ',
+            'á' | 'à' | 'ä' | 'â' | 'ã' | 'å' => 'a',
             'é' | 'è' | 'ë' | 'ê' => 'e',
             'í' | 'ì' | 'ï' | 'î' => 'i',
             'ó' | 'ò' | 'ö' | 'ô' | 'õ' => 'o',
             'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ý' | 'ÿ' => 'y',
             'ñ' => 'n',
             'ç' => 'c',
             otro => otro,
@@ -74,7 +89,11 @@ pub fn normalizar(s: &str) -> String {
 
 /// Texto con largo máximo; recorta espacios. Error si queda vacío y es obligatorio.
 pub fn texto(v: &str, max: usize, campo: &str, obligatorio: bool) -> Res<String> {
-    let t = v.trim();
+    // Sin caracteres de ancho cero ni marcas de dirección, y sin espacios repetidos (los saltos de
+    // línea de una nota se respetan). Así "Ana  Mora" y "Ana Mora" son el mismo nombre.
+    let limpio: String = v.chars().filter(|c| *c == '\n' || c.is_control() || !invisible(*c)).collect();
+    let limpio = limpio.split('\n').map(|l| l.split([' ', '\t']).filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("\n");
+    let t = limpio.trim();
     if obligatorio && t.is_empty() {
         return Err(format!("Escriba {campo}"));
     }
@@ -114,6 +133,24 @@ pub fn guardar_en(dir: &std::path::Path, nombre: &str, datos: &[u8]) -> Res<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mismos casos que tests/texto.test.ts: la búsqueda solo funciona si las dos dan lo mismo.
+    #[test]
+    fn normalizar_igual_que_la_pantalla_y_nombres_limpios() {
+        for (entrada, esperado) in [
+            ("Café Ñandú", "cafe nandu"),
+            ("Cafe\u{301} N\u{303}andu\u{301}", "cafe nandu"), // tildes sueltas (copiado de una web o Mac)
+            ("  LÁPIZ   2B ", "lapiz 2b"),
+            ("Ana\u{200b}Mora", "ana mora"),
+            ("Pingüino Ýoyo", "pinguino yoyo"),
+        ] {
+            assert_eq!(normalizar(entrada), esperado, "{entrada:?}");
+        }
+        assert_eq!(texto("  Ana \u{200b} \t Mora ", 60, "nombre", true).unwrap(), "Ana Mora");
+        assert_eq!(texto("línea  uno\nlínea   dos", 200, "nota", false).unwrap(), "línea uno\nlínea dos");
+        assert!(texto("\u{200b}\u{feff} ", 60, "el nombre", true).unwrap_err().contains("Escriba"));
+        assert!(texto("a\u{1b}b", 60, "nombre", true).is_err());
+    }
 
     #[test]
     fn guardar_sin_pisar_y_solo_nombres_simples() {

@@ -1,6 +1,6 @@
 import type { Actor, Departamento } from "../tipos";
 import { puede, SinPermiso } from "../lib/permisos";
-import { ahoraIso, normalizar } from "../lib/texto";
+import { ahoraIso, limpiarNombre, normalizar } from "../lib/texto";
 import { ulid } from "../lib/ulid";
 import { bitacora } from "./bitacora";
 import { bool, db } from "./conexion";
@@ -45,7 +45,7 @@ export async function crearDepartamento(actor: Actor, datos: { codigo: string; n
   await db().lote([
     {
       id: "departamento.crear",
-      params: [id, datos.codigo, datos.nombre.trim(), orden],
+      params: [id, datos.codigo, limpiarNombre(datos.nombre), orden],
     },
     bitacora(actor.id, "departamento.crear", "departamento", id, datos),
   ]);
@@ -62,7 +62,7 @@ export async function editarDepartamento(
   if (!d) throw new Error("Departamento no encontrado");
   if (cambios.codigo !== undefined && cambios.codigo !== d.codigo && !puede(actor.rol, "departamentos.estructura"))
     throw new SinPermiso("cambiar el código de un departamento");
-  const n = { ...d, ...cambios, nombre: (cambios.nombre ?? d.nombre).trim() };
+  const n = { ...d, ...cambios, nombre: limpiarNombre(cambios.nombre ?? d.nombre) };
   await validar(n, id);
   const ahora = ahoraIso();
   await db().lote([
