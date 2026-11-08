@@ -40,17 +40,28 @@ export default function Conteo() {
 
   const datos = () => Object.fromEntries(Object.entries(contado).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, Number(v)]));
 
-  async function guardar() {
-    if (!conteo) return;
+  /** Devuelve si quedó guardado: aplicar sin guardar usaría lo de antes, no lo que se ve. */
+  async function guardar(avisar = true): Promise<boolean> {
+    if (!conteo) return false;
     setError("");
     try {
       await guardarConteo(conteo.id, null, datos());
       setFilas(await diferenciasConteo(conteo.id));
-      toast.ok("Conteo guardado. Puede seguir después.");
+      if (avisar) toast.ok("Conteo guardado. Puede seguir después.");
+      return true;
     } catch (e) {
       setError(textoError(e));
+      return false;
     }
   }
+
+  // Lo contado se guarda solo, al ratito de cada cambio: si la sesión se cierra por inactividad
+  // mientras se cuenta en los estantes, no se pierde nada.
+  useEffect(() => {
+    if (!conteo) return;
+    const t = setTimeout(() => void guardarConteo(conteo.id, null, datos()).catch((e) => setError(textoError(e))), 1500);
+    return () => clearTimeout(t);
+  }, [contado]);
 
   // Escanear suma 1 al producto de ese código.
   useEscaner(
@@ -67,7 +78,7 @@ export default function Conteo() {
   if (!conteo)
     return (
       <section className="card">
-        <p>Cuente lo que hay en el estante. Puede guardar a medias y seguir otro día; al aplicar, las diferencias quedan como ajustes con motivo «Conteo».</p>
+        <p>Cuente lo que hay en el estante. Lo contado se guarda solo: puede seguir otro día. Al aplicar, las diferencias quedan como ajustes con motivo «Conteo».</p>
         <Field label="Departamento a contar">
           <select value={depto} onChange={(e) => setDepto(e.target.value)}>
             <option value="">Todos</option>
@@ -104,7 +115,7 @@ export default function Conteo() {
   return (
     <section className="card">
       <p className="muted">
-        {departamentos.find((d) => d.id === conteo.departamentoId)?.nombre ?? "Todos los departamentos"} · contados {contados} de {filas.length}. Escanee para sumar 1 o escriba la cantidad.
+        {departamentos.find((d) => d.id === conteo.departamentoId)?.nombre ?? "Todos los departamentos"} · contados {contados} de {filas.length}. Escanee para sumar 1 o escriba la cantidad; se guarda solo.
       </p>
       <label className="row">
         <input type="checkbox" checked={soloDiferencias} onChange={(e) => setSoloDiferencias(e.target.checked)} /> Ver solo diferencias
@@ -140,7 +151,7 @@ export default function Conteo() {
       </table>
       <Mensaje error={error} />
       <div className="row">
-        <Button icono={Save} onClick={guardar}>
+        <Button icono={Save} onClick={() => void guardar()}>
           Guardar a medias
         </Button>
         <Button
@@ -148,8 +159,7 @@ export default function Conteo() {
           icono={CheckCircle2}
           disabled={!contados}
           onClick={async () => {
-            await guardar();
-            setPidePin(true);
+            if (await guardar(false)) setPidePin(true);
           }}
         >
           Aplicar conteo

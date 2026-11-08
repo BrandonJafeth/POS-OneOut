@@ -46,11 +46,14 @@ const FILTROS: [FiltroInventario, string][] = [
   ["sin_control", "Sin control"],
 ];
 
-export default function Existencias() {
+export default function Existencias(p: { filtroInicial?: FiltroInventario; onFiltro?(f: FiltroInventario): void }) {
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [texto, setTexto] = useState("");
   const [depto, setDepto] = useState("");
-  const [filtro, setFiltro] = useState<FiltroInventario>("");
+  const [filtro, setFiltroLocal] = useState<FiltroInventario>(p.filtroInicial ?? "");
+  const setFiltro = (f: FiltroInventario) => (setFiltroLocal(f), p.onFiltro?.(f));
+  // El botón «Ver cuáles» de arriba cambia el filtro sin borrar lo que se buscó.
+  useEffect(() => setFiltroLocal(p.filtroInicial ?? ""), [p.filtroInicial]);
   const [filas, setFilas] = useState<FilaInventario[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");

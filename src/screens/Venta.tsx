@@ -95,6 +95,8 @@ export default function Venta() {
     return () => clearInterval(i);
   }, [modal, activaId]);
   const alBuscador = () => setTimeout(() => buscador.current?.focus(), 0);
+  // Venta lista: el foco vuelve al buscador para la siguiente (escribir o escanear sin hacer clic).
+  const cerrarCobrada = () => (setCobrada(null), alBuscador());
 
   /** Igual que actualizar, pero si el descuento pasa el tope del rol, pide antes el PIN del dueño. */
   function actualizarConTope(nuevo: EstadoEspera) {
@@ -265,7 +267,7 @@ export default function Venta() {
     const k = (e: KeyboardEvent) => {
       if (cobrada && (e.key === "Enter" || e.key === "Escape")) {
         e.preventDefault();
-        return setCobrada(null);
+        return cerrarCobrada();
       }
       if (modal) return;
       const atajos: Record<string, () => void> = {
@@ -286,7 +288,9 @@ export default function Venta() {
         return;
       }
       const enBuscador = document.activeElement === buscador.current;
-      if (e.key === "Delete" && lineaSel && (!enBuscador || !texto)) {
+      // Supr dentro de otro campo (p. ej. corrigiendo la cantidad) borra texto, no la línea entera.
+      const escribiendo = !enBuscador && document.activeElement?.matches("input, textarea, select, [contenteditable]");
+      if (e.key === "Delete" && lineaSel && !escribiendo && (!enBuscador || !texto)) {
         e.preventDefault();
         quitarLinea(lineaSel);
       }
@@ -607,7 +611,7 @@ export default function Venta() {
         />
       )}
       {cobrada && (
-        <Modal titulo={`Venta ${cobrada.numero} cobrada`} onCerrar={() => setCobrada(null)} ancho={460}>
+        <Modal titulo={`Venta ${cobrada.numero} cobrada`} onCerrar={cerrarCobrada} ancho={460}>
           {cobrada.vuelto > 0 && (
             <div className="cobro-resumen ok">
               <Banknote size={24} aria-hidden /> Vuelto <strong>{monto(cobrada.vuelto)}</strong>
@@ -640,7 +644,7 @@ export default function Venta() {
             )
           )}
           <div className="fila-botones">
-            <Button variante="primario" tamano="lg" icono={ShoppingCart} atajo="Enter" onClick={() => setCobrada(null)} autoFocus>
+            <Button variante="primario" tamano="lg" icono={ShoppingCart} atajo="Enter" onClick={cerrarCobrada} autoFocus>
               Siguiente venta
             </Button>
           </div>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { guardarConfig } from "../db/config";
-import { alertasInventario } from "../db/inventario";
+import { alertasInventario, type FiltroInventario } from "../db/inventario";
 import Button from "../ui/Button";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
@@ -30,12 +30,20 @@ export default function Inventario() {
   const { puede } = useSesion();
   const [tab, setTab] = useState<Tab>("existencias");
   const [alertas, setAlertas] = useState(0);
+  const [filtro, setFiltro] = useState<FiltroInventario>("");
   useEffect(() => void alertasInventario().then(setAlertas, () => setAlertas(0)), [tab]);
   const tabs = TABS.filter(([id]) => id !== "reportes" || puede("reportes"));
   return (
     <div className="screen">
       <h1>Inventario</h1>
-      {alertas > 0 && tab === "existencias" && <p className="muted">{alertas === 1 ? "1 producto está" : `${alertas} productos están`} en su mínimo o por debajo. Use el filtro «Bajo mínimo».</p>}
+      {alertas > 0 && tab === "existencias" && filtro !== "bajo_minimo" && (
+        <div className="row">
+          <span className="muted">{alertas === 1 ? "1 producto está" : `${alertas} productos están`} en su mínimo o por debajo.</span>
+          <Button variante="fantasma" onClick={() => setFiltro("bajo_minimo")}>
+            Ver {alertas === 1 ? "cuál" : "cuáles"}
+          </Button>
+        </div>
+      )}
       <div className="tabs" role="tablist" aria-label="Inventario">
         {tabs.map(([id, t]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab active" : "tab"} onClick={() => setTab(id)}>
@@ -43,7 +51,7 @@ export default function Inventario() {
           </button>
         ))}
       </div>
-      {tab === "existencias" && <Existencias />}
+      {tab === "existencias" && <Existencias filtroInicial={filtro} onFiltro={setFiltro} />}
       {tab === "entrada" && <EntradaMercaderia />}
       {tab === "conteo" && <Conteo />}
       {tab === "reportes" && <Reportes />}

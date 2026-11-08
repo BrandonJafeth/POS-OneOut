@@ -46,7 +46,15 @@ export default function Inicial(p: { onConteo(): void }) {
         <h2>Cargar desde un archivo CSV</h2>
         <p className="muted">Columnas: «codigo» (o «id»), «existencia» y, si quiere, «costo» en colones. Si una sola fila tiene error, no se carga nada.</p>
         <Field label="Archivo CSV">
-          <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && void leer(e.target.files[0])} />
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = ""; // así el mismo archivo, ya corregido, se puede volver a elegir
+              if (f) void leer(f);
+            }}
+          />
         </Field>
         <Mensaje error={error} />
         {prevista.length > 0 && (

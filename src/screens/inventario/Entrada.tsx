@@ -28,16 +28,35 @@ interface Linea {
 
 const hoy = () => new Date().toLocaleDateString("sv-SE");
 
+// Borrador de la entrada a medio digitar: si la sesión se cierra por inactividad, no se pierde.
+// sessionStorage vive mientras la ventana esté abierta (se borra al cerrar el programa).
+const BORRADOR = "inventario.entrada.borrador";
+interface Borrador {
+  proveedor: string;
+  factura: string;
+  fecha: string;
+  lineas: Linea[];
+  actualizarCosto: boolean;
+}
+function leerBorrador(): Partial<Borrador> {
+  try {
+    return JSON.parse(sessionStorage.getItem(BORRADOR) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
 export default function EntradaMercaderia() {
   const { config } = useSesion();
   const toast = useToast();
   const confirmar = useConfirmar();
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [proveedor, setProveedor] = useState("");
-  const [factura, setFactura] = useState("");
-  const [fecha, setFecha] = useState(hoy);
-  const [lineas, setLineas] = useState<Linea[]>([]);
-  const [actualizarCosto, setActualizarCosto] = useState(true);
+  const [borrador] = useState(leerBorrador);
+  const [proveedor, setProveedor] = useState(borrador.proveedor ?? "");
+  const [factura, setFactura] = useState(borrador.factura ?? "");
+  const [fecha, setFecha] = useState(borrador.fecha ?? hoy());
+  const [lineas, setLineas] = useState<Linea[]>(borrador.lineas ?? []);
+  const [actualizarCosto, setActualizarCosto] = useState(borrador.actualizarCosto ?? true);
   const [buscar, setBuscar] = useState("");
   const [opciones, setOpciones] = useState<ProductoLista[]>([]);
   const [error, setError] = useState("");
@@ -45,6 +64,14 @@ export default function EntradaMercaderia() {
   const [hecha, setHecha] = useState<Comprobante | null>(null);
 
   useEffect(() => void listarProveedores().then(setProveedores, (e) => setError(textoError(e))), []);
+  useEffect(() => {
+    try {
+      if (lineas.length || factura) sessionStorage.setItem(BORRADOR, JSON.stringify({ proveedor, factura, fecha, lineas, actualizarCosto } satisfies Borrador));
+      else sessionStorage.removeItem(BORRADOR);
+    } catch {
+      /* sin almacenamiento: se sigue sin borrador */
+    }
+  }, [proveedor, factura, fecha, lineas, actualizarCosto]);
 
   function agregar(p: { id: string; nombre: string; precio: number }) {
     setLineas((ls) => {
@@ -167,6 +194,7 @@ export default function EntradaMercaderia() {
           <input type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} />
         </Field>
       </div>
+      {borrador.lineas?.length ? <Alert tono="info">Se recuperó la entrada que estaba a medias ({borrador.lineas.length} producto(s)).</Alert> : null}
       <Field label="Agregar producto" ayuda="Escanee el código, o escriba el nombre o el código y elija.">
         <input
           type="search"
