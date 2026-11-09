@@ -5,7 +5,7 @@ import { codigoInterno, ean13CheckDigit, isValidEan13 } from "../src/lib/ean13";
 import { etiquetaProducto } from "../src/lib/impresion";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS } from "../src/lib/tickets";
-import { esLecturaDeEscaner } from "../src/lib/useEscaner";
+import { esLecturaDeEscaner, esRepetida } from "../src/lib/useEscaner";
 import type { Actor } from "../src/tipos";
 import { baseDePrueba } from "./driverNode";
 
@@ -78,5 +78,19 @@ describe("detección del escáner", () => {
     expect(esLecturaDeEscaner([0, 10, 20, 30, 40], 40, 3)).toBe(true);
     expect(esLecturaDeEscaner([0, 150, 300, 450], 40, 3)).toBe(false);
     expect(esLecturaDeEscaner([0, 5], 40, 3)).toBe(false);
+  });
+});
+
+describe("lector que manda lecturas repetidas o pegadas", () => {
+  it("la misma lectura antes del tiempo de espera se ignora; después, cuenta (otra unidad)", () => {
+    const u = { codigo: "7401234567895", en: 1000 };
+    expect(esRepetida(u, "7401234567895", 1200, 400)).toBe(true);
+    expect(esRepetida(u, "7401234567895", 1500, 400)).toBe(false);
+    expect(esRepetida(u, "7409999999995", 1200, 400)).toBe(false);
+  });
+
+  it("dos códigos pegados sin Enter son UNA lectura (código desconocido → aviso), no dos productos", () => {
+    const tiempos = Array.from({ length: 26 }, (_, i) => i * 8);
+    expect(esLecturaDeEscaner(tiempos, 40, 3)).toBe(true);
   });
 });

@@ -110,7 +110,7 @@ pub fn texto(v: &str, max: usize, campo: &str, obligatorio: bool) -> Res<String>
 /// ("x (1).pdf"). Solo un nombre simple .pdf/.csv: la ventana no elige carpetas ni extensiones.
 pub fn guardar_en(dir: &std::path::Path, nombre: &str, datos: &[u8]) -> Res<String> {
     let simple = !nombre.is_empty() && nombre.len() <= 120 && !nombre.starts_with('.') && !nombre.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c));
-    let Some((base, ext)) = nombre.rsplit_once('.').filter(|(_, x)| *x == "pdf" || *x == "csv") else {
+    let Some((base, ext)) = nombre.rsplit_once('.').filter(|(_, x)| matches!(*x, "pdf" | "csv" | "txt")) else {
         return Err(format!("{TECNICO}Archivo no permitido: {nombre}"));
     };
     if !simple {

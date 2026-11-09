@@ -39,8 +39,35 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (12, "control_por_codigo", include_str!("../../src/db/migraciones/0012_control_por_codigo.sql")),
 ];
 
-#[derive(Debug)]
+/// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
+/// abrir la base si cambia: un build hecho desde un clon con CRLF (git en Windows) no abriría las
+/// bases migradas con LF. Normalizado, la suma es la misma venga el archivo como venga.
+fn sin_cr(sql: &str) -> std::borrow::Cow<'_, str> {
+    if sql.contains('\r') { sql.replace("\r\n", "\n").into() } else { sql.into() }
+}
+
+/// Bases migradas cuando un .sql venía en CRLF guardaron la suma del CRLF. Si la guardada es la de
+/// la MISMA migración en CRLF, se pasa a la normalizada (sin_cr). Cualquier otra diferencia es un
+/// cambio de contenido y sqlx la sigue rechazando.
+async fn reparar_sumas(pool: &SqlitePool) -> Res<()> {
+    let aplicadas: Vec<(i64, Vec<u8>)> = match sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations").fetch_all(pool).await {
+        Ok(f) => f,
+        Err(_) => return Ok(()), // base nueva: todavía no hay tabla de migraciones
+    };
+    let suma = |v: i64, d: &str, sql: String| Migration::new(v, d.to_string().into(), MigrationType::ReversibleUp, sql.into(), false).checksum.into_owned();
+    for (v, guardada) in aplicadas {
+        let Some((_, d, sql)) = MIGRACIONES.iter().find(|m| m.0 == v) else { continue };
+        let lf = sin_cr(sql).into_owned();
+        let normal = suma(v, d, lf.clone());
+        if guardada != normal && guardada == suma(v, d, lf.replace('\n', "\r\n")) {
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?").bind(&normal).bind(v).execute(pool).await.map_err(e)?;
+        }
+    }
+    Ok(())
+}
+
 /// Las primeras N migraciones (todas en la app; menos en pruebas, para simular una base vieja).
+#[derive(Debug)]
 struct Lista(usize);
 
 impl MigrationSource<'static> for Lista {
@@ -48,7 +75,7 @@ impl MigrationSource<'static> for Lista {
         Box::pin(async move {
             Ok(MIGRACIONES[..self.0]
                 .iter()
-                .map(|(v, d, sql)| Migration::new(*v, (*d).into(), MigrationType::ReversibleUp, (*sql).into(), false))
+                .map(|(v, d, sql)| Migration::new(*v, (*d).into(), MigrationType::ReversibleUp, sin_cr(sql).into_owned().into(), false))
                 .collect())
         })
     }
@@ -210,6 +237,27 @@ async fn integridad(pool: &SqlitePool) -> Res<()> {
     Ok(())
 }
 
+/// Antes de crear la clave o abrir la base: ¿qué había en la carpeta? Primera vez (nada) → se
+/// crea todo. Si falta solo la base o solo la clave, NO se crea nada nuevo encima: una base vacía
+/// taparía los datos (el cliente seguiría trabajando en ella) y una clave nueva dejaría la base
+/// huérfana. Se avisa en palabras simples y se ofrece restaurar.
+pub fn revisar_instalacion(dir: &Path, cifrado: bool) -> Res<()> {
+    let (base, clave) = (dir.join("pos.db").exists(), dir.join("pos.clave").exists());
+    if !base && clave {
+        return Err(format!(
+            "No se encontró la base de datos (pos.db) en {}, pero esta computadora ya tenía el programa instalado. No se creó una base nueva para no tapar sus datos. Si la base se movió, devuélvala a esa carpeta; si no, use «Restaurar desde respaldo».",
+            dir.to_string_lossy()
+        ));
+    }
+    if base && !clave && cifrado {
+        return Err(format!(
+            "Falta la clave de la base (pos.clave) en {}. Sin ella la base no se puede abrir y no se creó una nueva. Si la tiene, devuélvala a esa carpeta; si no, use «Restaurar desde respaldo».",
+            dir.to_string_lossy()
+        ));
+    }
+    Ok(())
+}
+
 pub fn ultima_migracion() -> i64 {
     MIGRACIONES.last().map(|m| m.0).unwrap_or(0)
 }
@@ -249,6 +297,7 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
             std::fs::copy(ruta, carpeta.join(format!("pos-antes-v{}-{marca}.db", aplicadas + 1))).map_err(e)?;
         }
     }
+    reparar_sumas(pool).await?;
     Migrator::new(Lista(MIGRACIONES.len())).await.map_err(e)?.run(pool).await.map_err(e)?;
     bitacora::encadenar_pendientes(pool).await?;
     Ok(())
@@ -382,6 +431,39 @@ mod tests {
 
     fn actor(rol: Rol) -> Actor {
         Actor { id: "U".into(), rol, nombre: "x".into() }
+    }
+
+    /// Una base migrada con los .sql en LF tiene que seguir abriendo con un build hecho desde un
+    /// clon con CRLF (git en Windows): si no, la actualización se niega a abrir la base del cliente
+    /// ("migration N was previously applied but has been modified").
+    #[test]
+    fn suma_de_las_migraciones_no_depende_de_los_saltos_de_linea() {
+        let lf = sin_cr("CREATE TABLE x (a);\nINSERT INTO x VALUES (1);\n");
+        let crlf = sin_cr("CREATE TABLE x (a);\r\nINSERT INTO x VALUES (1);\r\n");
+        assert_eq!(lf, crlf);
+        let m = |sql: &str| Migration::new(1, "x".into(), MigrationType::ReversibleUp, sin_cr(sql).into_owned().into(), false).checksum;
+        assert_eq!(m("a;\nb;\n"), m("a;\r\nb;\r\n"));
+        // Las migraciones reales: ninguna tiene CR después de normalizar.
+        assert!(MIGRACIONES.iter().all(|(_, _, sql)| !sin_cr(sql).contains('\r')));
+    }
+
+    /// Bases ya migradas con un .sql en CRLF (la suma guardada es la del CRLF) siguen abriendo:
+    /// la suma se pasa a la normalizada. Un cambio de CONTENIDO sigue rechazándose.
+    #[tokio::test]
+    async fn bases_migradas_con_crlf_siguen_abriendo_y_un_cambio_real_no() {
+        let dir = std::env::temp_dir().join(format!("pos-sumas-{}", crate::util::ulid()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ruta = dir.join("pos.db");
+        let vieja = crear_vieja(&ruta, MIGRACIONES.len()).await;
+        let crlf = sin_cr(MIGRACIONES[0].2).replace('\n', "\r\n");
+        let suma_crlf = Migration::new(1, "inicial".into(), MigrationType::ReversibleUp, crlf.into(), false).checksum.into_owned();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 1").bind(&suma_crlf).execute(&vieja).await.unwrap();
+        migrar(&vieja, None, Path::new("")).await.unwrap();
+        // Contenido distinto (no solo saltos de línea): sigue siendo un error.
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = x'00' WHERE version = 2").execute(&vieja).await.unwrap();
+        assert!(migrar(&vieja, None, Path::new("")).await.is_err());
+        vieja.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

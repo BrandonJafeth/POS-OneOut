@@ -47,3 +47,20 @@ export const DIAS_SIN_RESPALDO = 7;
 export async function reiniciarApp(): Promise<void> {
   await invocarRust("app_reiniciar");
 }
+
+// ─────────── Respaldo automático ───────────
+
+export interface EstadoAutomatico {
+  configurado: boolean;
+  ultimo: string | null;
+  ultimoVerificado: boolean | null;
+  hechoHoy: boolean;
+  recordarUsb: boolean;
+  cantidad: number;
+  carpeta: string;
+}
+
+export const estadoAutomatico = () => invocarRust<EstadoAutomatico>("respaldo_auto_estado");
+export const configurarAutomatico = (contrasena: string, pin: string) => invocarRust<void>("respaldo_auto_configurar", { contrasena, pin });
+export const respaldoAhora = () => invocarRust<string | null>("respaldo_auto_ahora");
+export const usbConfirmado = () => invocarRust<void>("respaldo_usb_confirmado");

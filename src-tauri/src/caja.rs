@@ -267,6 +267,25 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
     })
 }
 
+/// Reloj atrasado: el día de la caja, las horas del Z y las fechas de las ventas saldrían mal. Se
+/// nota contra lo último registrado (con 10 minutos de margen). Al abrir, cobrar y cerrar.
+pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
+    let ultimo: Option<String> = sqlx::query_scalar(
+        "SELECT MAX(f) FROM (SELECT MAX(fecha) AS f FROM ventas UNION ALL SELECT MAX(COALESCE(cerrado_en, abierto_en)) FROM caja_turnos)",
+    )
+    .fetch_one(&mut *c)
+    .await
+    .map_err(e)?;
+    let margen = (chrono::Utc::now() + chrono::Duration::minutes(10)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    if let Some(u) = ultimo.filter(|u| *u > margen) {
+        return Err(format!(
+            "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de {para}.",
+            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u)
+        ));
+    }
+    Ok(())
+}
+
 pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo) -> Res<Turno> {
     a.exigir("caja", "abrir la caja")?;
     let (fondo, detalle) = total_conteo(conteo, &denominaciones(pool).await)?;
@@ -285,20 +304,7 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
             format!("La caja ya la tiene abierta {}. Debe cerrarla con su conteo antes de abrir la suya.", t.usuario_apertura)
         });
     }
-    // Reloj atrasado: el día de la caja y las horas del Z saldrían mal. Se nota contra lo último registrado.
-    let ultimo: Option<String> = sqlx::query_scalar(
-        "SELECT MAX(f) FROM (SELECT MAX(fecha) AS f FROM ventas UNION ALL SELECT MAX(COALESCE(cerrado_en, abierto_en)) FROM caja_turnos)",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(e)?;
-    let margen = (chrono::Utc::now() + chrono::Duration::minutes(10)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    if let Some(u) = ultimo.filter(|u| *u > margen) {
-        return Err(format!(
-            "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de abrir la caja.",
-            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u)
-        ));
-    }
+    reloj_atrasado(&mut tx, "abrir la caja").await?;
     sqlx::query(
         "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en)
          SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
@@ -883,6 +889,7 @@ pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo
     // La bitácora se verifica en cada cierre: si alguien la alteró, queda dicho en el reporte.
     let ver = bitacora::verificar(pool).await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    reloj_atrasado(&mut tx, "cerrar la caja").await?;
     let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja no está abierta")?;
     let comp = compartido(&mut tx).await;
     puede_cerrar(a, &t, comp)?;
@@ -1210,6 +1217,27 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
         out.push(TurnoFila { ventas: ve.then_some(n), total: ve.then_some(total), pendiente_revision: pendiente && admin, no_ventas: nv, alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv, turno: t });
     }
     Ok(out)
+}
+
+/// Primer número de tiquete de la caja (para seguir después del último del sistema anterior).
+/// Solo dueño o técnico, solo antes de la primera venta de la caja, y queda en la bitácora.
+pub async fn fijar_consecutivo(pool: &SqlitePool, a: &Actor, caja_id: &str, numero: i64) -> Res<()> {
+    if !puede(a.rol, "caja.admin") && !puede(a.rol, "config.tecnica") {
+        return Err(sin_permiso("cambiar el número de tiquete"));
+    }
+    if !(1..=999_999_999).contains(&numero) {
+        return Err("El número de tiquete va de 1 a 999.999.999".into());
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let ventas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas WHERE caja_id = ?").bind(caja_id).fetch_one(&mut *tx).await.map_err(e)?;
+    if ventas > 0 {
+        return Err("La caja ya tiene ventas: el número de tiquete solo se fija antes de la primera venta (si no, se repetirían o saltarían números ya entregados).".into());
+    }
+    let antes: i64 = sqlx::query_scalar("SELECT consecutivo_siguiente FROM cajas WHERE id = ?").bind(caja_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Caja no encontrada")?;
+    sqlx::query("UPDATE cajas SET consecutivo_siguiente = ?, actualizado_en = ? WHERE id = ?").bind(numero).bind(ahora_iso()).bind(caja_id).execute(&mut *tx).await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "caja.consecutivo", "caja", Some(caja_id), &json!({"antes": antes, "despues": numero})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
 }
 
 #[cfg(test)]

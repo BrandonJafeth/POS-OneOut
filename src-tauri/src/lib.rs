@@ -7,11 +7,16 @@ mod clave;
 mod clientes;
 mod config;
 mod desglose;
+mod diagnostico;
 mod escpos;
 mod estadisticas;
 mod gaveta;
 mod importacion;
 mod impresoras;
+#[cfg(test)]
+mod invariantes;
+#[cfg(test)]
+mod tabla_permisos;
 mod inventario;
 mod negocio;
 mod permisos;
@@ -36,8 +41,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use util::Res;
 
+/// Carpeta de datos dentro de %APPDATA%. NO depende del identifier ni del nombre del programa: el
+/// desinstalador (NSIS) borra %APPDATA%\<identifier> si se marca «Borrar datos», y aquí están la
+/// base, la clave y los respaldos. NO CAMBIAR este nombre: el cliente dejaría de ver sus datos.
+const CARPETA_DATOS: &str = "PuntoDeVenta-Datos";
+
 struct App {
     bd: Result<Bd, String>,
+    dir: std::path::PathBuf,
     clave: Option<[u8; 32]>,
     sesion: Sesion,
     /// El usuario entró con un PIN que debe cambiar: hasta hacerlo, no puede hacer otra cosa.
@@ -75,12 +86,25 @@ struct EstadoSistema {
     tema: Value,
     color_acento: Value,
     carpeta: String,
+    /// Versión del programa y última migración que conoce (pantalla «Acerca de»).
+    version: &'static str,
+    migracion: i64,
 }
 
 #[tauri::command]
 async fn sistema_estado(st: St<'_>) -> Res<EstadoSistema> {
     match &st.bd {
-        Err(err) => Ok(EstadoSistema { error: Some(err.clone()), necesita_tecnico: false, cifrada: false, nombre_negocio: String::new(), tema: Value::Null, color_acento: Value::Null, carpeta: String::new() }),
+        Err(err) => Ok(EstadoSistema {
+            error: Some(err.clone()),
+            necesita_tecnico: false,
+            cifrada: false,
+            nombre_negocio: String::new(),
+            tema: Value::Null,
+            color_acento: Value::Null,
+            carpeta: st.dir.to_string_lossy().to_string(),
+            version: env!("CARGO_PKG_VERSION"),
+            migracion: bd::ultima_migracion(),
+        }),
         Ok(b) => {
             let nombre: Option<String> = sqlx::query_scalar("SELECT nombre_comercial FROM negocio WHERE id = 1").fetch_optional(&b.pool).await.map_err(util::e)?;
             Ok(EstadoSistema {
@@ -91,9 +115,37 @@ async fn sistema_estado(st: St<'_>) -> Res<EstadoSistema> {
                 tema: config::valor(&b.pool, "tema").await.unwrap_or(Value::Null),
                 color_acento: config::valor(&b.pool, "color_acento").await.unwrap_or(Value::Null),
                 carpeta: b.dir.as_ref().map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
+                version: env!("CARGO_PKG_VERSION"),
+                migracion: bd::ultima_migracion(),
             })
         }
     }
+}
+
+/// La base no abrió (dañada, otra cuenta de Windows, clave o base perdidas): sin sesión posible, se
+/// restaura un respaldo con su contraseña. Solo funciona en ese estado. Si la clave actual no se
+/// puede leer, queda a un lado con fecha y se crea otra para la base restaurada.
+#[tauri::command]
+async fn sistema_restaurar(st: St<'_>, archivo: Vec<u8>, contrasena: String) -> Res<()> {
+    if st.bd.is_ok() {
+        return Err("La base abre bien: restaure desde Administración → Respaldo.".into());
+    }
+    let clave = if cfg!(feature = "cifrado") {
+        Some(match clave::obtener(&st.dir) {
+            Ok(k) => k,
+            Err(_) => {
+                let vieja = st.dir.join("pos.clave");
+                if vieja.exists() {
+                    let marca = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                    std::fs::rename(&vieja, st.dir.join(format!("pos.clave.resguardo-{marca}"))).map_err(util::e)?;
+                }
+                clave::obtener(&st.dir)?
+            }
+        })
+    } else {
+        None
+    };
+    respaldo::restaurar_sin_base(&st.dir, &archivo, &contrasena, clave.as_ref()).await
 }
 
 /// Primer arranque: crea el técnico. Solo funciona si todavía no existe ninguno.
@@ -288,9 +340,54 @@ async fn caja_necesita_nota(st: St<'_>, conteo: caja::Conteo) -> Res<bool> {
 }
 
 #[tauri::command]
-async fn caja_cerrar(st: St<'_>, conteo: caja::Conteo, nota: String) -> Res<caja::ResultadoCierre> {
+async fn caja_cerrar(app: tauri::AppHandle, st: St<'_>, conteo: caja::Conteo, nota: String) -> Res<caja::ResultadoCierre> {
     let a = st.actor().await?;
-    caja::cerrar(st.pool()?, &a, caja::CAJA_1, &conteo, &nota).await
+    let r = caja::cerrar(st.pool()?, &a, caja::CAJA_1, &conteo, &nota).await?;
+    // Respaldo automático al cerrar el turno, en segundo plano (no demora el cierre).
+    respaldo_en_segundo_plano(app, "cierre");
+    Ok(r)
+}
+
+/// Hace un respaldo automático sin trabar a quien llama. Si falla, queda en la bitácora.
+fn respaldo_en_segundo_plano(app: tauri::AppHandle, motivo: &'static str) {
+    tauri::async_runtime::spawn(async move {
+        let st = app.state::<App>();
+        if let Ok(b) = &st.bd {
+            if let Err(err) = respaldo::automatico(b, motivo).await {
+                if let Ok(mut tx) = b.pool.begin_with("BEGIN IMMEDIATE").await {
+                    let motivo_err = err.trim_start_matches(util::TECNICO).to_string();
+                    if bitacora::registrar(&mut tx, None, "respaldo.automatico_fallido", "respaldo", None, &json!({"motivo": motivo_err})).await.is_ok() {
+                        let _ = tx.commit().await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
+async fn respaldo_auto_configurar(st: St<'_>, contrasena: String, pin: String) -> Res<()> {
+    let a = st.actor().await?;
+    respaldo::configurar_automatico(st.bd()?, &a, &contrasena, &pin).await
+}
+
+#[tauri::command]
+async fn respaldo_auto_estado(st: St<'_>) -> Res<respaldo::EstadoAutomatico> {
+    let a = st.actor().await?;
+    respaldo::estado_automatico(st.bd()?, &a).await
+}
+
+#[tauri::command]
+async fn respaldo_auto_ahora(st: St<'_>) -> Res<Option<String>> {
+    let a = st.actor().await?;
+    a.exigir("respaldo", "hacer respaldos")?;
+    respaldo::automatico(st.bd()?, "manual").await
+}
+
+#[tauri::command]
+async fn respaldo_usb_confirmado(st: St<'_>) -> Res<()> {
+    let a = st.actor().await?;
+    respaldo::usb_confirmado(st.bd()?, &a).await
 }
 
 #[tauri::command]
@@ -561,6 +658,23 @@ async fn respaldo_ultimo(st: St<'_>) -> Res<Option<String>> {
     respaldo::ultimo(st.bd()?, &a).await
 }
 
+/// Error técnico que vio la pantalla: queda en el registro local (sin datos personales). Funciona
+/// sin sesión: hay errores antes de entrar. El registro rota solo, no crece sin fin.
+#[tauri::command]
+async fn diagnostico_anotar(st: St<'_>, origen: String, mensaje: String) -> Res<()> {
+    diagnostico::anotar(&st.dir, &origen, &mensaje);
+    Ok(())
+}
+
+/// Archivo de diagnóstico para el técnico (sin datos personales), en Descargas.
+#[tauri::command]
+async fn diagnostico_exportar(app: tauri::AppHandle, st: St<'_>) -> Res<String> {
+    let a = st.actor().await?;
+    let txt = diagnostico::exportar(st.bd.as_ref(), &st.dir, &a).await?;
+    let dir = app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?;
+    util::guardar_en(&dir, &format!("diagnostico-pos-{}.txt", chrono::Local::now().format("%Y%m%d-%H%M")), txt.as_bytes())
+}
+
 #[tauri::command]
 async fn app_reiniciar(app: tauri::AppHandle) -> Res<()> {
     app.restart();
@@ -807,6 +921,11 @@ async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]
         Ok(r) => r,
         Err(err) => return (Err(format!("No se pudo aplicar la restauración: {err}")), None),
     };
+    // Antes de crear la clave: nunca una base vacía encima de una instalación (ni una clave nueva
+    // para una base que ya existe).
+    if let Err(err) = bd::revisar_instalacion(dir, cfg!(feature = "cifrado")) {
+        return (Err(err), None);
+    }
     let clave = if cfg!(feature = "cifrado") {
         match clave::obtener(dir) {
             Ok(k) => Some(k),
@@ -834,12 +953,78 @@ fn url_propia(u: &tauri::Url) -> bool {
     }
 }
 
+/// ¿Ya hay otra instancia? Crea un mutex con nombre que vive mientras viva el proceso (el handle
+/// no se cierra a propósito); si ya existía, otra instancia lo tiene.
+#[cfg(windows)]
+fn ya_abierto(nombre: &str) -> bool {
+    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::System::Threading::CreateMutexW;
+    let ancho: Vec<u16> = nombre.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: nombre terminado en 0, vivo durante la llamada.
+    unsafe {
+        let h = CreateMutexW(None, true, windows::core::PCWSTR(ancho.as_ptr()));
+        h.is_ok() && GetLastError() == ERROR_ALREADY_EXISTS
+    }
+}
+
+#[cfg(windows)]
+fn avisar(texto: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    let t: Vec<u16> = texto.encode_utf16().chain(std::iter::once(0)).collect();
+    let titulo: Vec<u16> = "Punto de Venta".encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: cadenas terminadas en 0, vivas durante la llamada.
+    unsafe {
+        MessageBoxW(None, windows::core::PCWSTR(t.as_ptr()), windows::core::PCWSTR(titulo.as_ptr()), MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests_instancia {
+    #[test]
+    fn la_segunda_instancia_se_detecta() {
+        let nombre = format!("Local\\PuntoDeVenta-prueba-{}", crate::util::ulid());
+        assert!(!super::ya_abierto(&nombre), "la primera vez no hay otra");
+        assert!(super::ya_abierto(&nombre), "la segunda vez sí");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Una sola ventana del programa por usuario: dos abiertas serían dos escritores sobre la misma
+    // base (y dos cajas cobrando con el mismo consecutivo en pantalla).
+    #[cfg(windows)]
+    if ya_abierto("Local\\PuntoDeVenta-una-sola-vez") {
+        avisar("El Punto de Venta ya está abierto. Búsquelo en la barra de tareas.");
+        return;
+    }
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().app_config_dir()?;
-            let (bd, clave) = tauri::async_runtime::block_on(preparar(&dir));
+            let dir = app.path().data_dir()?.join(CARPETA_DATOS);
+            let _ = std::fs::create_dir_all(&dir);
+            diagnostico::anotar_cierres(&dir);
+            // Versiones anteriores: datos en la carpeta del identifier → se trasladan una vez.
+            let (bd, clave) = match respaldo::trasladar_datos(&app.path().app_config_dir()?, &dir) {
+                Err(err) => (Err(err), None),
+                Ok(_) => tauri::async_runtime::block_on(preparar(&dir)),
+            };
+            // Respaldo automático diario: un minuto después de abrir y después cada hora se revisa si
+            // ya se hizo el de hoy.
+            if bd.is_ok() {
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    loop {
+                        let hecho = match &h.state::<App>().bd {
+                            Ok(b) => respaldo::automatico_hecho_hoy(b).await,
+                            Err(_) => true,
+                        };
+                        if !hecho {
+                            respaldo_en_segundo_plano(h.clone(), "diario");
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                    }
+                });
+            }
             // Revisión periódica de integridad (además de la del arranque).
             if let Ok(b) = &bd {
                 let pool = b.pool.clone();
@@ -857,7 +1042,7 @@ pub fn run() {
                     }
                 });
             }
-            app.manage(App { bd, clave, sesion: Sesion::default(), debe_cambiar_pin: AtomicBool::new(false) });
+            app.manage(App { bd, dir, clave, sesion: Sesion::default(), debe_cambiar_pin: AtomicBool::new(false) });
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Punto de Venta")
                 .inner_size(1280.0, 800.0)
@@ -872,6 +1057,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sistema_estado,
             sistema_crear_tecnico,
+            sistema_restaurar,
+            diagnostico_anotar,
+            diagnostico_exportar,
             sesion_usuarios,
             sesion_iniciar,
             sesion_tecnico,
@@ -936,6 +1124,10 @@ pub fn run() {
             cliente_retencion,
             respaldo_crear,
             respaldo_ultimo,
+            respaldo_auto_configurar,
+            respaldo_auto_estado,
+            respaldo_auto_ahora,
+            respaldo_usb_confirmado,
             guardar_descarga,
             respaldo_restaurar,
             importacion_leer,

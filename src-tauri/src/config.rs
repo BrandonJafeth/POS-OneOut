@@ -44,6 +44,7 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         // Inventario: solo el dueño (el técnico no tiene acceso a inventario).
         "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => &["inventario"],
         c if c.starts_with("inventario_") => &["inventario"],
+        c if c.starts_with("respaldo_") => &["respaldo"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }
 }
@@ -75,6 +76,7 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
         "sesion_inactividad_min" => entero(1, 240),
         "permitir_vender_sin_existencia" | "venta_mostrar_existencia" | "importacion_codigos_internos" => si_no(),
+        "respaldo_auto_cantidad" => entero(1, 365),
         "inventario_motivos_ajuste" => match v.as_array() {
             Some(l) if !l.is_empty() && l.len() <= 30 && l.iter().all(|x| x.as_str().is_some_and(|t| !t.trim().is_empty() && t.chars().count() <= 40)) => Ok(()),
             _ => Err("Motivos de ajuste: una lista de textos cortos".into()),

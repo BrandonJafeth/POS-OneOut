@@ -2,6 +2,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import {
   Boxes,
   FileText,
+  Info,
   Landmark,
   Moon,
   Package,
@@ -16,7 +17,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { crearSesion, SesionCtx } from "./app/sesion";
+import AcercaDe from "./components/AcercaDe";
+import AvisoRespaldo from "./components/AvisoRespaldo";
 import ErrorPantalla from "./components/ErrorPantalla";
+import RestaurarSinBase from "./components/RestaurarSinBase";
 import { MARCA_TECNICA, mostrarDetalleTecnico, textoError } from "./components/Mensaje";
 import { estadoCaja, type EstadoCaja } from "./db/caja";
 import { guardarConfig, leerConfig, type ConfigApp } from "./db/config";
@@ -74,10 +78,19 @@ const AVANZADO: Seccion[] = [
 type Fase =
   | { f: "cargando" }
   | { f: "sinTauri" }
-  | { f: "error"; mensaje: string }
+  | { f: "error"; mensaje: string; carpeta?: string; version?: string }
   | { f: "primer" }
   | { f: "login" }
   | { f: "dentro"; usuario: Usuario; minutos: number };
+
+/** Al cerrar sesión o bloquearse: no quedan costos de una entrada a medias en la memoria de la ventana. */
+function borrarBorradores() {
+  try {
+    sessionStorage.removeItem(BORRADOR_ENTRADA);
+  } catch {
+    /* sin almacenamiento: no hay borrador */
+  }
+}
 
 export default function App() {
   const [fase, setFase] = useState<Fase>({ f: "cargando" });
@@ -89,7 +102,7 @@ export default function App() {
   const cargarSistema = useCallback(async () => {
     const s = await estadoSistema();
     // Al arrancar no hay sesión: se muestra el detalle para que el administrador sepa qué pasó.
-    if (s.error) return setFase({ f: "error", mensaje: `${s.error.replace(MARCA_TECNICA, "")} Si no sabe cómo resolverlo, contacte al administrador.` });
+    if (s.error) return setFase({ f: "error", mensaje: `${s.error.replace(MARCA_TECNICA, "")} Si no sabe cómo resolverlo, contacte al administrador.`, carpeta: s.carpeta, version: s.version });
     aplicarTema(s.tema === "oscuro" ? "oscuro" : "claro", typeof s.colorAcento === "string" ? s.colorAcento : "");
     setNombreNegocio(s.nombreNegocio);
     setFase(s.necesitaTecnico ? { f: "primer" } : { f: "login" });
@@ -107,6 +120,7 @@ export default function App() {
     () =>
       alPerderSesion((m) => {
         if (m !== SESION_EXPIRADA) return;
+        borrarBorradores();
         setConfig(null);
         setAvisoLogin("La sesión se cerró por inactividad.");
         setFase({ f: "login" });
@@ -116,14 +130,6 @@ export default function App() {
 
   const entrar = useCallback(async (usuario: Usuario, minutos: number) => {
     setAvisoLogin("");
-    // El borrador de una entrada de mercadería (lleva costos) es del dueño: si entra otro rol, se borra.
-    if (!puede(usuario.rol, "inventario")) {
-      try {
-        sessionStorage.removeItem(BORRADOR_ENTRADA);
-      } catch {
-        /* sin almacenamiento: no hay borrador */
-      }
-    }
     // Con PIN pendiente de cambio Rust no deja leer nada: la configuración se carga después del cambio.
     if (!usuario.debeCambiarPin) {
       const c = await leerConfig();
@@ -143,6 +149,7 @@ export default function App() {
   // la lista de usuarios. Al entrar el siguiente, toda la pantalla se arma de cero según su rol:
   // no queda nada a la vista del anterior (ni totales, ni avisos, ni diálogos).
   const salir = useCallback((aviso = "") => {
+    borrarBorradores();
     setAvisoLogin(aviso);
     void cerrarSesion()
       .catch(() => undefined)
@@ -165,9 +172,14 @@ export default function App() {
   else if (fase.f === "error")
     contenido = (
       <div className="centro">
-        <Alert tono="error" titulo="No se pudo iniciar">
-          {fase.mensaje}
-        </Alert>
+        <div className="screen" style={{ maxWidth: 640 }}>
+          <Alert tono="error" titulo="No se pudo iniciar">
+            {fase.mensaje}
+          </Alert>
+          {/* Solo cuando Rust sí arrancó y la base no abrió: ofrecer el respaldo (nunca una base vacía). */}
+          {fase.carpeta && <RestaurarSinBase carpeta={fase.carpeta} />}
+          {fase.version && <p className="muted">Punto de Venta, versión {fase.version}</p>}
+        </div>
       </div>
     );
   else if (fase.f === "primer") contenido = <PrimerArranque onListo={(u, m) => void entrar(u, m)} />;
@@ -219,6 +231,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
   // Arranca en la primera sección que el rol puede usar (Venta para cajero y dueño).
   useEffect(() => setPagina(principal[0]?.id ?? avanzado[0]?.id ?? "admin"), []);
   const [facturas, setFacturas] = useState(0);
+  const [acercaDe, setAcercaDe] = useState(false);
   // Aviso discreto al dueño (nunca al cajero en la venta): productos en su mínimo o por debajo.
   const [bajoMinimo, setBajoMinimo] = useState(0);
   useEffect(() => {
@@ -344,9 +357,14 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
             >
               Cambiar usuario
             </Button>
+            <Button icono={Info} className="nav-item" title="Acerca de" onClick={() => setAcercaDe(true)}>
+              Acerca de
+            </Button>
           </div>
         </aside>
         <main className="contenido">
+          {acercaDe && <AcercaDe onCerrar={() => setAcercaDe(false)} />}
+          {sesion.puede("respaldo") && <AvisoRespaldo pagina={pagina} />}
           {/* key: al cambiar de sección, un error anterior no se queda pegado. */}
           <ErrorPantalla key={pagina}>{paginas[pagina]}</ErrorPantalla>
         </main>

@@ -273,6 +273,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
+    caja::reloj_atrasado(&mut tx, "cobrar").await?;
 
     // Precio, IVA y departamento de un producto salen de la base, no de la pantalla.
     let mut lineas = est.lineas.clone();
@@ -457,8 +458,10 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
 
 // ─────────── Consultas ───────────
 
+/// Solo quien vende (cajero y dueño). El técnico tiene "reportes" para la bitácora, pero una venta
+/// lleva el nombre del cliente y el impreso en el tiquete: Ley 8968, el técnico no los ve.
 fn puede_consultar(a: &Actor) -> Res<()> {
-    if puede(a.rol, "venta") || puede(a.rol, "reportes") {
+    if puede(a.rol, "venta") {
         Ok(())
     } else {
         Err(sin_permiso("ver ventas"))

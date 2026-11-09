@@ -21,6 +21,11 @@ export function esLecturaDeEscaner(tiempos: number[], maxIntervaloMs: number, mi
   return total / (tiempos.length - 1) < maxIntervaloMs;
 }
 
+/** El lector a veces manda la misma lectura dos veces seguidas: se ignora si llega antes de `debounceMs`. */
+export function esRepetida(ultimo: { codigo: string; en: number }, codigo: string, ahora: number, debounceMs: number): boolean {
+  return ultimo.codigo.toLowerCase() === codigo.toLowerCase() && ahora - ultimo.en < debounceMs;
+}
+
 /** Quita `codigo` del final del campo y avisa a React (que escucha el evento input). */
 function quitarDelCampo(el: Element | null, codigo: string) {
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
@@ -50,8 +55,7 @@ export function useEscaner(onEscaneo: (codigo: string) => void, opc: Opciones = 
         e.preventDefault();
         e.stopPropagation();
         quitarDelCampo(document.activeElement, codigo);
-        const u = ultimo.current;
-        if (u.codigo.toLowerCase() === codigo.toLowerCase() && ahora - u.en < debounceMs) return;
+        if (esRepetida(ultimo.current, codigo, ahora, debounceMs)) return;
         ultimo.current = { codigo, en: ahora };
         cb.current(codigo);
         return;

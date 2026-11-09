@@ -284,8 +284,14 @@ const LIMITE_IMPRESION: std::time::Duration = std::time::Duration::from_millis(3
 fn con_limite(i: &Impresora, datos: &[u8]) -> Res<()> {
     // Una impresora que sigue trabada con el trabajo anterior no recibe otro: se avisa al instante
     // en vez de dejar otro hilo esperando (se acumularían hasta reiniciar).
-    if !ocupadas().lock().map_err(e)?.insert(i.destino.clone()) {
-        return Err(SIGUE_TRABADA.into());
+    {
+        let mut o = ocupadas().lock().map_err(e)?;
+        // Pasado el plazo se deja reintentar (cable reconectado, papel puesto) aunque el hilo
+        // anterior siga esperando al driver: a lo sumo uno nuevo por minuto, no uno por clic.
+        if o.get(&i.destino).is_some_and(|desde| desde.elapsed() < LIBERAR_TRABADA) {
+            return Err(SIGUE_TRABADA.into());
+        }
+        o.insert(i.destino.clone(), std::time::Instant::now());
     }
     let (conexion, destino, baudios, datos) = (i.conexion.clone(), i.destino.clone(), i.baudios as u32, datos.to_vec());
     let (tx, rx) = std::sync::mpsc::channel();
@@ -300,10 +306,14 @@ fn con_limite(i: &Impresora, datos: &[u8]) -> Res<()> {
 }
 
 const SIGUE_TRABADA: &str = "sigue trabada";
+#[cfg(not(test))]
+const LIBERAR_TRABADA: std::time::Duration = std::time::Duration::from_secs(60);
+#[cfg(test)]
+const LIBERAR_TRABADA: std::time::Duration = std::time::Duration::from_millis(1000);
 
-/// Destinos con un envío todavía en curso.
-fn ocupadas() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static O: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+/// Destinos con un envío todavía en curso (y desde cuándo).
+fn ocupadas() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>> {
+    static O: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
     O.get_or_init(Default::default)
 }
 
@@ -314,7 +324,7 @@ fn mandar(i: &Impresora, datos: &[u8], con_detalle: bool) -> Res<()> {
     }
     con_limite(i, datos).map_err(|err| {
         if err == SIGUE_TRABADA {
-            return format!("La impresora «{}» sigue sin terminar el trabajo anterior. Revise el papel y el cable; si no se arregla, cierre y abra el programa.", i.nombre);
+            return format!("La impresora «{}» sigue sin terminar el trabajo anterior. Revise el papel y el cable y vuelva a intentar en un minuto.", i.nombre);
         }
         if err == SIN_RESPUESTA {
             return format!("La impresora «{}» {SIN_RESPUESTA}. Revise que tenga papel y esté bien conectada; puede que el trabajo salga con atraso.", i.nombre);
@@ -405,6 +415,10 @@ pub mod tests {
         let err = enviar(p, CAJA_1, "tiquete", b"Otro\n").await.unwrap_err();
         assert!(err.contains("trabajo anterior"), "{err}");
         assert!(antes.elapsed() < std::time::Duration::from_millis(200));
+        // Pasado el plazo se puede reintentar sin reiniciar (reconectó el cable, puso papel…).
+        std::thread::sleep(LIBERAR_TRABADA + std::time::Duration::from_millis(100));
+        let err = enviar(p, CAJA_1, "tiquete", b"Reintento\n").await.unwrap_err();
+        assert!(err.contains(SIN_RESPUESTA), "se reintentó (y esta vez también se trabó): {err}");
         // Cuando el driver por fin contesta, la impresora vuelve a recibir trabajos.
         std::thread::sleep(std::time::Duration::from_millis(2200));
         // La gaveta no confirmó pero pudo abrirse: la apertura queda registrada (nunca sin rastro).

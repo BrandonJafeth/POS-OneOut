@@ -21,6 +21,13 @@ export interface EstadoSistema {
   colorAcento: unknown;
   /** Carpeta de datos (base, clave protegida y respaldos). */
   carpeta: string;
+  version: string;
+  migracion: number;
+}
+
+/** Solo cuando la base no abrió: restaura un respaldo sin sesión (lo protege su contraseña). */
+export function restaurarSinBase(archivo: Uint8Array, contrasena: string): Promise<void> {
+  return invocar<void>("sistema_restaurar", { archivo: Array.from(archivo), contrasena });
 }
 
 export function estadoSistema(): Promise<EstadoSistema> {

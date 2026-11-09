@@ -186,8 +186,19 @@ pub async fn bytes_en_claro(bd: &Bd) -> Res<Vec<u8>> {
 
 fn carpeta(bd: &Bd) -> Res<PathBuf> {
     let d = bd.dir.as_ref().ok_or("Sin carpeta de datos")?.join("respaldos");
-    std::fs::create_dir_all(&d).map_err(e)?;
+    std::fs::create_dir_all(&d).map_err(|err| sin_lugar(&d, &err))?;
     Ok(d)
+}
+
+/// Disco lleno, sin permiso o carpeta ocupada: dicho en palabras simples. La base no se toca (el
+/// respaldo es un archivo aparte que se escribe recién al final).
+pub fn sin_lugar(carpeta: &Path, err: &std::io::Error) -> String {
+    let donde = carpeta.to_string_lossy();
+    match err.kind() {
+        std::io::ErrorKind::StorageFull => format!("No se pudo guardar el respaldo: el disco está lleno. Libere espacio y vuelva a intentar. (Carpeta: {donde})"),
+        std::io::ErrorKind::PermissionDenied => format!("No se pudo guardar el respaldo: Windows no deja escribir en {donde}. Avise al técnico."),
+        _ => format!("No se pudo guardar el respaldo en {donde} ({err}). La base de datos no cambió. Avise al técnico."),
+    }
 }
 
 /// Crea el respaldo cifrado en la carpeta de la app. Devuelve la ruta.
@@ -198,11 +209,132 @@ pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
     let migracion: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&bd.pool).await.map_err(e)?;
     let cifrado = cifrar(&datos, contrasena, migracion)?;
     let destino = carpeta(bd)?.join(format!("respaldo-{}.posbak", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-    std::fs::write(&destino, cifrado).map_err(e)?;
+    std::fs::write(&destino, cifrado).map_err(|err| {
+        let _ = std::fs::remove_file(&destino); // nunca un respaldo a medias que parezca bueno
+        sin_lugar(destino.parent().unwrap_or(&destino), &err)
+    })?;
     let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "respaldo.crear", "respaldo", None, &json!({"bytes": datos.len()})).await?;
     tx.commit().await.map_err(e)?;
     Ok(destino.to_string_lossy().to_string())
+}
+
+// ─────────── Respaldo automático ───────────
+//
+// El dueño elige la contraseña UNA vez (con su PIN); se guarda protegida con DPAPI. Los automáticos
+// usan esa misma contraseña, así se abren en otra computadora (no con la clave DPAPI, que se pierde
+// con la PC). Uno al día y uno al cerrar cada turno; se conservan los últimos N; cada uno se relee
+// del disco y se verifica (descifrar + integridad + bitácora) apenas se escribe.
+
+const SECRETO_AUTO: &str = "respaldo-automatico.clave";
+
+pub async fn configurar_automatico(bd: &Bd, a: &Actor, contrasena: &str, pin: &str) -> Res<()> {
+    a.exigir("respaldo", "configurar el respaldo automático")?;
+    validar_contrasena(contrasena)?;
+    usuarios::confirmar_dueno(&bd.pool, a, pin, "configurar respaldo automático").await?;
+    let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
+    crate::clave::guardar_secreto(dir, SECRETO_AUTO, contrasena.as_bytes())?;
+    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.auto_configurado", "respaldo", None, &json!({})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
+}
+
+fn es_automatico(nombre: &str) -> bool {
+    nombre.starts_with("auto-") && nombre.ends_with(".posbak")
+}
+
+/// Hace un respaldo automático. None si el dueño todavía no eligió la contraseña.
+pub async fn automatico(bd: &Bd, motivo: &str) -> Res<Option<String>> {
+    let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
+    let Some(secreto) = crate::clave::leer_secreto(dir, SECRETO_AUTO)? else {
+        return Ok(None);
+    };
+    let contrasena = String::from_utf8(secreto).map_err(e)?;
+    let datos = bytes_en_claro(bd).await?;
+    let migracion: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&bd.pool).await.map_err(e)?;
+    let cifrado = cifrar(&datos, &contrasena, migracion)?;
+    let carpeta = carpeta(bd)?;
+    let nombre = format!("auto-{}-{motivo}.posbak", chrono::Local::now().format("%Y%m%d-%H%M%S-%3f"));
+    let destino = carpeta.join(&nombre);
+    // A un nombre de paso y después el nombre final: nunca un respaldo a medias con cara de bueno.
+    let parcial = carpeta.join(format!("{nombre}.parcial"));
+    std::fs::write(&parcial, &cifrado).map_err(|err| {
+        let _ = std::fs::remove_file(&parcial);
+        sin_lugar(&carpeta, &err)
+    })?;
+    renombrar(&parcial, &destino)?;
+    // Verificación: se relee del disco y se revisa como si se fuera a restaurar.
+    let verificado = match std::fs::read(&destino).map_err(e).and_then(|b| descifrar(&b, &contrasena)) {
+        Ok(d) => match revisar(&d, None).await {
+            Ok(p) => {
+                p.close().await;
+                true
+            }
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+    // Rotación: quedan los últimos N automáticos (los manuales no se tocan).
+    let cantidad = crate::config::entero(&bd.pool, "respaldo_auto_cantidad", 30).await.clamp(1, 365) as usize;
+    let mut todos: Vec<String> = std::fs::read_dir(&carpeta).map_err(e)?.filter_map(|f| f.ok()).map(|f| f.file_name().to_string_lossy().to_string()).filter(|n| es_automatico(n)).collect();
+    todos.sort();
+    for viejo in todos.iter().take(todos.len().saturating_sub(cantidad)) {
+        let _ = std::fs::remove_file(carpeta.join(viejo));
+    }
+    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    bitacora::registrar(&mut tx, None, "respaldo.automatico", "respaldo", None, &json!({"archivo": nombre, "motivo": motivo, "verificado": verificado, "bytes": cifrado.len()})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(Some(destino.to_string_lossy().to_string()))
+}
+
+#[derive(serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct EstadoAutomatico {
+    pub configurado: bool,
+    pub ultimo: Option<String>,
+    pub ultimo_verificado: Option<bool>,
+    pub hecho_hoy: bool,
+    /// Pasaron 7 días (o nunca) desde que el dueño confirmó la copia a la USB.
+    pub recordar_usb: bool,
+    pub cantidad: i64,
+    pub carpeta: String,
+}
+
+pub async fn estado_automatico(bd: &Bd, a: &Actor) -> Res<EstadoAutomatico> {
+    a.exigir("respaldo", "ver los respaldos")?;
+    estado_auto(bd).await
+}
+
+async fn estado_auto(bd: &Bd) -> Res<EstadoAutomatico> {
+    let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
+    let configurado = dir.join(SECRETO_AUTO).exists();
+    let ultimo: Option<(String, String)> = sqlx::query_as("SELECT fecha, detalle FROM bitacora WHERE accion = 'respaldo.automatico' ORDER BY rowid DESC LIMIT 1").fetch_optional(&bd.pool).await.map_err(e)?;
+    let usb: Option<String> = sqlx::query_scalar("SELECT MAX(fecha) FROM bitacora WHERE accion = 'respaldo.usb_confirmado'").fetch_one(&bd.pool).await.map_err(e)?;
+    let dia_local = |iso: &str| chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default();
+    let hace_7 = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    Ok(EstadoAutomatico {
+        configurado,
+        hecho_hoy: ultimo.as_ref().is_some_and(|(f, _)| dia_local(f) == crate::util::dia_local()),
+        ultimo_verificado: ultimo.as_ref().and_then(|(_, d)| serde_json::from_str::<serde_json::Value>(d).ok()?.get("verificado")?.as_bool()),
+        recordar_usb: configurado && ultimo.is_some() && usb.is_none_or(|u| u < hace_7),
+        ultimo: ultimo.map(|(f, _)| f),
+        cantidad: crate::config::entero(&bd.pool, "respaldo_auto_cantidad", 30).await,
+        carpeta: dir.join("respaldos").to_string_lossy().to_string(),
+    })
+}
+
+/// El de hoy ya está hecho (para el disparo diario).
+pub async fn automatico_hecho_hoy(bd: &Bd) -> bool {
+    estado_auto(bd).await.is_ok_and(|x| x.hecho_hoy)
+}
+
+pub async fn usb_confirmado(bd: &Bd, a: &Actor) -> Res<()> {
+    a.exigir("respaldo", "confirmar la copia de respaldos")?;
+    let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "respaldo.usb_confirmado", "respaldo", None, &json!({})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
 }
 
 /// Cuándo se hizo el último respaldo cifrado (None: nunca). Para avisar al dueño si pasa mucho tiempo.
@@ -285,7 +417,8 @@ pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena
     };
     let ancla = bd.dir.as_ref().ok_or("Sin carpeta de datos")?.join("pos.db.revisando");
     let _ = std::fs::remove_file(&ancla);
-    let r = restaurar_en(bd, &datos, &ancla, clave).await;
+    let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
+    let r = restaurar_en(dir, bd.cifrada, &datos, &ancla, clave).await;
     borrar_ancla(&ancla);
     if let Err(err) = r {
         return Err(anotar_fallo(bd, a, &err, cab.as_ref()).await);
@@ -314,13 +447,16 @@ fn borrar_ancla(ancla: &Path) {
     }
 }
 
-async fn restaurar_en(bd: &Bd, datos: &[u8], ancla: &Path, clave: Option<&[u8; 32]>) -> Res<()> {
+async fn restaurar_en(dir: &Path, cifrada: bool, datos: &[u8], ancla: &Path, clave: Option<&[u8; 32]>) -> Res<()> {
     let mem = revisar(datos, Some(ancla)).await?;
-    let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
     let nuevo = dir.join("pos.db.nuevo");
+    // Se escribe a un nombre de paso y se renombra al final: si se va la luz a medias, al arrancar
+    // no hay un pos.db.nuevo incompleto que reemplace la base buena.
+    let parcial = dir.join("pos.db.nuevo.parcial");
     let _ = std::fs::remove_file(&nuevo);
-    let destino = nuevo.to_string_lossy().to_string();
-    match (bd.cifrada, clave) {
+    borrar_ancla(&parcial);
+    let destino = parcial.to_string_lossy().to_string();
+    match (cifrada, clave) {
         (true, Some(k)) => {
             sqlx::query(&format!("ATTACH DATABASE ? AS cifrada KEY \"x'{}'\"", hex(k))).bind(&destino).execute(&mem).await.map_err(e)?;
             sqlx::query("SELECT sqlcipher_export('cifrada')").execute(&mem).await.map_err(e)?;
@@ -333,7 +469,53 @@ async fn restaurar_en(bd: &Bd, datos: &[u8], ancla: &Path, clave: Option<&[u8; 3
         (true, None) => return Err("Falta la clave de la base".into()),
     }
     mem.close().await;
-    Ok(())
+    renombrar(&parcial, &nuevo)
+}
+
+/// Restaurar cuando la base NO abre (dañada, de otro usuario de Windows, clave perdida): no hay
+/// sesión posible, así que no se pide PIN. Lo que protege es la contraseña del respaldo (GCM).
+/// Nunca toca la base actual: deja pos.db.nuevo y, al reiniciar, la que no abría queda a un lado
+/// con fecha en respaldos-automaticos (aplicar_restauracion_pendiente). `clave`: la de la base
+/// nueva (None = compilación sin SQLCipher).
+pub async fn restaurar_sin_base(dir: &Path, archivo: &[u8], contrasena: &str, clave: Option<&[u8; 32]>) -> Res<()> {
+    if archivo.len() > 2_000_000_000 {
+        return Err("Archivo demasiado grande".into());
+    }
+    if let Some(c) = cabecera(archivo)?.filter(|c| c.migracion > crate::bd::ultima_migracion()) {
+        return Err(mas_nuevo(Some(&c.app)));
+    }
+    let datos = descifrar(archivo, contrasena)?;
+    let ancla = dir.join("pos.db.revisando");
+    let _ = std::fs::remove_file(&ancla);
+    let r = restaurar_en(dir, clave.is_some(), &datos, &ancla, clave).await;
+    borrar_ancla(&ancla);
+    r
+}
+
+/// Las versiones anteriores guardaban los datos en la carpeta del `identifier`, que el
+/// desinstalador borra si se marca «Borrar los datos de la aplicación». La carpeta se traslada
+/// entera (un solo rename, en el mismo disco) a una que el desinstalador no conoce.
+/// Devuelve si trasladó algo. Si las DOS tienen base, no toca ninguna y avisa.
+pub fn trasladar_datos(viejo: &Path, nuevo: &Path) -> Res<bool> {
+    let hay = |d: &Path| d.join("pos.db").exists() || d.join("pos.clave").exists();
+    if !hay(viejo) {
+        return Ok(false);
+    }
+    if hay(nuevo) {
+        return Err(format!(
+            "Hay datos del punto de venta en dos carpetas ({} y {}). No se tocó ninguna. Avise al técnico.",
+            viejo.to_string_lossy(),
+            nuevo.to_string_lossy()
+        ));
+    }
+    if nuevo.exists() {
+        std::fs::remove_dir(nuevo).map_err(|_| format!("La carpeta {} no está vacía. No se trasladaron los datos. Avise al técnico.", nuevo.to_string_lossy()))?;
+    }
+    if let Some(padre) = nuevo.parent() {
+        std::fs::create_dir_all(padre).map_err(e)?;
+    }
+    renombrar(viejo, nuevo).map_err(|err| format!("No se pudieron trasladar los datos a {}: {err}", nuevo.to_string_lossy()))?;
+    Ok(true)
 }
 
 /// Renombrar con reintentos: en Windows el antivirus suele tener abierto un archivo recién
@@ -356,6 +538,8 @@ fn renombrar(de: impl AsRef<Path>, a: impl AsRef<Path>) -> Res<()> {
 /// La base anterior queda en respaldos-automaticos (cifrada, igual que estaba).
 /// Devuelve Some(archivo donde quedó la base anterior) si se aplicó una restauración.
 pub fn aplicar_restauracion_pendiente(dir: &Path) -> Res<Option<String>> {
+    // Una exportación cortada a medias nunca se aplica: se descarta.
+    borrar_ancla(&dir.join("pos.db.nuevo.parcial"));
     let nuevo = dir.join("pos.db.nuevo");
     if !nuevo.exists() {
         return Ok(None);
@@ -619,6 +803,25 @@ mod tests_restaurar {
     }
 
     #[tokio::test]
+    async fn respaldo_sin_lugar_donde_guardar_avisa_claro_y_no_toca_la_base() {
+        let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
+        let bd = Bd::abrir(&dir, None).await.unwrap();
+        let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
+        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
+        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        // "respaldos" es un archivo: Windows no deja crear la carpeta (como sin permiso).
+        std::fs::write(dir.join("respaldos"), b"x").unwrap();
+        let err = crear(&bd, &dueno, "contrasena-larga").await.unwrap_err();
+        assert!(!err.starts_with(crate::util::TECNICO) && err.contains("respaldo"), "{err}");
+        let r: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(r, "ok");
+        bd.pool.close().await;
+        bd.lectura.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn actualizar_exige_caja_cerrada_y_respalda_antes() {
         let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -717,5 +920,176 @@ mod tests_disco {
         // 5. Con otra clave (otro usuario de Windows / otra máquina) no abre.
         assert!(Bd::abrir(&dir, Some([9u8; 32])).await.is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Sección 1 de la auditoría: los datos sobreviven a instalar, desinstalar, mover y restaurar.
+#[cfg(test)]
+mod tests_instalacion {
+    use super::*;
+
+    fn carpeta() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("pos-inst-{}", crate::util::ulid()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn nunca_una_base_vacia_encima_de_una_instalacion() {
+        // Primera vez: carpeta vacía → se puede crear todo.
+        let d = carpeta();
+        assert!(crate::bd::revisar_instalacion(&d, true).is_ok());
+        // Hay clave pero no base (alguien movió o borró pos.db): no se crea una vacía encima.
+        std::fs::write(d.join("pos.clave"), b"x").unwrap();
+        let err = crate::bd::revisar_instalacion(&d, true).unwrap_err();
+        assert!(err.contains("No se encontró la base") && err.contains("Restaurar"), "{err}");
+        // Hay base pero falta la clave (con cifrado): no se genera otra (la base quedaría huérfana).
+        let d2 = carpeta();
+        std::fs::write(d2.join("pos.db"), b"x").unwrap();
+        assert!(crate::bd::revisar_instalacion(&d2, true).unwrap_err().contains("clave"));
+        assert!(crate::bd::revisar_instalacion(&d2, false).is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&d2);
+    }
+
+    #[test]
+    fn la_carpeta_vieja_se_traslada_entera_sin_pisar_nada() {
+        let raiz = carpeta();
+        let (viejo, nuevo) = (raiz.join("cr.puntodeventa.pos"), raiz.join("PuntoDeVenta-Datos"));
+        std::fs::create_dir_all(viejo.join("respaldos")).unwrap();
+        std::fs::write(viejo.join("pos.db"), b"base").unwrap();
+        std::fs::write(viejo.join("pos.clave"), b"clave").unwrap();
+        std::fs::write(viejo.join("respaldos").join("r.posbak"), b"r").unwrap();
+        assert!(trasladar_datos(&viejo, &nuevo).unwrap());
+        assert_eq!(std::fs::read(nuevo.join("pos.db")).unwrap(), b"base");
+        assert!(nuevo.join("respaldos").join("r.posbak").exists());
+        assert!(!viejo.join("pos.db").exists());
+        // Segunda vez: ya está trasladada, no hace nada.
+        assert!(!trasladar_datos(&viejo, &nuevo).unwrap());
+        // Si las dos tienen base, NO se toca ninguna (se avisa).
+        std::fs::create_dir_all(&viejo).unwrap();
+        std::fs::write(viejo.join("pos.db"), b"otra").unwrap();
+        assert!(trasladar_datos(&viejo, &nuevo).unwrap_err().contains("dos"));
+        assert_eq!(std::fs::read(nuevo.join("pos.db")).unwrap(), b"base");
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[tokio::test]
+    async fn restaurar_sin_sesion_cuando_la_base_no_abre() {
+        // Base "dañada" (no es SQLite): la app no abre. Se restaura un respaldo sin entrar.
+        let d = carpeta();
+        std::fs::write(d.join("pos.db"), b"esto no es una base").unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/respaldo-v0.1.0-m10.posbak");
+        let archivo = std::fs::read(fixture).unwrap();
+        assert!(restaurar_sin_base(&d, &archivo, "otra-contrasena", None).await.is_err());
+        assert!(!d.join("pos.db.nuevo").exists());
+        restaurar_sin_base(&d, &archivo, tests::CONTRASENA_FIXTURE, None).await.unwrap();
+        // Al reiniciar: la dañada queda a un lado con fecha (no se borra) y la restaurada abre.
+        let anterior = aplicar_restauracion_pendiente(&d).unwrap().unwrap();
+        assert_eq!(std::fs::read(&anterior).unwrap(), b"esto no es una base");
+        let bd = Bd::abrir(&d, None).await.unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas").fetch_one(&bd.pool).await.unwrap();
+        assert_eq!(n, 2);
+        bd.pool.close().await;
+        bd.lectura.close().await;
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+/// Respaldo automático (diario y al cerrar turno): con la contraseña que eligió el dueño, verificado,
+/// con rotación. Y el simulacro: restaurar el último en una instalación limpia y comparar conteos.
+#[cfg(test)]
+mod tests_automatico {
+    use super::*;
+    use crate::caja::{abrir, tests::conteo, CAJA_1};
+    use crate::permisos::Rol;
+
+    async fn base_en_disco() -> (PathBuf, Bd, Actor) {
+        let dir = std::env::temp_dir().join(format!("pos-auto-{}", crate::util::ulid()));
+        let bd = Bd::abrir(&dir, None).await.unwrap();
+        let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
+        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
+        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        (dir, bd, dueno)
+    }
+
+    fn automaticos(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir.join("respaldos")).map(|l| l.filter_map(|f| f.ok()).map(|f| f.file_name().to_string_lossy().to_string()).filter(|n| n.starts_with("auto-")).collect()).unwrap_or_default();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn sin_contrasena_no_hace_nada_y_con_ella_respalda_verifica_y_rota() {
+        let (dir, bd, dueno) = base_en_disco().await;
+        // Sin configurar: no hay respaldo (y no falla).
+        assert!(automatico(&bd, "diario").await.unwrap().is_none());
+        assert!(!estado_automatico(&bd, &dueno).await.unwrap().configurado);
+        // Contraseña corta o PIN equivocado: no se guarda.
+        assert!(configurar_automatico(&bd, &dueno, "corta", "246813").await.is_err());
+        assert!(configurar_automatico(&bd, &dueno, "contrasena-larga", "000000").await.is_err());
+        configurar_automatico(&bd, &dueno, "contrasena-larga", "246813").await.unwrap();
+        crate::config::guardar(&bd.pool, &dueno, "respaldo_auto_cantidad", &json!(3)).await.unwrap();
+        for _ in 0..5 {
+            automatico(&bd, "diario").await.unwrap().unwrap();
+        }
+        let archivos = automaticos(&dir);
+        assert_eq!(archivos.len(), 3, "rotación: quedan los últimos 3: {archivos:?}");
+        // Cada uno se abre con la contraseña del dueño (sirve en otra computadora).
+        let ultimo = std::fs::read(dir.join("respaldos").join(archivos.last().unwrap())).unwrap();
+        assert!(descifrar(&ultimo, "contrasena-larga").is_ok());
+        let e = estado_automatico(&bd, &dueno).await.unwrap();
+        assert!(e.configurado && e.ultimo_verificado == Some(true) && e.hecho_hoy, "{e:?}");
+        // Recordatorio de la USB: hasta que lo confirme, toca.
+        assert!(e.recordar_usb);
+        usb_confirmado(&bd, &dueno).await.unwrap();
+        assert!(!estado_automatico(&bd, &dueno).await.unwrap().recordar_usb);
+        bd.pool.close().await;
+        bd.lectura.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn simulacro_restaurar_el_del_dia_en_una_instalacion_limpia() {
+        let (dir, bd, dueno) = base_en_disco().await;
+        configurar_automatico(&bd, &dueno, "contrasena-larga", "246813").await.unwrap();
+        // Un día de trabajo: caja, ventas, cliente.
+        abrir(&bd.pool, &dueno, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('PS', 'Lápiz', 'lapiz', '00000000000000000000000D01', 500)").execute(&bd.pool).await.unwrap();
+        for _ in 0..3 {
+            let e: crate::calculo::Estado = serde_json::from_value(json!({"lineas": [{"id": crate::util::ulid(), "productoId": "PS", "descripcion": "Lápiz", "departamentoId": "00000000000000000000000D01", "cantidad": 2, "precioUnitario": 500, "descuento": 0, "tasaIva": 13.0, "exento": false}], "descuentoTotal": 0, "requiereFactura": false})).unwrap();
+            let esp = crate::ventas::crear_espera(&bd.pool, &dueno, CAJA_1, &e).await.unwrap();
+            let pago: crate::calculo::PagoEntrada = serde_json::from_value(json!({"formaPagoId": "0000000000000000000000FP01", "monto": 1000})).unwrap();
+            crate::ventas::cobrar_con(&bd.pool, &dueno, CAJA_1, &esp.id, &e, &[pago], None).await.unwrap();
+        }
+        crate::clientes::crear(&bd.pool, &dueno, &serde_json::from_value(json!({"nombre": "Cliente Prueba", "telefono": "8000-0000"})).unwrap(), true, "1").await.unwrap();
+        automatico(&bd, "cierre").await.unwrap().unwrap();
+        let conteos = |p: SqlitePool| async move {
+            let mut v = vec![];
+            for t in ["ventas", "venta_pagos", "caja_turnos", "clientes", "existencias", "inventario_movimientos", "bitacora"] {
+                v.push(sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {t}")).fetch_one(&p).await.unwrap());
+            }
+            v
+        };
+        let antes = conteos(bd.pool.clone()).await;
+        let archivo = std::fs::read(dir.join("respaldos").join(automaticos(&dir).last().unwrap())).unwrap();
+        // Instalación limpia en otra carpeta (otra PC): se restaura sin entrar.
+        let limpia = std::env::temp_dir().join(format!("pos-limpia-{}", crate::util::ulid()));
+        std::fs::create_dir_all(&limpia).unwrap();
+        restaurar_sin_base(&limpia, &archivo, "contrasena-larga", None).await.unwrap();
+        aplicar_restauracion_pendiente(&limpia).unwrap();
+        let nueva = Bd::abrir(&limpia, None).await.unwrap();
+        let despues = conteos(nueva.pool.clone()).await;
+        // La bitácora de la restaurada no tiene la entrada del propio respaldo automático (se escribe después).
+        assert_eq!(antes[..6], despues[..6], "ventas, pagos, turnos, clientes, existencias, kardex");
+        assert!(crate::bitacora::verificar(&nueva.pool).await.unwrap().ok);
+        for b in [bd, nueva] {
+            b.pool.close().await;
+            b.lectura.close().await;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&limpia);
     }
 }

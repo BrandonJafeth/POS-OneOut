@@ -3334,3 +3334,20 @@ td.linea-producto {
     display: none;
   }
 }
+
+/* Lista etiqueta → valor (Acerca de, fichas cortas). */
+.datos-lista {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--e2) var(--e4);
+  margin: 0;
+}
+
+.datos-lista dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.datos-lista dd {
+  margin: 0;
+}

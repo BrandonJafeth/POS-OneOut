@@ -1,6 +1,8 @@
 // Solo técnico. Lo que cambia entre negocios se ajusta aquí, sin tocar código.
 import Alert from "../ui/Alert";
+import { FileText } from "lucide-react";
 import Button from "../ui/Button";
+import { invocar } from "../lib/invocar";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
@@ -265,6 +267,7 @@ function Sistema() {
   const [estado, setEstado] = useState<EstadoSistema | null>(null);
   const [bit, setBit] = useState<VerificacionBitacora | null>(null);
   const [caja, setCaja] = useState<Caja | null>(null);
+  const [diagnostico, setDiagnostico] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
     void estadoSistema().then(setEstado, (e) => setError(textoError(e)));
@@ -289,6 +292,15 @@ function Sistema() {
         </span>
       </div>
       {error && <Alert tono="error">{error}</Alert>}
+      {diagnostico && <Alert tono="ok">Diagnóstico guardado en {diagnostico}. Mándelo al desarrollador; no lleva datos de clientes.</Alert>}
+      <Button
+        icono={FileText}
+        onClick={() =>
+          invocar<string>("diagnostico_exportar").then(setDiagnostico, (e) => setError(textoError(e)))
+        }
+      >
+        Exportar diagnóstico
+      </Button>
       <p className="muted">
         La base y su clave solo sirven en esta computadora y con este usuario de Windows. Para llevar los datos a otra, use un respaldo
         cifrado (Administración → Respaldo).

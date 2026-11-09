@@ -62,6 +62,25 @@ mod dpapi {
     }
 }
 
+/// Guarda un secreto pequeño (p. ej. la contraseña del respaldo automático) protegido con DPAPI:
+/// solo este usuario de Windows en esta computadora lo puede leer.
+pub fn guardar_secreto(dir: &Path, nombre: &str, datos: &[u8]) -> Res<()> {
+    let protegido = dpapi::proteger(datos)?;
+    std::fs::create_dir_all(dir).map_err(e)?;
+    let tmp = dir.join(format!("{nombre}.nuevo"));
+    std::fs::write(&tmp, protegido).map_err(e)?;
+    std::fs::rename(&tmp, dir.join(nombre)).map_err(e)
+}
+
+/// None si no existe.
+pub fn leer_secreto(dir: &Path, nombre: &str) -> Res<Option<Vec<u8>>> {
+    let ruta = dir.join(nombre);
+    if !ruta.exists() {
+        return Ok(None);
+    }
+    dpapi::desproteger(&std::fs::read(&ruta).map_err(e)?).map(Some)
+}
+
 /// Devuelve la clave de la base (la crea la primera vez).
 pub fn obtener(dir: &Path) -> Res<[u8; 32]> {
     let ruta = dir.join(ARCHIVO);

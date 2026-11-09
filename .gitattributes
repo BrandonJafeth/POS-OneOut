@@ -1,0 +1,5 @@
+# Las migraciones SIEMPRE en LF: sqlx guarda una suma de cada una ya aplicada y, si cambian los
+# saltos de línea, la versión nueva se niega a abrir la base del cliente.
+*.sql text eol=lf
+# Respaldos de prueba (fixtures): binarios.
+*.posbak binary

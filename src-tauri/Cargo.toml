@@ -1,6 +1,6 @@
 [package]
 name = "pos"
-version = "0.1.0"
+version = "0.9.0"
 description = "Punto de venta local (librerías y floristerías)"
 authors = ["you"]
 edition = "2024"
@@ -69,4 +69,4 @@ strip = true
 
 # Solo en Windows: API del spooler (RAW), puertos seriales y dispositivos USB de impresora.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Security_Cryptography", "Win32_Devices_Communication", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Storage_FileSystem"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Printing", "Win32_Security_Cryptography", "Win32_Devices_Communication", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

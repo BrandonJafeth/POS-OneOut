@@ -23,6 +23,8 @@ export async function invocar<T = unknown>(cmd: string, args: Record<string, unk
     if (m === SESION_EXPIRADA || m === DEBE_CAMBIAR_PIN) escuchas.forEach((f) => f(m));
     if (m === SESION_EXPIRADA) throw new Error("La sesión se cerró por inactividad. Vuelva a entrar.");
     if (m === DEBE_CAMBIAR_PIN) throw new Error("Primero cambie su PIN.");
+    // Errores técnicos: al registro local para el técnico (Rust quita lo que pueda ser personal).
+    if (m.startsWith("ERROR_TECNICO: ") && cmd !== "diagnostico_anotar") void invoke("diagnostico_anotar", { origen: cmd, mensaje: m }).catch(() => undefined);
     throw new Error(m);
   }
 }

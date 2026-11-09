@@ -1,4 +1,5 @@
 import { useState } from "react";
+import RespaldoAutomatico from "./respaldo/RespaldoAutomatico";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { AVISO_RESPALDO, CONTRASENA_MINIMA, crearRespaldo, reiniciarApp, restaurarRespaldo } from "../lib/respaldoApi";
 import { useConfirmar } from "../ui/Confirmar";
@@ -62,6 +63,7 @@ export default function Respaldo() {
   return (
     <div className="screen">
       <h1>Respaldo</h1>
+      <RespaldoAutomatico />
       <section className="card login-card">
         <p className="note">{AVISO_RESPALDO}</p>
         <form onSubmit={crear}>
