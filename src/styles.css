@@ -3351,3 +3351,28 @@ td.linea-producto {
 .datos-lista dd {
   margin: 0;
 }
+
+/* Lista "Preparar para el cliente". */
+.preparacion {
+  list-style: none;
+  margin: var(--e3) 0;
+  padding: 0;
+  display: grid;
+  gap: var(--e3);
+}
+
+.preparacion li {
+  display: flex;
+  gap: var(--e3);
+  align-items: flex-start;
+}
+
+.preparacion .ok {
+  color: var(--ok);
+  flex: none;
+}
+
+.preparacion .falta {
+  color: var(--warn);
+  flex: none;
+}

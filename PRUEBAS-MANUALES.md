@@ -76,7 +76,7 @@ Cada prueba dice lo que debe pasar. Si algo no coincide, anote el número de la 
 
 ## H. Base cifrada
 
-1. Abra `%APPDATA%\cr.puntodeventa.pos\pos.db` con el Bloc de notas. → No aparece "SQLite format 3" ni datos legibles.
+1. Abra `%APPDATA%\PuntoDeVenta-Datos\pos.db` con el Bloc de notas. → No aparece "SQLite format 3" ni datos legibles.
 2. En **Técnico → Sistema** debe decir "Cifrada (SQLCipher, clave protegida por Windows)".
 3. Pulse **Verificar ahora** en la línea Bitácora. → "Íntegra (N registros)".
 
@@ -179,26 +179,7 @@ Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio
 
 ## P. Actualizar el programa en la PC del cliente
 
-Hágalo al final del día, con calma. Lleve una memoria USB.
-
-1. **Caja cerrada.** Cierre la caja (Z impreso). Si queda una caja abierta, la versión nueva **no abre** y pide volver a la anterior para cerrarla.
-2. **Respaldo previo.** Como Ana, **Administración → Respaldo → Crear respaldo**. Anote la contraseña aparte.
-3. **Copia a USB.** Copie el `.posbak` recién creado (Documentos\Respaldos POS) a la memoria USB.
-4. **Guarde el instalador anterior** en la USB también (por si hay que volver).
-5. **Verifique el instalador nuevo**: compare su SHA-256 con el que viene en la entrega (SEGURIDAD.md, sección 6).
-6. **Instale** la versión nueva encima de la anterior (no desinstale: los datos quedan en `%APPDATA%\cr.puntodeventa.pos`).
-7. **Primer arranque.** La app se pone al día sola. Antes, deja una copia en `%APPDATA%\cr.puntodeventa.pos\respaldos-automaticos\pos-antes-vN-fecha.db`.
-8. **Verifique**:
-   - Entra con el PIN de cada usuario.
-   - **Técnico → Sistema**: base "Cifrada" y bitácora "Íntegra".
-   - **Ventas del día / Caja → Turnos**: están las ventas y el último Z.
-   - Abra la caja, haga una venta de prueba de ¢5 y anúlela.
-9. **Si algo falla, volver a la versión anterior:**
-   1. Cierre la app.
-   2. Instale el instalador anterior (el de la USB).
-   3. La versión anterior no abre una base ya actualizada ("versión más nueva"). Vaya a `%APPDATA%\cr.puntodeventa.pos\`, renombre `pos.db` a `pos.db.fallida` y copie ahí la copia de `respaldos-automaticos\pos-antes-vN-….db` con el nombre `pos.db`.
-   4. Abra la app y verifique como en el paso 8. Si eso tampoco funciona, restaure el `.posbak` de la USB (Administración → Respaldo).
-   5. Avise al técnico con la fecha y el mensaje que salió.
+El procedimiento completo (antes, instalar, verificar, volver atrás) está en **ACTUALIZAR.md**. Sígalo paso a paso; no lo repita de memoria.
 
 ## Q. Lectura cerrada desde la pantalla (versión de desarrollo)
 
@@ -210,3 +191,59 @@ Solo con `npm run tauri dev` (en la versión final no hay DevTools).
 3. Con `"SELECT 1; SELECT 2"` y con `"DELETE FROM productos"`. → Fallan.
 4. En **Técnico → Bitácora** aparecen las entradas `lectura.rechazada`.
 5. Las pantallas de Venta y Productos funcionan igual que antes.
+
+## Aceptación de la versión de prueba (0.9.0)
+
+Se hace una vez, en la computadora del negocio, antes de dejarla en uso. Marque cada casilla solo si pasó lo esperado. Si algo falla, anote el número y no entregue.
+
+### Instalar
+- [ ] 1. **Verificar el instalador.** PowerShell: `Get-FileHash .\Punto*Setup.exe -Algorithm SHA256`. → Igual al de ENTREGAS.md.
+- [ ] 2. **Instalar.** Doble clic. Si sale «Windows protegió su PC»: **Más información → Ejecutar de todas formas** (no está firmado). → Instala sin pedir permisos de administrador. **No desactive el antivirus.** Si Defender lo pone en cuarentena, no lo saque de ahí: avise al técnico (el SHA-256 dice si el archivo es el correcto).
+- [ ] 3. **Primer arranque.** → Pide crear el técnico. **Acerca de** (menú, abajo) dice versión 0.9.0.
+- [ ] 4. **Abrir dos veces.** Con el programa abierto, ábralo otra vez. → Aviso «ya está abierto»; no abre una segunda ventana.
+
+### Configurar
+- [ ] 5. **Técnico → Preparar para el cliente.** Complete cada punto (negocio, dueño, formas de pago, departamentos, impresoras, gaveta). → Todos en «listo» salvo productos y respaldo.
+- [ ] 6. **Número del próximo tiquete.** Si venía de otro sistema, póngalo en Administración → Caja y cierre (antes de la primera venta). → Queda en la bitácora `caja.consecutivo`.
+- [ ] 7. **Importar productos** (el archivo del cliente, ~719). → El resumen cuadra con el archivo; los que tienen error dicen la fila y por qué. Sin códigos internos inventados (salvo que lo marque).
+- [ ] 8. **Respaldo automático.** Como dueño, Administración → Respaldo: elija la contraseña, márquela como entendida y anótela **fuera de la computadora**. → «Hacer uno ahora» dice verificado.
+- [ ] 9. **Preparar para el cliente** otra vez. → Todo listo; «Sin datos de prueba» listo.
+
+### Vender
+- [ ] 10. Abrir caja con fondo. → Abre; queda en la bitácora.
+- [ ] 11. Venta en **efectivo** con vuelto. → Tiquete impreso, gaveta abre, vuelto correcto.
+- [ ] 12. Venta con **tarjeta** y con **SINPE / transferencia** (cada forma activa). → Pide referencia si aplica; no abre gaveta si no corresponde.
+- [ ] 13. Venta **mixta** (parte efectivo, parte tarjeta). → Suma exacta; vuelto solo sobre el efectivo.
+- [ ] 14. **Poner en espera**, cerrar el programa, abrirlo y retomar. → La espera sigue ahí con sus líneas.
+- [ ] 15. **Anular** una venta (PIN del dueño). → Pide motivo; el efectivo esperado baja; queda en la bitácora.
+- [ ] 16. **Entrada** de efectivo y **salida** de efectivo. → Comprobante impreso; el esperado cambia.
+- [ ] 17. **Ajuste de inventario** de un producto con control. → El kardex muestra el movimiento con el motivo.
+- [ ] 18. **No venta** (abrir gaveta sin vender). → Pide motivo; queda registrada.
+- [ ] 19. **Corte** a medio turno. → Imprime corte; la caja sigue abierta.
+- [ ] 20. **Cambiar de usuario** con la caja abierta (cajero ↔ dueño). → Cada uno ve solo lo suyo; el cajero no entra a Administración.
+
+### Cerrar
+- [ ] 21. **Cierre ciego**: el cajero cuenta sin ver el esperado. → Al confirmar muestra la diferencia.
+- [ ] 22. **Z impreso.** → Totales por forma de pago = suma de las ventas del turno; anulaciones aparte.
+- [ ] 23. Después del cierre, un respaldo automático «cierre» aparece en Administración → Respaldo.
+
+### Respaldo y recuperación
+- [ ] 24. **Respaldo manual** a la USB. → Verificado.
+- [ ] 25. **Restaurar en otra carpeta** (simulacro, en otra PC o usuario de Windows): instalar, en la pantalla inicial **Restaurar desde respaldo** con el archivo de la USB y su contraseña. → Mismas ventas, turnos y productos (compare con **Exportar diagnóstico**).
+- [ ] 26. **Exportar diagnóstico** (Técnico → Sistema). → Archivo en Descargas, sin nombres de clientes ni PIN.
+
+### Desinstalar y reinstalar sin perder datos
+- [ ] 27. Anote los conteos (Exportar diagnóstico). **Desinstale** desde Configuración de Windows **marcando «Borrar los datos de la aplicación»** si lo ofrece.
+- [ ] 28. Verifique que `%APPDATA%\PuntoDeVenta-Datos` sigue ahí con `pos.db`, `pos.clave` y `respaldos`.
+- [ ] 29. **Reinstale** el mismo instalador y entre. → Mismos usuarios, ventas, turnos y productos (diagnóstico igual al del paso 27). No pidió crear técnico de nuevo.
+
+Firma técnico: ________________  Firma dueño: ________________  Fecha: ____________
+
+## Instalación limpia
+
+Para dejar la base sin datos de prueba (por ejemplo, si se probó en la PC del negocio antes de entregar).
+
+1. Cierre el programa. Si hay algo que guardar, haga un respaldo y cópielo a la USB.
+2. Vaya a `%APPDATA%\PuntoDeVenta-Datos` y **renombre** la carpeta a `PuntoDeVenta-Datos.prueba-<fecha>` (no la borre hasta que el cliente use la nueva una semana).
+3. Abra el programa: arranca como recién instalado (pide crear el técnico).
+4. Siga «Aceptación» desde el paso 3. «Preparar para el cliente» debe marcar «Sin datos de prueba».

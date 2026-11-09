@@ -105,10 +105,13 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 
 ### 4.9 Seguridad y datos
 - Base cifrada (SQLCipher) con la clave guardada en Windows DPAPI.
-- **Respaldo cifrado** AES-256-GCM con contraseña, guardado en Documentos\Respaldos POS, y restauración. El respaldo lleva la versión y la migración (`POSBAK02`); al restaurar uno viejo se pone al día con las migraciones y se verifica (integridad y bitácora) antes de reemplazar nada. No se restaura ni se actualiza con la caja abierta. `tests/fixtures` guarda un respaldo de cada versión.
+- **Respaldo cifrado** AES-256-GCM con contraseña, guardado en `%APPDATA%\PuntoDeVenta-Datos\respaldos`, y restauración. El respaldo lleva la versión y la migración (`POSBAK02`); al restaurar uno viejo se pone al día con las migraciones y se verifica (integridad y bitácora) antes de reemplazar nada. No se restaura ni se actualiza con la caja abierta. `tests/fixtures` guarda un respaldo de cada versión.
 - **Bitácora** de acciones sensibles, solo para agregar y encadenada con hashes. Se verifica al cerrar la caja y no guarda datos personales.
 - Triggers que impiden cambiar los pagos de turnos cerrados.
 - App cerrada: estricta, sin acceso a internet, sin DevTools en la versión final y sin fórmulas en los CSV.
+- **Datos fuera del alcance del desinstalador**: `%APPDATA%\PuntoDeVenta-Datos` (constante `CARPETA_DATOS`). Las versiones viejas usaban `%APPDATA%\cr.puntodeventa.pos`; se trasladan solas. **NO CAMBIAR** el `identifier` (`cr.puntodeventa.pos`): `build.rs` frena el build.
+- **Respaldo automático** diario y al cerrar cada turno, verificado, con rotación (30) y recordatorio semanal de USB. **Restaurar desde respaldo** en la pantalla de error cuando la base no abre (nunca se crea una base vacía encima de una instalación).
+- **Una sola instancia**, reloj revisado al abrir/cobrar/cerrar, registro local `errores.log` y «Exportar diagnóstico» (técnico). «Preparar para el cliente» (técnico) revisa que la instalación esté lista.
 
 ## 5. Fases
 
@@ -116,20 +119,20 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 |---|---|---|
 | 0. Prototipo de hardware | Lector, POS-58, code pages, gaveta; elegir Tauri | ✅ Hecho |
 | 1. Base | Base de datos, roles, datos del negocio, catálogo, importación CSV, códigos internos, etiquetas | ✅ Hecho |
-| 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, pendientes de factura, seguridad | 🟡 Casi completa |
+| 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, pendientes de factura, seguridad | ✅ Hecho |
 | 3. Apartados y créditos | Apartados con abonos (Chaguí) y crédito (otros negocios), según banderas por negocio | ⏳ Siguiente |
 | 4. Inventario | Existencias, entradas de mercadería, ajustes con motivo, mínimos y alertas, venta sin stock configurable; además: `bd_leer` cerrado y respaldos compatibles entre versiones | ✅ Hecho (falta probar en la PC real: PRUEBAS-MANUALES O, P, Q) |
 | 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ Incluido en el contrato |
 | 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ Incluido en el contrato |
 
-**Último trabajo (commits recientes):** registro del supervisor y descarga de archivos, colores por departamento en la venta, validación de hora al abrir caja, "da vuelto" con la caja abierta, y estadísticas por usuario y lecturas del día en el Z.
+**Versión actual: 0.9.0 (versión de prueba en el negocio)**, migraciones 1 a 12. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
 
 ## 6. Lo que falta
 
 ### Incluido en el contrato (no es opcional)
 1. Apartados con abonos (fase 3). Las tablas `cuentas`, `cuenta_lineas`, `abonos` y `ventas.cuenta_id` ya existen.
 2. Reportes (fase 5): ventas por día, departamento, producto y usuario. Los de inventario ya están (Inventario → Reportes).
-3. Pruebas manuales con `PRUEBAS-MANUALES.md` y entrega (fase 6).
+3. Aceptación de la 0.9.0 en la PC real (`PRUEBAS-MANUALES.md`), uso de prueba y entrega 1.0.0 (fase 6).
 
 ### Deuda técnica o seguridad (de SEGURIDAD.md)
 4. Firmar el instalador (requiere certificado; mientras tanto, documentar el SHA-256 de cada entrega).

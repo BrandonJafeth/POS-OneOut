@@ -21,6 +21,7 @@ mod inventario;
 mod negocio;
 mod permisos;
 mod pin;
+mod preparacion;
 mod printer;
 mod respaldo;
 mod sesion;
@@ -391,6 +392,12 @@ async fn respaldo_usb_confirmado(st: St<'_>) -> Res<()> {
 }
 
 #[tauri::command]
+async fn caja_consecutivo(st: St<'_>, numero: i64) -> Res<()> {
+    let a = st.actor().await?;
+    caja::fijar_consecutivo(st.pool()?, &a, caja::CAJA_1, numero).await
+}
+
+#[tauri::command]
 async fn caja_reabrir(st: St<'_>, turno_id: String, pin: String, motivo: String) -> Res<()> {
     let a = st.actor().await?;
     caja::reabrir(st.pool()?, &a, &turno_id, &pin, &motivo).await
@@ -673,6 +680,12 @@ async fn diagnostico_exportar(app: tauri::AppHandle, st: St<'_>) -> Res<String> 
     let txt = diagnostico::exportar(st.bd.as_ref(), &st.dir, &a).await?;
     let dir = app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?;
     util::guardar_en(&dir, &format!("diagnostico-pos-{}.txt", chrono::Local::now().format("%Y%m%d-%H%M")), txt.as_bytes())
+}
+
+#[tauri::command]
+async fn sistema_preparacion(st: St<'_>) -> Res<Vec<preparacion::Punto>> {
+    let a = st.actor().await?;
+    preparacion::revisar(st.bd()?, &a).await
 }
 
 #[tauri::command]
@@ -1060,6 +1073,7 @@ pub fn run() {
             sistema_restaurar,
             diagnostico_anotar,
             diagnostico_exportar,
+            sistema_preparacion,
             sesion_usuarios,
             sesion_iniciar,
             sesion_tecnico,
@@ -1085,6 +1099,7 @@ pub fn run() {
             caja_necesita_nota,
             caja_cerrar,
             caja_reabrir,
+            caja_consecutivo,
             caja_revisada,
             caja_z,
             caja_z_imprimir,

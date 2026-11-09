@@ -16,10 +16,12 @@ import { DEFAULT_SETTINGS, type TicketSettings } from "../lib/tickets";
 import { ROL_NOMBRE, type Caja, type EntradaBitacora, type Rol } from "../tipos";
 import { Bancos, FormasPago } from "./config/FormasPago";
 import Departamentos from "./Departamentos";
+import Preparacion from "./config/Preparacion";
 import Diagnostico from "./hardware/Diagnostico";
 import { useToast } from "../ui/Toast";
 
 const TABS = [
+  ["preparar", "Preparar para el cliente"],
   ["claves", "Claves de configuración"],
   ["departamentos", "Departamentos"],
   ["hardware", "Hardware"],
@@ -33,7 +35,7 @@ const TABS = [
 type Tab = (typeof TABS)[number][0];
 
 export default function ConfigTecnica() {
-  const [tab, setTab] = useState<Tab>("claves");
+  const [tab, setTab] = useState<Tab>("preparar");
   return (
     <div className="screen">
       <h1>Técnico</h1>
@@ -44,6 +46,7 @@ export default function ConfigTecnica() {
           </button>
         ))}
       </nav>
+      {tab === "preparar" && <Preparacion />}
       {tab === "claves" && <Claves />}
       {tab === "departamentos" && <Departamentos embebido />}
       {tab === "hardware" && <Hardware />}

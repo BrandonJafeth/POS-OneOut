@@ -41,6 +41,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("caja_cerrar", true, true, false),
     ("caja_reabrir", false, true, false),
     ("caja_revisada", false, true, false),
+    ("caja_consecutivo (antes de la 1.ª venta)", false, true, true),
     ("caja_z", true, true, false),
     ("caja_z_imprimir", true, true, false),
     ("caja_nota_cierre", true, true, false),
@@ -92,6 +93,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("imprimir (cierre)", false, true, false),
     ("imprimir (entrada)", false, true, false),
     ("list_printers / print_raw (diagnóstico)", false, false, true),
+    ("sistema_preparacion / diagnostico_exportar", false, false, true),
 ];
 
 /// Lo que de verdad pasa con un rol: (comando, permitido).
@@ -123,6 +125,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("caja_cerrar", denegado(caja::cerrar(p, a, CAJA_1, &conteo(&[]), "").await));
     s("caja_reabrir", denegado(caja::reabrir(p, a, x, "000000", "motivo largo").await));
     s("caja_revisada", denegado(caja::marcar_revisada(p, a, x).await));
+    s("caja_consecutivo (antes de la 1.ª venta)", denegado(caja::fijar_consecutivo(p, a, CAJA_1, 100).await));
     s("caja_z", denegado(caja::datos_z(p, a, x).await));
     s("caja_z_imprimir", denegado(caja::imprimir_z(p, a, x, &[], None).await));
     s("caja_nota_cierre", denegado(caja::nota_cierre(p, a, x, "nota").await));
@@ -175,6 +178,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("imprimir (cierre)", lib("caja.admin"));
     s("imprimir (entrada)", lib("inventario"));
     s("list_printers / print_raw (diagnóstico)", lib("config.tecnica"));
+    s("sistema_preparacion / diagnostico_exportar", denegado(crate::preparacion::revisar(bd, a).await));
     v
 }
 

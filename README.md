@@ -27,7 +27,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 
 ## Datos
 
-- Archivo: `%APPDATA%\cr.puntodeventa.pos\pos.db` (WAL; respaldar con la app cerrada junto con `-wal`/`-shm`). Nunca dentro del instalador.
+- Archivo: `%APPDATA%\PuntoDeVenta-Datos\pos.db` (WAL; respaldar con la app cerrada junto con `-wal`/`-shm`). Nunca dentro del instalador.
 - Migraciones: `src/db/migraciones/NNNN_*.sql`, registradas en `src-tauri/src/db.rs`. Agregar una nueva = archivo nuevo + versión siguiente; nunca editar una ya instalada.
 - Todo el SQL vive en `src/db`. Las escrituras van por el comando Rust `sql_lote` (transacción real); ver comentario en `src-tauri/src/db.rs`.
 - Primer arranque: pide el PIN del técnico. Entrada del técnico en la pantalla de login: **Ctrl+Alt+T**.
@@ -38,7 +38,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 - Cajero: solo nombre y teléfono. Dueño: lista, datos, corrección, exportar (PDF/CSV) y anonimizar (con PIN y motivo). Técnico: sin acceso a clientes ni al respaldo.
 - No hay borrado lógico de clientes: se anonimizan (el id queda para el historial). Bloqueado si tienen saldo pendiente.
 - La bitácora guarda ids, acciones y nombres de campos, nunca datos personales.
-- Respaldo: solo cifrado (AES-256-GCM, clave Argon2id, contraseña ≥ 8), en Documentos\Respaldos POS.
+- Respaldo: solo cifrado (AES-256-GCM, clave Argon2id, contraseña ≥ 8), en `%APPDATA%\PuntoDeVenta-Datos\respaldos` (diario, al cerrar cada turno y a mano).
 - Nube: no existe sincronización; `src/db/sincronizacion.ts` fija la lista blanca (sin clientes, apartados, usuarios ni bitácora).
 
 ## Venta (fase 2)

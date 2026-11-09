@@ -11,6 +11,7 @@ import Button from "../ui/Button";
 import CampoMonto from "../ui/CampoMonto";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
+import Consecutivo from "./caja/Consecutivo";
 
 export const AYUDA_TURNO_COMPARTIDO =
   "Si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona. El cierre Z dice qué vendió cada uno, pero el efectivo es uno solo. Si quiere controlar el efectivo de cada cajero por separado, desactive esta opción y cada uno abre y cierra su propio turno.";
@@ -45,6 +46,7 @@ export default function ConfigCaja() {
       <h1>Caja y cierre</h1>
       {error && <Alert tono="error">{error}</Alert>}
 
+      <Consecutivo />
       <section className="card">
         <h2>Turno de caja</h2>
         <label className="opcion">

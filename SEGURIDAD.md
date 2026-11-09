@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.1.0, con las migraciones 1 a 12.
+Aplica a la versión 0.9.0 (versión de prueba en el negocio), con las migraciones 1 a 12.
 
 ## 1. Modelo de amenazas
 
@@ -53,7 +53,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - El técnico entra por una entrada oculta (Ctrl+Alt+T); no aparece en la lista.
 
 ### Datos en disco
-- La base `pos.db` y los respaldos quedan en la carpeta de la app: `%APPDATA%\cr.puntodeventa.pos`.
+- La base `pos.db`, su clave `pos.clave` y los respaldos quedan en `%APPDATA%\PuntoDeVenta-Datos` (constante `CARPETA_DATOS` en lib.rs). No depende del `identifier` ni del nombre del programa y el desinstalador no la conoce: aunque se marque «Borrar los datos de la aplicación», los datos se conservan. Las versiones anteriores la tenían en `%APPDATA%\cr.puntodeventa.pos`; al arrancar se traslada sola (`respaldo::trasladar_datos`).
 - **SQLCipher**: se evaluó contra cifrar solo los respaldos y se eligió SQLCipher. La clave de 32 bytes es aleatoria y se guarda en `pos.clave`, protegida con DPAPI. No está en el código ni en el repositorio.
   - Una base vieja sin cifrar se convierte sola al primer arranque con `sqlcipher_export`. La copia en claro se borra cuando la cifrada ya existe.
 - WAL activo y `quick_check` al arrancar y cada 6 horas. Un fallo queda en la bitácora.
@@ -135,6 +135,105 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - Compilación release: LTO, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
 - Instalador **sin firmar**. Cada entrega se publica con su SHA-256 (ver la sección 6).
 
+### Datos que sobreviven (auditoría 0.9.0)
+- **Carpeta de datos fija**: `%APPDATA%\PuntoDeVenta-Datos` (ver «Datos en disco»). El `identifier` de `tauri.conf.json` (`cr.puntodeventa.pos`) igual no se cambia: `build.rs` frena el build si alguien lo cambia (JSON no admite comentarios y Tauri rechaza claves desconocidas, así que el aviso vive en `build.rs`).
+- **Instalador**: solo NSIS, por usuario (`installMode: currentUser`), coherente con la clave DPAPI atada al usuario de Windows.
+- **Nunca una base vacía encima**: si falta `pos.db` pero existe `pos.clave` (o al revés, con cifrado), la app NO crea nada nuevo y ofrece «Restaurar desde respaldo» (`bd::revisar_instalacion`).
+- **Restaurar sin sesión** cuando la base no abre (`sistema_restaurar`): solo en ese estado; lo protege la contraseña del respaldo. La base que no abría queda aparte con fecha; si la clave no se puede leer, queda como `pos.clave.resguardo-<fecha>` y se crea otra.
+- **Migraciones y saltos de línea**: sqlx guarda una suma de cada migración aplicada. Un build hecho desde un clon con CRLF dejaba de abrir las bases (encontrado en la simulación de la actualización futura). Ahora el SQL se normaliza a LF (`bd::sin_cr`), las sumas guardadas con CRLF se pasan a la normalizada si el contenido es idéntico (`bd::reparar_sumas`) y `.gitattributes` fija LF en los `.sql`.
+- **Migraciones futuras**: desde la 13 no pueden borrar tablas ni filas salvo marcado explícito (`tests/migraciones.test.ts`).
+- **Restauración atómica**: el respaldo se exporta a `pos.db.nuevo.parcial` y recién al final pasa a `pos.db.nuevo`; un corte a medias no reemplaza la base.
+- **Una sola instancia** por usuario (mutex con nombre de Windows): dos ventanas serían dos escritores.
+- **Reloj atrasado**: además de al abrir la caja, se revisa al cobrar y al cerrar.
+
+### Respaldo automático y diagnóstico
+- El dueño elige la contraseña una vez (con su PIN); se guarda protegida con DPAPI (`respaldo-automatico.clave`). Los automáticos usan esa contraseña, así se abren en otra computadora. Uno al día y uno al cerrar cada turno, en segundo plano; quedan los últimos N (`respaldo_auto_cantidad`, 30); cada uno se relee del disco y se verifica (descifrar + integridad + bitácora). Recordatorio semanal al dueño de copiarlos a la USB.
+- **Contraseña perdida = respaldos perdidos.** No hay recuperación posible (es el punto del cifrado). La pantalla lo advierte con casilla de «entendido» al hacer un respaldo y al activar el automático.
+- Registro local de errores técnicos `errores.log` (rota a los 512 KB): origen y mensaje técnico, sin control, máx. 400 caracteres y toda secuencia de 6+ dígitos cambiada por «#». También los cierres inesperados de Rust (panic). «Exportar diagnóstico» (solo técnico) arma un `.txt` en Descargas con versión, base, integridad, bitácora, conteos (nunca nombres) y las últimas líneas del registro.
+
+### Tabla de permisos (comando × rol)
+Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_respeta_la_tabla` llama cada comando con cada rol y compara con esta tabla: si un permiso cambia, cambian las dos. «Permitido» = el comando no responde con falta de permiso (puede fallar por otra cosa).
+
+| Comando | Cajero | Dueño | Técnico |
+|---|:---:|:---:|:---:|
+| `usuarios_listar` | — | ✔ | ✔ |
+| `usuarios_crear (cajero)` | — | ✔ | ✔ |
+| `usuarios_editar` | — | ✔ | ✔ |
+| `usuarios_cambiar_pin (de otro)` | — | ✔ | ✔ |
+| `usuarios_eliminar` | — | ✔ | ✔ |
+| `config_guardar (tema)` | ✔ | ✔ | ✔ |
+| `config_guardar (técnica)` | — | — | ✔ |
+| `config_guardar (caja_*)` | — | ✔ | ✔ |
+| `config_guardar (inventario)` | — | ✔ | — |
+| `negocio_guardar (contacto)` | — | ✔ | ✔ |
+| `negocio_logo` | — | — | ✔ |
+| `bitacora_listar / verificar` | — | ✔ | ✔ |
+| `caja_estado` | ✔ | ✔ | — |
+| `caja_abrir` | ✔ | ✔ | — |
+| `caja_movimiento` | ✔ | ✔ | — |
+| `caja_detalle` | ✔ | ✔ | — |
+| `caja_necesita_nota` | ✔ | ✔ | — |
+| `caja_cerrar` | ✔ | ✔ | — |
+| `caja_reabrir` | — | ✔ | — |
+| `caja_revisada` | — | ✔ | — |
+| `caja_consecutivo (antes de la 1.ª venta)` | — | ✔ | ✔ |
+| `caja_z` | ✔ | ✔ | — |
+| `caja_z_imprimir` | ✔ | ✔ | — |
+| `caja_nota_cierre` | ✔ | ✔ | — |
+| `caja_corte` | — | ✔ | — |
+| `caja_turnos` | ✔ | ✔ | — |
+| `gaveta_venta` | ✔ | ✔ | — |
+| `gaveta_no_venta` | ✔ | ✔ | — |
+| `gaveta_dueno` | ✔ | ✔ | — |
+| `gaveta_aperturas` | — | ✔ | — |
+| `venta_esperas / crear / guardar` | ✔ | ✔ | — |
+| `venta_espera_descartar` | ✔ | ✔ | — |
+| `venta_autorizar_descuento` | ✔ | ✔ | — |
+| `venta_cobrar` | ✔ | ✔ | — |
+| `venta_obtener` | ✔ | ✔ | — |
+| `venta_listar_dia` | ✔ | ✔ | — |
+| `venta_imprimir` | ✔ | ✔ | — |
+| `venta_correcciones` | ✔ | ✔ | — |
+| `venta_corregir_pago` | — | ✔ | — |
+| `venta_anular` | — | ✔ | — |
+| `venta_pendientes_factura` | ✔ | ✔ | — |
+| `venta_pedir_factura` | ✔ | ✔ | — |
+| `venta_marcar_factura` | ✔ | ✔ | — |
+| `cliente_crear` | ✔ | ✔ | — |
+| `cliente_buscar` | ✔ | ✔ | — |
+| `cliente_basico` | ✔ | ✔ | — |
+| `cliente_dato_factura` | ✔ | ✔ | — |
+| `cliente_tiene_correo` | ✔ | ✔ | — |
+| `cliente_listar` | — | ✔ | — |
+| `cliente_obtener` | — | ✔ | — |
+| `cliente_editar` | — | ✔ | — |
+| `cliente_cuentas_saldo` | — | ✔ | — |
+| `cliente_exportar` | — | ✔ | — |
+| `cliente_anonimizar` | — | ✔ | — |
+| `cliente_retencion` | — | ✔ | — |
+| `respaldo_crear` | — | ✔ | — |
+| `respaldo_restaurar` | — | ✔ | — |
+| `respaldo_ultimo` | — | ✔ | — |
+| `respaldo_auto_configurar / estado / ahora / usb_confirmado` | — | ✔ | — |
+| `importacion_leer` | — | ✔ | ✔ |
+| `importacion_aplicar` | — | ✔ | ✔ |
+| `inventario_* (lista, kardex, entradas, ajustes, conteos, carga inicial)` | — | ✔ | — |
+| `inventario_reporte_*` | — | ✔ | — |
+| `inventario_existencia (config apagada)` | — | ✔ | — |
+| `proveedores_*` | — | ✔ | — |
+| `impresoras_listar / detectar / guardar / eliminar / asignar / probar` | — | ✔ | ✔ |
+| `impresora_ajustes (formato, sin destino)` | ✔ | ✔ | ✔ |
+| `imprimir (movimiento)` | ✔ | ✔ | — |
+| `imprimir (etiqueta)` | — | ✔ | ✔ |
+| `imprimir (cierre)` | — | ✔ | — |
+| `imprimir (entrada)` | — | ✔ | — |
+| `list_printers / print_raw (diagnóstico)` | — | — | ✔ |
+| `sistema_preparacion / diagnostico_exportar` | — | — | ✔ |
+| `sistema_estado`, `sesion_*`, `sistema_crear_tecnico` (solo si no hay técnico), `sistema_restaurar` (solo si la base NO abre), `diagnostico_anotar`, `app_reiniciar` | sin sesión | sin sesión | sin sesión |
+| `bd_leer` (solo catálogo y configuración pública), `guardar_descarga` (.pdf/.csv/.txt ya armados) | ✔ | ✔ | ✔ |
+
+Notas: cajero y técnico no administran al dueño (con un usuario real responden «No tiene permiso»). El técnico NO consulta ventas (llevan el nombre del cliente): corregido en esta auditoría. `imprimir` cambia de permiso según el documento.
+
 ## 3. Lo que NO cubre
 
 - **Un administrador de Windows o malware que corre como el mismo usuario**. Ese atacante puede pedirle a DPAPI la clave de la base, leer la memoria del proceso o registrar teclas. El cifrado protege el archivo si se lo llevan, no una máquina comprometida.
@@ -148,6 +247,16 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Turno compartido**: si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona (el Z lo dice). Para control por cajero, desactive `caja_turno_compartido`.
 - **Gaveta abierta a mano** (llave o botón físico de la gaveta): no pasa por el sistema; solo el arqueo lo detecta.
 - **Un solo puesto**: no hay red ni sincronización. El módulo de nube existe pero no está activo.
+
+### Riesgos aceptados para la versión de prueba (0.9.0)
+| Riesgo | Por qué se acepta | Qué lo mitiga |
+|---|---|---|
+| Instalador sin firma: SmartScreen avisa | El certificado cuesta y tarda; es una versión de prueba | SHA-256 de cada entrega en ENTREGAS.md; instalar solo desde la USB del técnico |
+| Cambiar de usuario de Windows o reinstalar Windows: la base no abre | Es la protección DPAPI (un disco robado no se lee) | «Restaurar desde respaldo» en la pantalla de error + respaldo automático diario con la contraseña del dueño |
+| Contraseña de respaldo perdida | Sin ella no se puede descifrar (por diseño) | Advertencia con casilla; anotarla fuera de la computadora |
+| Impresora trabada: un hilo espera al driver hasta que contesta | Windows no deja cancelar con seguridad una escritura trabada | Límite de 10 s por envío; la base sigue libre; se puede reintentar al minuto |
+| Uso prolongado (12 h) sin medir en la PC real | No se puede medir sin la app gráfica en la PC del negocio | Prueba de aceptación; consultas medidas con 50.000 ventas (búsqueda ~3 ms, Z ~30 ms) |
+| `bd_leer` sigue para el catálogo | Las tablas permitidas no tienen datos personales ni costos | Lista blanca + rechazos a la bitácora |
 
 ## 4. Recomendaciones para cada negocio
 
@@ -189,8 +298,8 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (88 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
-- TypeScript: `npm test` (153 pruebas).
+- Rust: `cd src-tauri && cargo test --lib` (114 pruebas + 1 ignorada que genera el fixture, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (167 pruebas).
 
 ## 6. Compilar y verificar una entrega
 
