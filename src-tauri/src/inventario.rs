@@ -692,7 +692,7 @@ pub struct Filtro {
     #[serde(default)]
     pub texto: String,
     pub departamento_id: Option<String>,
-    /// "", "bajo_minimo", "agotados", "negativos", "sin_barras", "sin_costo", "sin_control"
+    /// "", "con_control", "bajo_minimo", "agotados", "negativos", "sin_barras", "sin_costo", "sin_control"
     #[serde(default)]
     pub filtro: String,
     pub limite: Option<i64>,
@@ -725,6 +725,7 @@ pub async fn lista(pool: &SqlitePool, a: &Actor, caja_id: &str, f: &Filtro) -> R
         "sin_barras" => Some("NOT EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.tipo = 'barras')"),
         "sin_costo" => Some("k.costo IS NULL"),
         "sin_control" => Some("p.controla_inventario = 0"),
+        "con_control" => Some("p.controla_inventario = 1"),
         _ => return Err(format!("{}Filtro desconocido: {}", crate::util::TECNICO, f.filtro)),
     };
     if let Some(x) = cond {
@@ -1314,6 +1315,9 @@ mod tests {
         for (pid, n) in [(&a1, 2), (&b1, 4)] {
             ajustar(p, &dueno, CAJA_1, &Ajuste { producto_id: pid.clone(), nueva: Some(n), diferencia: None, motivo: "Conteo".into(), detalle: String::new() }, PIN_DUENO).await.unwrap();
         }
+        let sin = prod(p, "Servicio", false).await;
+        let (con, _) = lista(p, &dueno, CAJA_1, &Filtro { filtro: "con_control".into(), ..Default::default() }).await.unwrap();
+        assert!(con.iter().all(|f| f.controla) && !con.iter().any(|f| f.producto_id == sin));
         let bm = reporte_bajo_minimo(p, &dueno, CAJA_1).await.unwrap();
         assert_eq!(bm.iter().map(|f| (f.producto_id.as_str(), f.sugerido)).collect::<Vec<_>>(), vec![(a1.as_str(), 8)]);
         assert_eq!(alertas(p, &dueno, CAJA_1).await.unwrap(), 1);

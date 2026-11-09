@@ -30,7 +30,7 @@ const hoy = () => new Date().toLocaleDateString("sv-SE");
 
 // Borrador de la entrada a medio digitar: si la sesión se cierra por inactividad, no se pierde.
 // sessionStorage vive mientras la ventana esté abierta (se borra al cerrar el programa).
-const BORRADOR = "inventario.entrada.borrador";
+export const BORRADOR = "inventario.entrada.borrador";
 interface Borrador {
   proveedor: string;
   factura: string;

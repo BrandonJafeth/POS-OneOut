@@ -3,7 +3,7 @@
 import { invocar } from "../lib/invocar";
 
 export type EstadoInventario = "sin_control" | "con_existencia" | "bajo_minimo" | "agotado" | "negativo";
-export type FiltroInventario = "" | "bajo_minimo" | "agotados" | "negativos" | "sin_barras" | "sin_costo" | "sin_control";
+export type FiltroInventario = "" | "con_control" | "bajo_minimo" | "agotados" | "negativos" | "sin_barras" | "sin_costo" | "sin_control";
 export type TipoMovimiento = "venta" | "anulacion" | "entrada" | "ajuste" | "inicial";
 
 export const NOMBRE_ESTADO: Record<EstadoInventario, string> = {

@@ -2,6 +2,7 @@
 // 1. elegir archivo (lo lee Rust) → 2. revisar: vista previa, mapeo, reglas y decisiones →
 // 3. confirmar con PIN (Rust valida y escribe todo en una transacción). Nada se escribe en la
 // base antes del paso 3; volver atrás conserva el mapeo y las decisiones.
+import { flechasPestanas } from "../../ui/pestanas";
 import { ArrowLeft, ArrowRight, Check, Download, FileUp, RotateCcw, Save, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSesion } from "../../app/sesion";
@@ -239,7 +240,7 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
             ))}
 
             <section className="card">
-              <div className="tabs" role="tablist" aria-label="Vista previa">
+              <div className="tabs" role="tablist" aria-label="Vista previa" onKeyDown={flechasPestanas}>
                 {(
                   [
                     ["resumen", "Departamentos"],

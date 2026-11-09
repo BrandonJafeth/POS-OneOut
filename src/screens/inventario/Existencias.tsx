@@ -37,6 +37,7 @@ export function EstadoBadge({ estado }: { estado: EstadoInventario }) {
 }
 
 const FILTROS: [FiltroInventario, string][] = [
+  ["con_control", "Con control"],
   ["", "Todos"],
   ["bajo_minimo", "Bajo mínimo"],
   ["agotados", "Agotados"],
@@ -50,10 +51,10 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [texto, setTexto] = useState("");
   const [depto, setDepto] = useState("");
-  const [filtro, setFiltroLocal] = useState<FiltroInventario>(p.filtroInicial ?? "");
+  const [filtro, setFiltroLocal] = useState<FiltroInventario>(p.filtroInicial ?? "con_control");
   const setFiltro = (f: FiltroInventario) => (setFiltroLocal(f), p.onFiltro?.(f));
   // El botón «Ver cuáles» de arriba cambia el filtro sin borrar lo que se buscó.
-  useEffect(() => setFiltroLocal(p.filtroInicial ?? ""), [p.filtroInicial]);
+  useEffect(() => setFiltroLocal(p.filtroInicial ?? "con_control"), [p.filtroInicial]);
   const [filas, setFilas] = useState<FilaInventario[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
@@ -108,7 +109,15 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
       </div>
       <Mensaje error={error} />
       {filas.length === 0 ? (
-        <EmptyState icono={ClipboardList} titulo="No hay productos con ese filtro" texto="Pruebe con otro filtro o búsqueda." />
+        filtro === "con_control" && !texto && !depto ? (
+          <EmptyState
+            icono={ClipboardList}
+            titulo="Todavía ningún producto lleva inventario"
+            texto="Cargue las existencias en «Carga inicial» o con un conteo físico, o registre una entrada de mercadería. Para ver todo el catálogo, elija «Todos» en Mostrar."
+          />
+        ) : (
+          <EmptyState icono={ClipboardList} titulo="No hay productos con ese filtro" texto="Pruebe con otro filtro o búsqueda." />
+        )
       ) : (
         <table className="tbl">
           <thead>

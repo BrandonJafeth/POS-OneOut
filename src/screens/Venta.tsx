@@ -5,6 +5,7 @@
 // "3*código" agrega 3 unidades.
 // Las pestañas viven en useEsperas, el catálogo en useCatalogo y las reglas de dinero en
 // lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
+import { flechasPestanas } from "../ui/pestanas";
 import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
@@ -483,7 +484,7 @@ export default function Venta() {
 
       {/* ─── Tiquete ─── */}
       <aside className="tiquete" aria-label="Tiquete">
-        <div className="tiquete-cab" role="tablist" aria-label="Ventas en espera">
+        <div className="tiquete-cab" role="tablist" aria-label="Ventas en espera" onKeyDown={flechasPestanas}>
           {esperas.map((e, i) => (
             <div key={e.id} className={e.id === activaId ? "pestana activa" : "pestana"}>
               <button
@@ -540,7 +541,6 @@ export default function Venta() {
                 onAbrir={() => setLineaSel(l.id === lineaSel ? null : l.id)}
                 onCambio={(patch) => setLinea(l.id, patch)}
                 onQuitar={() => quitarLinea(l.id)}
-                onError={setAviso}
               />
             ))}
           </ul>
@@ -671,22 +671,25 @@ function LineaTiquete(p: {
   onAbrir(): void;
   onCambio(patch: Partial<LineaEspera>): void;
   onQuitar(): void;
-  onError(msg: string): void;
 }) {
   const l = p.linea;
+  // El error se muestra en la misma línea (antes salía arriba, en el catálogo, lejos de aquí).
+  const [error, setError] = useState("");
   const [modo, setModo] = useState<"¢" | "%">("¢");
   const [desc, setDesc] = useState(conMiles(String(l.descuento)));
   useEffect(() => {
     setModo("¢");
     setDesc(conMiles(String(l.descuento)));
+    setError("");
   }, [p.abierta]);
 
   const aplicarDescuento = () => {
     const d = leerDescuento(desc, bruto(l), modo);
-    if (d === null || d > bruto(l)) return p.onError(modo === "%" ? "El porcentaje va de 0 a 100." : `El descuento no puede pasar de ${monto(bruto(l))}.`);
+    if (d === null || d > bruto(l)) return setError(modo === "%" ? "El porcentaje va de 0 a 100." : `El descuento no puede pasar de ${monto(bruto(l))}.`);
+    setError("");
     if (d !== l.descuento) p.onCambio({ descuento: d });
   };
-  const cantidad = (c: number) => c >= 1 && c <= MAX_CANTIDAD && p.onCambio({ cantidad: c, descuento: Math.min(l.descuento, c * l.precioUnitario) });
+  const cantidad = (c: number) => c >= 1 && c <= MAX_CANTIDAD && (setError(""), p.onCambio({ cantidad: c, descuento: Math.min(l.descuento, c * l.precioUnitario) }));
 
   return (
     <li className={p.abierta ? "linea sel" : "linea"}>
@@ -715,7 +718,7 @@ function LineaTiquete(p: {
               <Minus size={16} aria-hidden />
             </button>
           )}
-          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : p.onError("La cantidad debe ser un número entero de 1 a 100.000."))} />
+          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : setError("La cantidad debe ser un número entero de 1 a 100.000."))} />
           <button aria-label={`Una más de ${l.descripcion}`} onClick={() => cantidad(l.cantidad + 1)}>
             <Plus size={16} aria-hidden />
           </button>
@@ -750,6 +753,11 @@ function LineaTiquete(p: {
             </Button>
           )}
         </div>
+      )}
+      {error && (
+        <Alert tono="error">
+          {error}
+        </Alert>
       )}
     </li>
   );

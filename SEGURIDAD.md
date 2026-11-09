@@ -83,10 +83,12 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 
 ### Impresión y gaveta
 - Cada envío a una impresora tiene un tiempo límite de 10 s (`impresoras::con_limite`). Se imprime dentro de la transacción: sin límite, una USB trabada (sin papel) dejaba la base tomada y ningún cobro se guardaba.
+- Mientras una impresora siga trabada con un trabajo, el siguiente se rechaza al instante con un aviso claro (no se acumulan hilos esperando al driver).
 - Si el pulso de la gaveta no contesta a tiempo, pudo llegar tarde y abrirla: la apertura se registra igual y se avisa. Si la impresora no recibió nada (apagada, sin gaveta), no queda registro.
 
 ### Clientes y facturas
 - El consentimiento vale para el aviso de privacidad vigente: si el aviso cambió, Rust rechaza el registro con la versión vieja.
+- El borrador de una entrada de mercadería (lleva costos) vive en la memoria de la ventana mientras esté abierta y se borra al guardar, al cerrar el programa o cuando entra un usuario sin permiso de inventario.
 - El cajero no puede guardar notas del cliente (solo el dueño), aunque llame al comando directo.
 - No se anonimiza un cliente con ventas pendientes de factura electrónica (Hacienda necesita sus datos): primero se hace la factura y se marca.
 - Anonimizar también borra el nombre impreso en sus tiquetes (`ventas.nombre_tiquete`) y en las ventas en espera.
@@ -187,7 +189,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (86 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- Rust: `cd src-tauri && cargo test --lib` (88 pruebas, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
 - TypeScript: `npm test` (153 pruebas).
 
 ## 6. Compilar y verificar una entrega

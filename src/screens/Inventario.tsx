@@ -1,5 +1,6 @@
 // Inventario (solo el dueño): existencias, entradas de mercadería, conteo físico, reportes,
 // proveedores, carga inicial y opciones. Rust decide todo (src-tauri/src/inventario.rs).
+import { flechasPestanas } from "../ui/pestanas";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
@@ -30,7 +31,7 @@ export default function Inventario() {
   const { puede } = useSesion();
   const [tab, setTab] = useState<Tab>("existencias");
   const [alertas, setAlertas] = useState(0);
-  const [filtro, setFiltro] = useState<FiltroInventario>("");
+  const [filtro, setFiltro] = useState<FiltroInventario>("con_control");
   useEffect(() => void alertasInventario().then(setAlertas, () => setAlertas(0)), [tab]);
   const tabs = TABS.filter(([id]) => id !== "reportes" || puede("reportes"));
   return (
@@ -44,7 +45,7 @@ export default function Inventario() {
           </Button>
         </div>
       )}
-      <div className="tabs" role="tablist" aria-label="Inventario">
+      <div className="tabs" role="tablist" aria-label="Inventario" onKeyDown={flechasPestanas}>
         {tabs.map(([id, t]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab active" : "tab"} onClick={() => setTab(id)}>
             {t}

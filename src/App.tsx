@@ -32,6 +32,7 @@ import Caja from "./screens/Caja";
 import CambiarPinObligatorio from "./screens/CambiarPinObligatorio";
 import Clientes from "./screens/Clientes";
 import Inventario from "./screens/Inventario";
+import { BORRADOR as BORRADOR_ENTRADA } from "./screens/inventario/Entrada";
 import ConfigTecnica from "./screens/ConfigTecnica";
 import Login from "./screens/Login";
 import PendientesFactura from "./screens/PendientesFactura";
@@ -115,6 +116,14 @@ export default function App() {
 
   const entrar = useCallback(async (usuario: Usuario, minutos: number) => {
     setAvisoLogin("");
+    // El borrador de una entrada de mercadería (lleva costos) es del dueño: si entra otro rol, se borra.
+    if (!puede(usuario.rol, "inventario")) {
+      try {
+        sessionStorage.removeItem(BORRADOR_ENTRADA);
+      } catch {
+        /* sin almacenamiento: no hay borrador */
+      }
+    }
     // Con PIN pendiente de cambio Rust no deja leer nada: la configuración se carga después del cambio.
     if (!usuario.debeCambiarPin) {
       const c = await leerConfig();

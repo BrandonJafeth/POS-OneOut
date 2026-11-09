@@ -27,11 +27,14 @@ pub fn repartir(total: i64, pesos: &[i64]) -> Vec<i64> {
         v[0] = total;
         return v;
     }
-    let mut partes: Vec<i64> = pesos.iter().map(|p| ((p.max(&0)) * total).div_euclid(suma)).collect();
+    // peso × total en i128: en i64 se desborda con montos de miles de millones y, en la versión
+    // final, da la vuelta sin avisar (el reparto saldría mal en vez de fallar).
+    let prod = |p: i64| (p.max(0) as i128) * (total as i128);
+    let mut partes: Vec<i64> = pesos.iter().map(|&p| prod(p).div_euclid(suma as i128) as i64).collect();
     let mut resto = total - partes.iter().sum::<i64>();
     // Mayor resto primero (a igual resto, la primera línea).
     let mut orden: Vec<usize> = (0..n).collect();
-    orden.sort_by_key(|&i| std::cmp::Reverse((pesos[i].max(0) * total).rem_euclid(suma)));
+    orden.sort_by_key(|&i| std::cmp::Reverse(prod(pesos[i]).rem_euclid(suma as i128)));
     let mut k = 0;
     while resto > 0 {
         partes[orden[k % n]] += 1;
@@ -250,6 +253,14 @@ pub async fn calcular(c: &mut SqliteConnection, turno_id: &str) -> Res<Desglose>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repartir_montos_enormes_sin_desbordar() {
+        let total = 5_000_000_000_000; // ¢5 billones: peso × total pasa de i64
+        let p = repartir(total, &[3_000_000_000_000, 2_000_000_000_000]);
+        assert_eq!(p, vec![3_000_000_000_000, 2_000_000_000_000]);
+        assert_eq!(repartir(10, &[1, 1, 1]).iter().sum::<i64>(), 10);
+    }
 
     #[test]
     fn repartir_suma_exacto() {
