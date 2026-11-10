@@ -7,12 +7,16 @@ import Mensaje, { textoError } from "../../components/Mensaje";
 import PinDueno from "../../components/PinDueno";
 import { listarDepartamentos } from "../../db/departamentos";
 import { aplicarConteo, conteoAbierto, descartarConteo, diferenciasConteo, guardarConteo, type Conteo as ConteoGuardado, type FilaConteo } from "../../db/inventario";
+import { normalizar } from "../../lib/texto";
 import { useEscaner } from "../../lib/useEscaner";
 import type { Departamento } from "../../tipos";
 import Button from "../../ui/Button";
 import { useConfirmar } from "../../ui/Confirmar";
 import Field from "../../ui/Field";
+import Paginacion from "../../ui/Paginacion";
 import { useToast } from "../../ui/Toast";
+
+const POR_PAGINA = 50;
 
 export default function Conteo() {
   const { config } = useSesion();
@@ -24,6 +28,8 @@ export default function Conteo() {
   const [filas, setFilas] = useState<FilaConteo[]>([]);
   const [contado, setContado] = useState<Record<string, string>>({});
   const [soloDiferencias, setSoloDiferencias] = useState(false);
+  const [buscar, setBuscar] = useState("");
+  const [pagina, setPagina] = useState(1);
   const [pidePin, setPidePin] = useState(false);
   const [error, setError] = useState("");
 
@@ -70,6 +76,9 @@ export default function Conteo() {
       if (!f) return setError(`El código ${codigo} no es de un producto de este conteo.`);
       setError("");
       setContado((c) => ({ ...c, [f.productoId]: String((Number(c[f.productoId]) || 0) + 1) }));
+      // Que se vea lo que se acaba de escanear aunque esté en otra página.
+      const i = visibles.indexOf(f);
+      if (i >= 0) setPagina(Math.floor(i / POR_PAGINA) + 1);
     },
     { activo: !!conteo && !pidePin, debounceMs: config.escaner_debounce_ms },
   );
@@ -109,7 +118,14 @@ export default function Conteo() {
     );
 
   const cuenta = (f: FilaConteo) => (contado[f.productoId]?.trim() ? Number(contado[f.productoId]) : null);
-  const visibles = soloDiferencias ? filas.filter((f) => cuenta(f) != null && cuenta(f) !== f.sistema) : filas;
+  // La búsqueda es sobre todo el conteo, no solo la página que se ve.
+  const palabras = normalizar(buscar).split(" ").filter(Boolean);
+  const visibles = filas.filter(
+    (f) =>
+      (!soloDiferencias || (cuenta(f) != null && cuenta(f) !== f.sistema)) &&
+      palabras.every((w) => normalizar(f.nombre).includes(w) || f.codigos.toLowerCase().includes(w)),
+  );
+  const paginaVisible = Math.min(pagina, Math.max(1, Math.ceil(visibles.length / POR_PAGINA)));
   const contados = filas.filter((f) => cuenta(f) != null).length;
 
   return (
@@ -117,9 +133,14 @@ export default function Conteo() {
       <p className="muted">
         {departamentos.find((d) => d.id === conteo.departamentoId)?.nombre ?? "Todos los departamentos"} · contados {contados} de {filas.length}. Escanee para sumar 1 o escriba la cantidad; se guarda solo.
       </p>
-      <label className="row">
-        <input type="checkbox" checked={soloDiferencias} onChange={(e) => setSoloDiferencias(e.target.checked)} /> Ver solo diferencias
-      </label>
+      <div className="row abajo">
+        <Field label="Buscar en el conteo" flex={1}>
+          <input type="search" value={buscar} placeholder="Nombre o código" onChange={(e) => (setBuscar(e.target.value), setPagina(1))} />
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={soloDiferencias} onChange={(e) => (setSoloDiferencias(e.target.checked), setPagina(1))} /> Ver solo diferencias
+        </label>
+      </div>
       <table className="tbl">
         <thead>
           <tr>
@@ -130,7 +151,7 @@ export default function Conteo() {
           </tr>
         </thead>
         <tbody>
-          {visibles.map((f) => {
+          {visibles.slice((paginaVisible - 1) * POR_PAGINA, paginaVisible * POR_PAGINA).map((f) => {
             const c = cuenta(f);
             const d = c == null ? null : c - f.sistema;
             return (
@@ -149,6 +170,8 @@ export default function Conteo() {
           })}
         </tbody>
       </table>
+      {visibles.length === 0 && <p className="muted">Nada coincide con la búsqueda.</p>}
+      <Paginacion nombre="el conteo" pagina={paginaVisible} porPagina={POR_PAGINA} total={visibles.length} onPagina={setPagina} />
       <Mensaje error={error} />
       <div className="row">
         <Button icono={Save} onClick={() => void guardar()}>

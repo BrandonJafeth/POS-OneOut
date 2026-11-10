@@ -6,7 +6,8 @@ import { obtenerNegocio } from "../src/db/negocio";
 import { EscPos } from "../src/lib/escpos";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS, lr } from "../src/lib/tickets";
-import { calcularTotales, estadoVacio, redondear } from "../src/lib/venta/calculo";
+import { calcularTotales, conCantidad, conLinea, estadoVacio, redondear } from "../src/lib/venta/calculo";
+import { paginasVisibles } from "../src/ui/Paginacion";
 import { calcularPagos, sugerenciasEfectivo } from "../src/lib/venta/pagos";
 import { lineasPago, tiqueteVenta } from "../src/lib/venta/tiquete";
 import type { EstadoEspera, FormaPago, LineaEspera, Venta } from "../src/tipos";
@@ -37,6 +38,32 @@ const FORMAS: FormaPago[] = [
   { id: TJ, codigo: "TJ", nombre: "Tarjeta", tipo: "tarjeta", requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: true, orden: 2, activo: true },
   { id: TR, codigo: "TR", nombre: "Transferencia", tipo: "transferencia", requiereBanco: true, requiereReferencia: true, daVuelto: false, pideUltimos4: false, orden: 3, activo: true },
 ];
+
+describe("descuento fijo del producto", () => {
+  const conCatalogo = (pct: number, cantidad = 1): LineaEspera => {
+    const l = { ...linea(1000, cantidad), productoId: "P", descuentoCatalogo: pct };
+    return { ...l, descuento: Math.round((1000 * cantidad * pct) / 100) };
+  };
+
+  it("no cuenta contra el tope; lo que se agregue encima sí", () => {
+    expect(calcularTotales(venta(conCatalogo(30, 2)), 1)).toMatchObject({ total: 1400, pctDescuento: 0 });
+    expect(calcularTotales(venta({ ...conCatalogo(30, 2), descuento: 900 }), 1).pctDescuento).toBeCloseTo(15);
+  });
+
+  it("al sumar cantidad se recalcula; un descuento a mano se respeta", () => {
+    expect(conCantidad(conCatalogo(10), 3).descuento).toBe(300);
+    expect(conCantidad({ ...conCatalogo(10), descuento: 50 }, 3).descuento).toBe(50);
+    const e = conLinea(venta(conCatalogo(10)), conCatalogo(10));
+    expect(e.lineas.map((l) => [l.cantidad, l.descuento])).toEqual([[2, 200]]);
+  });
+});
+
+describe("paginación", () => {
+  it("primera, última y dos alrededor de la actual", () => {
+    expect(paginasVisibles(1, 3)).toEqual([1, 2, 3]);
+    expect(paginasVisibles(6, 15)).toEqual([1, null, 4, 5, 6, 7, 8, null, 15]);
+  });
+});
 
 describe("totales y redondeo", () => {
   it("redondea al múltiplo de 5 más cercano y guarda la diferencia", () => {

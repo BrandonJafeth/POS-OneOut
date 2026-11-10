@@ -2,11 +2,11 @@
   "_comentario": "Únicas escrituras de catálogo que el frontend puede pedir, por nombre. Rust ejecuta el SQL de aquí (nunca uno que mande la pantalla) y revisa el permiso contra la sesión. bitacora.registrar es especial: la escribe Rust con el usuario de la sesión y la cadena de hashes.",
   "producto.crear": {
     "permiso": "productos",
-    "sql": "INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio, activo, cabys, tasa_iva, exento, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "sql": "INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio, activo, cabys, tasa_iva, exento, descuento_pct, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   },
   "producto.editar": {
     "permiso": "productos",
-    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?, cabys = ?, tasa_iva = ?, exento = ?, revisar = 0, actualizado_en = ? WHERE id = ?"
+    "sql": "UPDATE productos SET nombre = ?, nombre_busqueda = ?, departamento_id = ?, precio = ?, activo = ?, cabys = ?, tasa_iva = ?, exento = ?, descuento_pct = ?, revisar = 0, actualizado_en = ? WHERE id = ?"
   },
   "producto.eliminar": {
     "permiso": "productos",

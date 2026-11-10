@@ -16,10 +16,10 @@ import {
   obtenerProducto,
   quitarCodigo,
 } from "../../db/productos";
-import { estadoInventario } from "../../db/inventario";
+import { estadoInventario, registrarEntrada } from "../../db/inventario";
 import { isValidEan13 } from "../../lib/ean13";
 import { leerMontoEntero } from "../../lib/texto";
-import { colones } from "../../lib/tickets";
+import { colones, monto } from "../../lib/tickets";
 import { useEscaner } from "../../lib/useEscaner";
 import type { Codigo, Departamento, ProductoConCodigos, TipoCodigo } from "../../tipos";
 import Etiqueta from "./Etiqueta";
@@ -51,6 +51,9 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   const [cabys, setCabys] = useState("");
   const [tasaIva, setTasaIva] = useState("13");
   const [exento, setExento] = useState(false);
+  const [descuento, setDescuento] = useState("");
+  // Solo al crear: unidades con las que empieza (queda como entrada de mercadería en el kardex).
+  const [existencia, setExistencia] = useState("");
   const [codigos, setCodigos] = useState<Codigo[]>(codigoInicial ? [codigoInicial] : []);
   const [codigoNuevo, setCodigoNuevo] = useState("");
   const [conflicto, setConflicto] = useState<{ error: CodigoOcupado; tipo: TipoCodigo } | null>(null);
@@ -69,6 +72,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     setCabys(p.cabys ?? "");
     setTasaIva(String(p.tasaIva));
     setExento(p.exento);
+    setDescuento(p.descuentoPct ? String(p.descuentoPct) : "");
     setCodigos(p.codigos);
   }
   useEffect(() => {
@@ -77,6 +81,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
 
   const precioNum = leerMontoEntero(precio);
   const tasaNum = Number(tasaIva.replace(",", "."));
+  const descuentoNum = Number(descuento || 0);
+  const existenciaNum = Number(existencia || 0);
   const sucio =
     !prod ||
     nombre !== prod.nombre ||
@@ -85,7 +91,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     activo !== prod.activo ||
     cabys !== (prod.cabys ?? "") ||
     tasaNum !== prod.tasaIva ||
-    exento !== prod.exento;
+    exento !== prod.exento ||
+    descuentoNum !== prod.descuentoPct;
 
   function limpiarAvisos() {
     setError("");
@@ -96,15 +103,28 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     limpiarAvisos();
     if (precioNum === null) return setError("Precio inválido: use solo números (ej. 1500 o 1.500)");
     if (!Number.isFinite(tasaNum)) return setError("Tasa de IVA inválida");
+    if (!(descuentoNum <= 100)) return setError("El descuento va de 0 a 100 %");
     if (precioNum === 0 && prod?.precio !== 0 && !(await confirmar({ titulo: "¿Precio ¢0?", texto: "El producto se venderá gratis cada vez que se escanee o se toque.", aceptar: "Guardar en ¢0", peligro: true })))
       return;
-    const datos = { nombre, departamentoId, precio: precioNum, activo, cabys: cabys.trim() || null, tasaIva: tasaNum, exento };
+    const datos = { nombre, departamentoId, precio: precioNum, activo, cabys: cabys.trim() || null, tasaIva: tasaNum, exento, descuentoPct: descuentoNum };
     try {
       if (id) await editarProducto(actor, id, datos);
       else {
         const nuevoId = await crearProducto(actor, datos, codigos, { moverCodigos });
         setId(nuevoId);
         await cargar(nuevoId);
+        if (existenciaNum > 0)
+          await registrarEntrada({
+            proveedorId: null,
+            factura: "",
+            fecha: new Date().toLocaleDateString("sv-SE"),
+            lineas: [{ productoId: nuevoId, cantidad: existenciaNum, costoUnitario: null }],
+            actualizarCosto: false,
+          }).catch((e) => {
+            onCambio();
+            throw new Error(`El producto se creó, pero las unidades no se cargaron: ${textoError(e)}. Cárguelas en Inventario → Entrada.`);
+          });
+        setExistencia("");
       }
       if (id) await cargar(id);
       toast.ok("Producto guardado.");
@@ -226,7 +246,20 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             Precio
             <CampoMonto valor={precio} onCambio={setPrecio} />
           </label>
+          <label className="campo">
+            Descuento %
+            <input className="small" inputMode="numeric" placeholder="0" value={descuento} onChange={(e) => setDescuento(e.target.value.replace(/\D/g, "").slice(0, 3))} />
+          </label>
+          {!id && puede("inventario") && (
+            <label className="campo">
+              Unidades que hay
+              <input className="small" inputMode="numeric" placeholder="0" value={existencia} onChange={(e) => setExistencia(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+            </label>
+          )}
         </div>
+        {descuentoNum > 0 && precioNum ? (
+          <p className="muted">Se vende a {monto(precioNum - Math.round((precioNum * descuentoNum) / 100))} ({descuentoNum} % menos), sin pedir PIN.</p>
+        ) : null}
         <label className="check">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} /> Activo (aparece en la venta)
         </label>

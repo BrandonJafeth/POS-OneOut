@@ -49,7 +49,7 @@ describe("la pantalla no puede pedir SQL arbitrario", () => {
   it("escritura: solo operaciones del registro, con permiso", async () => {
     await expect(db().lote([{ id: "DELETE FROM ventas" }])).rejects.toThrow("desconocida");
     baseDePrueba({ rol: "cajero" });
-    await expect(db().lote([{ id: "producto.crear", params: ["P1", "Lápiz", "lapiz", "00000000000000000000000D01", 350, 1, null, 13, 0, "x", "x"] }])).rejects.toThrow("permiso");
+    await expect(db().lote([{ id: "producto.crear", params: ["P1", "Lápiz", "lapiz", "00000000000000000000000D01", 350, 1, null, 13, 0, 0, "x", "x"] }])).rejects.toThrow("permiso");
   });
 });
 

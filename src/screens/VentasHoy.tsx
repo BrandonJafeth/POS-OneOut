@@ -1,6 +1,6 @@
 // Ventas del día: reimprimir (COPIA) y, solo el dueño con su PIN, corregir forma de pago y anular.
-// El cajero ve los tiquetes que emitió en el turno abierto (Rust no le manda los demás) y nunca
-// sumas acumuladas; las ventas de turnos ya cerrados sí las ve. El cierre es el de Caja.
+// El cajero ve los tiquetes de todos (para atender un reclamo aunque no esté quien cobró), uno por
+// uno: las sumas del turno abierto nunca, esas son del cierre en Caja.
 // Para encontrar una venta cuando el cliente vuelve ("la de la tijera, como a las 3"): buscar por
 // tiquete, producto, monto o cajero, acotar por hora y filtrar por factura pendiente, anuladas o pago.
 import { Ban, FileText, Landmark, Pencil, Printer, ReceiptText, Save, Search, ShieldCheck, X } from "lucide-react";
@@ -23,8 +23,11 @@ import EmptyState from "../ui/EmptyState";
 import CampoMonto from "../ui/CampoMonto";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
+import Paginacion from "../ui/Paginacion";
 import PedirFactura from "./venta/PedirFactura";
 import { useToast } from "../ui/Toast";
+
+const POR_PAGINA = 50;
 
 export default function VentasHoy() {
   const { caja, irA, puede } = useSesion();
@@ -36,6 +39,9 @@ export default function VentasHoy() {
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [filtro, setFiltro] = useState("todas");
+  const [pagina, setPagina] = useState(1);
+  // Buscar o filtrar es sobre todas las ventas del día; se vuelve a la primera página.
+  useEffect(() => setPagina(1), [texto, desde, hasta, filtro, dia]);
 
   const [cargado, setCargado] = useState(false);
   const cargar = async () => {
@@ -81,7 +87,7 @@ export default function VentasHoy() {
           </div>
         </div>
       ) : (
-        <p className="muted">Aquí están los tiquetes que usted emitió y los de turnos ya cerrados. Los totales del turno se ven al cerrar la caja.</p>
+        <p className="muted">Aquí están los tiquetes de todos los cajeros, para reimprimir o atender un reclamo. Los totales del turno se ven al cerrar la caja.</p>
       )}
       {lista.length > 0 && (
         <section className="card ventas-filtros" aria-label="Buscar ventas">
@@ -139,7 +145,7 @@ export default function VentasHoy() {
             </tr>
           </thead>
           <tbody>
-            {visibles.map((v) => (
+            {visibles.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((v) => (
               <FilaClic key={v.id} etiqueta={`Abrir tiquete ${v.numero}`} className={v.estado === "anulada" ? "inactivo" : ""} onAbrir={() => setAbierta(v.id)}>
                 <td className="hora">{horaDe(v.fecha)}</td>
                 <td className="mono">{v.numero}</td>
@@ -160,6 +166,7 @@ export default function VentasHoy() {
             ))}
           </tbody>
         </table>
+        <Paginacion nombre="ventas" pagina={pagina} porPagina={POR_PAGINA} total={visibles.length} onPagina={setPagina} />
         </>
         )}
       </section>

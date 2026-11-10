@@ -38,6 +38,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (11, "inventario", include_str!("../../src/db/migraciones/0011_inventario.sql")),
     (12, "control_por_codigo", include_str!("../../src/db/migraciones/0012_control_por_codigo.sql")),
     (13, "conteo_contado_en", include_str!("../../src/db/migraciones/0013_conteo_contado_en.sql")),
+    (14, "descuento_producto", include_str!("../../src/db/migraciones/0014_descuento_producto.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
@@ -531,7 +532,7 @@ mod tests {
         let r = bd.lote(&actor(Rol::Dueno), &[Op { id: "DELETE FROM ventas".into(), params: vec![] }]).await;
         assert!(r.unwrap_err().contains("desconocida"));
         // Un cajero no puede crear productos aunque llame directo.
-        let p = serde_json::json!(["P1", "Lápiz", "lapiz", "00000000000000000000000D01", 350, 1, null, 13, 0, "x", "x"]);
+        let p = serde_json::json!(["P1", "Lápiz", "lapiz", "00000000000000000000000D01", 350, 1, null, 13, 0, 0, "x", "x"]);
         let op = Op { id: "producto.crear".into(), params: p.as_array().unwrap().clone() };
         assert!(bd.lote(&actor(Rol::Cajero), std::slice::from_ref(&op)).await.unwrap_err().contains("permiso"));
         // El dueño sí, y la bitácora queda con el usuario de la sesión y encadenada.

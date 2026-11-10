@@ -9,7 +9,8 @@
 // que pueda usarlo retoma las ventas en espera de otro.
 // Una venta cobrada no la cambia el cajero: anular y corregir la forma de pago son del dueño, con
 // su PIN y motivo. Si la venta es de un turno CERRADO, queda como ajuste en el turno actual.
-// Mientras el turno está abierto, el cajero solo ve sus propios tiquetes (nunca sumas).
+// El cajero ve todos los tiquetes (también los de otro cajero, para atender un reclamo si ese no
+// está), pero mientras el turno está abierto nunca ve sumas: esas son de Caja.
 
 use crate::bitacora;
 use crate::caja::{self, Turno};
@@ -319,9 +320,11 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
 
     // Precio, IVA y departamento de un producto salen de la base, no de la pantalla.
     let mut lineas = est.lineas.clone();
+    // Descuento fijo del producto (lo puso el dueño en el catálogo): no cuenta contra el tope del rol.
+    let mut del_catalogo = 0i64;
     for l in lineas.iter_mut() {
         if let Some(pid) = l.producto_id.as_deref() {
-            let p = sqlx::query("SELECT nombre, precio, tasa_iva, exento, departamento_id, activo FROM productos WHERE id = ? AND eliminado_en IS NULL")
+            let p = sqlx::query("SELECT nombre, precio, tasa_iva, exento, departamento_id, activo, descuento_pct FROM productos WHERE id = ? AND eliminado_en IS NULL")
                 .bind(pid)
                 .fetch_optional(&mut *tx)
                 .await
@@ -337,6 +340,8 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
             l.tasa_iva = p.get("tasa_iva");
             l.exento = p.get::<i64, _>("exento") == 1;
             l.departamento_id = p.get("departamento_id");
+            let pct: i64 = p.get("descuento_pct");
+            del_catalogo += l.descuento.min(((calculo::bruto(l) * pct) as f64 / 100.0).round() as i64);
         } else {
             let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM departamentos WHERE id = ? AND eliminado_en IS NULL").bind(&l.departamento_id).fetch_optional(&mut *tx).await.map_err(e)?;
             if ok.is_none() {
@@ -361,10 +366,11 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     let fs = formas(&mut tx).await?;
     let con_efectivo = pagos.is_empty() || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
     let tot = calculo::totales(&e2, if con_efectivo { paso } else { 1 });
+    let pct_tope = if tot.bruto > 0 { ((tot.descuento_lineas - del_catalogo + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 };
     let mut autorizado_por = None;
-    if tot.pct_descuento > tope + 1e-9 {
+    if pct_tope > tope + 1e-9 {
         let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
-        autorizado_por = Some(ver_autorizacion(token, espera_id, tot.pct_descuento).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?);
+        autorizado_por = Some(ver_autorizacion(token, espera_id, pct_tope).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?);
     }
     if est.requiere_factura && est.cliente.is_none() {
         return Err("Para factura electrónica, elija o cree el cliente".into());
@@ -496,7 +502,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         bitacora::registrar(&mut tx, Some(&a.id), "venta.referencia_repetida", "venta", Some(&venta_id), &json!({"pagos": repetidas})).await?;
     }
     if let Some(d) = &autorizado_por {
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (tot.pct_descuento * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (pct_tope * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
     }
     let numero: String = sqlx::query_scalar("SELECT numero FROM ventas WHERE id = ?").bind(&venta_id).fetch_one(&mut *tx).await.map_err(e)?;
     tx.commit().await.map_err(e)?;
@@ -522,14 +528,6 @@ fn puede_consultar(a: &Actor) -> Res<()> {
     }
 }
 
-/// El cajero, mientras el turno de la venta está abierto, solo ve los tiquetes que él emitió.
-fn puede_ver_venta(a: &Actor, turno_abierto: bool, usuario_id: &str) -> Res<()> {
-    if a.rol == Rol::Cajero && turno_abierto && usuario_id != a.id {
-        return Err(sin_permiso("ver tiquetes de otra persona mientras el turno está abierto"));
-    }
-    Ok(())
-}
-
 pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value>> {
     puede_consultar(a)?;
     let Some(f) = sqlx::query(
@@ -546,7 +544,6 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
     else {
         return Ok(None);
     };
-    puede_ver_venta(a, f.get::<Option<String>, _>("turno_estado").as_deref() == Some("abierto"), &f.get::<String, _>("usuario_id"))?;
     let lineas = sqlx::query("SELECT * FROM venta_lineas WHERE venta_id = ? AND eliminado_en IS NULL ORDER BY orden").bind(id).fetch_all(pool).await.map_err(e)?;
     let pagos = sqlx::query(
         "SELECT p.*, f.nombre AS forma, f.tipo, COALESCE(NULLIF(b.abreviatura, ''), b.nombre) AS banco FROM venta_pagos p
@@ -637,10 +634,9 @@ pub struct VentaResumen {
     pub articulos: i64,
 }
 
-/// Ventas del día. El cajero ve las de turnos cerrados y, del turno abierto, solo las suyas.
+/// Ventas del día, de todos los cajeros (una por una; las sumas del turno abierto son de Caja).
 pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) -> Res<Vec<VentaResumen>> {
     puede_consultar(a)?;
-    let solo_mias = a.rol == Rol::Cajero;
     let filas = sqlx::query(
         "SELECT v.id, v.numero, v.fecha, v.total, v.estado, v.requiere_factura, v.factura_emitida, u.nombre AS cajero, t.estado AS turno_estado,
            (SELECT group_concat(f.nombre, ' + ') FROM venta_pagos p JOIN formas_pago f ON f.id = p.forma_pago_id
@@ -649,13 +645,10 @@ pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) 
            (SELECT COALESCE(SUM(l.cantidad), 0) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL) AS articulos
          FROM ventas v JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
          WHERE v.caja_id = ? AND v.dia = ? AND v.eliminado_en IS NULL
-           AND (? = 0 OR COALESCE(t.estado, 'cerrado') = 'cerrado' OR v.usuario_id = ?)
          ORDER BY v.consecutivo DESC",
     )
     .bind(caja_id)
     .bind(dia)
-    .bind(solo_mias as i64)
-    .bind(&a.id)
     .fetch_all(pool)
     .await
     .map_err(e)?;
@@ -692,7 +685,6 @@ pub async fn imprimir_tiquete(pool: &SqlitePool, a: &Actor, venta_id: &str, dato
         .await
         .map_err(e)?
         .ok_or("Venta no encontrada")?;
-    puede_ver_venta(a, v.get::<Option<String>, _>("turno_estado").as_deref() == Some("abierto"), &v.get::<String, _>("usuario_id"))?;
     if !copia && v.get::<Option<String>, _>("impreso_en").is_some() {
         return Err("Ese tiquete ya se imprimió: la reimpresión sale como COPIA.".into());
     }
@@ -999,18 +991,15 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
 
 // ─────────── Factura electrónica externa ───────────
 
-/// Ventas que piden factura electrónica. El cajero, del turno abierto, solo ve las suyas.
+/// Ventas que piden factura electrónica, de todos los cajeros.
 pub async fn pendientes_factura(pool: &SqlitePool, a: &Actor) -> Res<Vec<Value>> {
     a.exigir("facturas", "ver pendientes de factura")?;
     let filas = sqlx::query(
         "SELECT v.id AS ventaId, v.numero, v.fecha, v.total, c.id AS clienteId, c.nombre AS cliente, c.cedula, (c.correo IS NOT NULL) AS tieneCorreo
-         FROM ventas v JOIN clientes c ON c.id = v.cliente_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
+         FROM ventas v JOIN clientes c ON c.id = v.cliente_id
          WHERE v.requiere_factura = 1 AND v.factura_emitida = 0 AND v.estado = 'completada' AND v.eliminado_en IS NULL
-           AND (? = 0 OR COALESCE(t.estado, 'cerrado') = 'cerrado' OR v.usuario_id = ?)
          ORDER BY v.fecha",
     )
-    .bind((a.rol == Rol::Cajero) as i64)
-    .bind(&a.id)
     .fetch_all(pool)
     .await
     .map_err(e)?;
@@ -1207,6 +1196,12 @@ mod tests {
         let tj: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&tj.venta_id).fetch_one(p).await.unwrap();
         let ef: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&ef.venta_id).fetch_one(p).await.unwrap();
         assert_eq!((tj, ef), ((998, 0), (1000, 2)));
+        // Descuento fijo del producto (30 %, lo puso el dueño): el cajero lo da sin PIN; lo que pase de
+        // ese 30 % sí cuenta contra su tope.
+        sqlx::query("UPDATE productos SET descuento_pct = 30 WHERE id = ?").bind(&pid).execute(p).await.unwrap();
+        vender(p, &cajero, &est(&pid, &dep, 1000, 2, 600), &[pago(EF, 1400)]).await;
+        let esp2 = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+        assert!(cobrar(p, &cajero, CAJA_1, &esp2.id, &est(&pid, &dep, 1000, 2, 900), &[pago(EF, 1100)]).await.unwrap_err().contains("PIN"));
     }
 
     #[tokio::test]
@@ -1287,16 +1282,16 @@ mod tests {
         // Mis turnos: sin ventas ni total del turno abierto.
         let fila = listar(p, &luis, CAJA_1, "2000-01-01", "2999-12-31").await.unwrap();
         assert_eq!((fila[0].ventas, fila[0].total), (None, None));
-        // Ventas del día: solo sus propios tiquetes; el tiquete de otro, ni por id.
+        // Ventas del día: ve los tiquetes de todos (para atender un reclamo aunque no esté quien cobró),
+        // uno por uno, sin sumas.
         let dia = listar_dia(p, &luis, CAJA_1, &dia_local()).await.unwrap();
-        assert_eq!(dia.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), vec![mia.venta_id.as_str()]);
-        assert!(obtener(p, &luis, &del_dueno.venta_id).await.unwrap_err().contains("permiso"));
+        assert_eq!(dia.len(), 2);
+        assert!(obtener(p, &luis, &del_dueno.venta_id).await.unwrap().is_some());
         assert!(obtener(p, &luis, &mia.venta_id).await.unwrap().is_some());
-        // Tampoco en "Facturas pendientes" ve los tiquetes de otro del turno abierto.
+        // Y en "Facturas pendientes", también las de otro.
         let cli = crate::clientes::crear(p, &dueno, &crate::clientes::Datos { nombre: "Ana Mora".into(), telefono: "8000-0000".into(), ..Default::default() }, true, "1").await.unwrap();
         pedir_factura(p, &dueno, &del_dueno.venta_id, &cli.id).await.unwrap();
-        assert!(pendientes_factura(p, &luis).await.unwrap().is_empty());
-        assert_eq!(pendientes_factura(p, &dueno).await.unwrap().len(), 1);
+        assert_eq!(pendientes_factura(p, &luis).await.unwrap().len(), 1);
         // Ni el Z (el turno sigue abierto), ni un corte.
         assert!(datos_z(p, &luis, &t.id).await.is_err());
         assert!(crate::caja::corte(p, &luis, CAJA_1, None, None).await.unwrap_err().contains("permiso"));

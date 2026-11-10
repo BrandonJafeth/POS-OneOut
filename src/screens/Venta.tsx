@@ -21,7 +21,7 @@ import { conMiles, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
-import { bruto, calcularTotales, conLinea, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
+import { bruto, calcularTotales, conCantidad, conLinea, descuentoCatalogo, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
 import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
 import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
@@ -125,7 +125,7 @@ export default function Venta() {
   }
 
   function agregarProducto(p: Producto, cantidad = 1, codigo: string | null = null) {
-    agregarLinea({
+    const l: LineaEspera = {
       id: ulid(),
       productoId: p.id,
       codigo,
@@ -134,9 +134,11 @@ export default function Venta() {
       cantidad,
       precioUnitario: p.precio,
       descuento: 0,
+      descuentoCatalogo: p.descuentoPct || undefined,
       tasaIva: p.tasaIva,
       exento: p.exento,
-    });
+    };
+    agregarLinea({ ...l, descuento: descuentoCatalogo(l) });
   }
 
   async function porCodigo(codigo: string, cantidad = 1): Promise<boolean> {
@@ -706,7 +708,7 @@ function LineaTiquete(p: {
     setError("");
     if (d !== l.descuento) p.onCambio({ descuento: d });
   };
-  const cantidad = (c: number) => c >= 1 && c <= MAX_CANTIDAD && (setError(""), p.onCambio({ cantidad: c, descuento: Math.min(l.descuento, c * l.precioUnitario) }));
+  const cantidad = (c: number) => c >= 1 && c <= MAX_CANTIDAD && (setError(""), p.onCambio(conCantidad(l, c)));
 
   return (
     <li className={p.abierta ? "linea sel" : "linea"}>

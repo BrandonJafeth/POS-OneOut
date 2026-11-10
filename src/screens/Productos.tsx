@@ -1,4 +1,4 @@
-import { ChevronDown, FileUp, PackagePlus, PackageSearch, Search, Star } from "lucide-react";
+import { FileUp, PackagePlus, PackageSearch, Search, Star } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { useConfirmar } from "../ui/Confirmar";
@@ -13,6 +13,7 @@ import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
+import Paginacion from "../ui/Paginacion";
 import CodigoNuevo from "./productos/CodigoNuevo";
 import Importar, { type FiltroProductosImportados } from "./productos/Importar";
 import { EstadoBadge } from "./inventario/Existencias";
@@ -32,6 +33,7 @@ export default function Productos() {
   const [mostrar, setMostrar] = useState<"" | FiltroProductosImportados>("");
   const [filas, setFilas] = useState<ProductoLista[]>([]);
   const [total, setTotal] = useState<number | null>(null); // null: todavía cargando
+  const [pagina, setPagina] = useState(1);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [importando, setImportando] = useState(false);
   const [error, setError] = useState("");
@@ -48,9 +50,9 @@ export default function Productos() {
     listarDepartamentos().then(setDepartamentos, (e) => setError(textoError(e)));
   }, []);
 
-  /** Carga la primera página (o agrega la siguiente). Descarta respuestas viejas si se siguió escribiendo. */
+  /** Carga una página (la búsqueda es sobre todo el catálogo). Descarta respuestas viejas si se siguió escribiendo. */
   const cargar = useCallback(
-    async (mas = false) => {
+    async (nPagina = pagina) => {
       const n = ++consulta.current;
       try {
         const r = await buscarProductos({
@@ -60,21 +62,23 @@ export default function Productos() {
           sinBarras: mostrar === "sinBarras",
           paraRevisar: mostrar === "revisar",
           limite: POR_PAGINA,
-          desplazamiento: mas ? filas.length : 0,
+          desplazamiento: (nPagina - 1) * POR_PAGINA,
         });
         if (n !== consulta.current) return;
-        setFilas(mas ? [...filas, ...r.filas] : r.filas);
+        if (!r.filas.length && nPagina > 1) return void cargar(1); // se borró lo último de la página
+        setFilas(r.filas);
         setTotal(r.total);
+        setPagina(nPagina);
       } catch (e) {
         setError(textoError(e));
       }
     },
-    [texto, depto, inactivos, mostrar, filas],
+    [texto, depto, inactivos, mostrar, pagina],
   );
 
   // Búsqueda instantánea (con una pausa mínima para no consultar en cada tecla del lector).
   useEffect(() => {
-    const t = setTimeout(() => void cargar(), 100);
+    const t = setTimeout(() => void cargar(1), 100);
     return () => clearTimeout(t);
   }, [texto, depto, inactivos, mostrar]);
 
@@ -186,7 +190,7 @@ export default function Productos() {
         ) : (
         <>
         <div className="row between">
-          <p className="muted">{`${filas.length} de ${total.toLocaleString("es-CR")} productos`}</p>
+          <p className="muted">{`${total.toLocaleString("es-CR")} productos`}</p>
           {(texto.trim() || depto) && (
             <div className="row">
               <Button icono={Star} onClick={() => void favoritosEnBloque(true)}>
@@ -253,13 +257,7 @@ export default function Productos() {
             ))}
           </tbody>
         </table>
-        {filas.length < total && (
-          <div className="fila-botones">
-            <Button icono={ChevronDown} onClick={() => cargar(true)}>
-              Ver {Math.min(POR_PAGINA, total - filas.length)} más
-            </Button>
-          </div>
-        )}
+        <Paginacion nombre="productos" pagina={pagina} porPagina={POR_PAGINA} total={total} onPagina={(n) => void cargar(n)} />
         </>
         )}
       </section>

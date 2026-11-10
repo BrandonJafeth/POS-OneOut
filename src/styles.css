@@ -264,6 +264,40 @@ button.grande {
   flex: 1;
 }
 
+/* ───── Paginación ───── */
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2);
+  align-items: center;
+  margin-top: var(--e4);
+}
+
+.paginacion .separador {
+  flex: 1;
+}
+
+.paginacion .pagina {
+  min-width: var(--alto-control);
+  min-height: var(--alto-control);
+  padding: 0 var(--e2);
+  border: 1px solid transparent;
+  border-radius: var(--radio);
+  background: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.paginacion .pagina:hover {
+  border-color: var(--line);
+}
+
+.paginacion .pagina[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 /* ───── Campos ───── */
 input,
 select,

@@ -17,6 +17,17 @@ export function bruto(l: LineaEspera): number {
   return l.cantidad * l.precioUnitario;
 }
 
+/** Descuento del catálogo (% fijo del producto) en colones para la cantidad de la línea. */
+export function descuentoCatalogo(l: LineaEspera): number {
+  return Math.round((bruto(l) * (l.descuentoCatalogo ?? 0)) / 100);
+}
+
+/** Cambia la cantidad. Si la línea tenía solo el descuento del catálogo, se recalcula para la nueva cantidad. */
+export function conCantidad(l: LineaEspera, cantidad: number): LineaEspera {
+  const n = { ...l, cantidad };
+  return { ...n, descuento: l.descuento === descuentoCatalogo(l) ? descuentoCatalogo(n) : Math.min(l.descuento, bruto(n)) };
+}
+
 export function importeLinea(l: LineaEspera): number {
   return bruto(l) - l.descuento;
 }
@@ -29,17 +40,20 @@ export interface Totales {
   redondeo: number;
   total: number;
   iva: number;
-  /** Descuento total (líneas + total) como % del bruto. */
+  /** Descuento total (líneas + total) como % del bruto, sin el descuento del catálogo (ese lo puso el
+   *  dueño): es el que se compara con el tope del rol. */
   pctDescuento: number;
   /** IVA de cada línea, ya con su parte del descuento al total (informativo). */
   ivaLineas: number[];
 }
 
-/** Agrega una línea a la venta. El mismo producto, al mismo precio y sin descuento, suma
- *  cantidad en vez de repetir la línea. */
+/** Agrega una línea a la venta. El mismo producto, al mismo precio y sin otro descuento que el del
+ *  catálogo, suma cantidad en vez de repetir la línea. */
 export function conLinea(e: EstadoEspera, l: LineaEspera): EstadoEspera {
-  const igual = l.productoId ? e.lineas.find((x) => x.productoId === l.productoId && !x.descuento && x.precioUnitario === l.precioUnitario) : undefined;
-  const lineas = igual ? e.lineas.map((x) => (x === igual ? { ...x, cantidad: x.cantidad + l.cantidad } : x)) : [...e.lineas, l];
+  const igual = l.productoId
+    ? e.lineas.find((x) => x.productoId === l.productoId && x.descuento === descuentoCatalogo(x) && x.precioUnitario === l.precioUnitario)
+    : undefined;
+  const lineas = igual ? e.lineas.map((x) => (x === igual ? conCantidad(x, x.cantidad + l.cantidad) : x)) : [...e.lineas, l];
   return { ...e, lineas };
 }
 
@@ -57,6 +71,7 @@ export function leerDescuento(texto: string, base: number, modo: "¢" | "%"): nu
 export function calcularTotales(e: EstadoEspera, paso: number): Totales {
   const b = e.lineas.reduce((s, l) => s + bruto(l), 0);
   const descuentoLineas = e.lineas.reduce((s, l) => s + l.descuento, 0);
+  const delCatalogo = e.lineas.reduce((s, l) => s + Math.min(l.descuento, descuentoCatalogo(l)), 0);
   const subtotal = b - descuentoLineas;
   const descuento = Math.max(0, Math.min(Math.round(e.descuentoTotal || 0), subtotal));
   const neto = subtotal - descuento;
@@ -72,7 +87,7 @@ export function calcularTotales(e: EstadoEspera, paso: number): Totales {
     redondeo: total - neto,
     total,
     iva: ivaLineas.reduce((s, x) => s + x, 0),
-    pctDescuento: b > 0 ? ((descuentoLineas + descuento) / b) * 100 : 0,
+    pctDescuento: b > 0 ? ((descuentoLineas - delCatalogo + descuento) / b) * 100 : 0,
     ivaLineas,
   };
 }

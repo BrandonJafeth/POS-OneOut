@@ -26,6 +26,7 @@ import Badge, { type Tono } from "../../ui/Badge";
 import Button from "../../ui/Button";
 import EmptyState from "../../ui/EmptyState";
 import Field from "../../ui/Field";
+import Paginacion from "../../ui/Paginacion";
 import { useToast } from "../../ui/Toast";
 
 const POR_PAGINA = 100;
@@ -57,25 +58,29 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
   useEffect(() => setFiltroLocal(p.filtroInicial ?? "con_control"), [p.filtroInicial]);
   const [filas, setFilas] = useState<FilaInventario[]>([]);
   const [total, setTotal] = useState<number | null>(null); // null: todavía cargando
+  const [pagina, setPagina] = useState(1);
   const [error, setError] = useState("");
   const [dialogo, setDialogo] = useState<{ tipo: "ajuste" | "kardex" | "ficha"; fila: FilaInventario } | null>(null);
   const consulta = useRef(0);
 
   useEffect(() => void listarDepartamentos().then(setDepartamentos, (e) => setError(textoError(e))), []);
 
-  async function cargar(mas = false) {
+  /** Una página; la búsqueda y el filtro son sobre todo el inventario. */
+  async function cargar(nPagina = pagina) {
     const n = ++consulta.current;
     try {
-      const r = await listarInventario({ texto, departamentoId: depto || undefined, filtro, limite: POR_PAGINA, desplazamiento: mas ? filas.length : 0 });
+      const r = await listarInventario({ texto, departamentoId: depto || undefined, filtro, limite: POR_PAGINA, desplazamiento: (nPagina - 1) * POR_PAGINA });
       if (n !== consulta.current) return;
-      setFilas(mas ? [...filas, ...r.filas] : r.filas);
+      if (!r.filas.length && nPagina > 1) return void cargar(1);
+      setFilas(r.filas);
       setTotal(r.total);
+      setPagina(nPagina);
     } catch (e) {
       setError(textoError(e));
     }
   }
   useEffect(() => {
-    const t = setTimeout(() => void cargar(), 150);
+    const t = setTimeout(() => void cargar(1), 150);
     return () => clearTimeout(t);
   }, [texto, depto, filtro]);
 
@@ -167,7 +172,7 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
           </tbody>
         </table>
       )}
-      {total !== null && filas.length < total && <Button onClick={() => void cargar(true)}>Ver más ({total - filas.length})</Button>}
+      {total !== null && <Paginacion nombre="existencias" pagina={pagina} porPagina={POR_PAGINA} total={total} onPagina={(n) => void cargar(n)} />}
       {dialogo?.tipo === "ajuste" && <AjusteDialogo fila={dialogo.fila} onCerrar={cerrar} />}
       {dialogo?.tipo === "kardex" && <KardexDialogo fila={dialogo.fila} onCerrar={() => cerrar(false)} />}
       {dialogo?.tipo === "ficha" && <FichaDialogo fila={dialogo.fila} onCerrar={cerrar} />}

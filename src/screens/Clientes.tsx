@@ -10,9 +10,12 @@ import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import FilaClic from "../ui/FilaClic";
+import Paginacion from "../ui/Paginacion";
 import DatosCliente from "./clientes/DatosCliente";
 import { plural } from "../lib/texto";
 import NuevoCliente from "./clientes/NuevoCliente";
+
+const POR_PAGINA = 50;
 
 export default function Clientes() {
   const { actor, config } = useSesion();
@@ -22,10 +25,12 @@ export default function Clientes() {
   const [abierto, setAbierto] = useState<{ id: string; retencion?: boolean } | null>(null);
   const [nuevo, setNuevo] = useState(false);
   const [error, setError] = useState("");
+  const [pagina, setPagina] = useState(1);
 
-  const cargar = () => listarClientes(actor, { texto }).then(setLista, (e) => setError(textoError(e)));
+  // La búsqueda la hace Rust sobre todos; aquí solo se parte en páginas.
+  const cargar = () => listarClientes(actor, { texto }).then((l) => (setLista(l), setPagina((n) => Math.min(n, Math.max(1, Math.ceil(l.length / POR_PAGINA))))), (e) => setError(textoError(e)));
   useEffect(() => {
-    const t = setTimeout(() => void cargar(), 300);
+    const t = setTimeout(() => (setPagina(1), void cargar()), 300);
     return () => clearTimeout(t);
   }, [texto]);
   const cargarSugeridos = () => sugerenciasRetencion(actor, config.retencion_clientes_meses).then(setSugeridos, (e) => setError(textoError(e)));
@@ -79,7 +84,7 @@ export default function Clientes() {
             </tr>
           </thead>
           <tbody>
-            {lista.map((c) => (
+            {lista.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((c) => (
               <FilaClic key={c.id} etiqueta={`Abrir datos de ${c.nombre}`} onAbrir={() => setAbierto({ id: c.id })}>
                 <td>{c.nombre}</td>
                 <td>{c.telefono}</td>
@@ -90,6 +95,7 @@ export default function Clientes() {
           </tbody>
         </table>
         )}
+        {lista && <Paginacion nombre="clientes" pagina={pagina} porPagina={POR_PAGINA} total={lista.length} onPagina={setPagina} />}
       </section>
       {nuevo && (
         <NuevoCliente

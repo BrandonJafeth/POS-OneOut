@@ -28,6 +28,7 @@ function aProducto(f: Record<string, unknown>): Producto {
     cabys: textoONull(f.cabys),
     tasaIva: f.tasa_iva == null ? 13 : Number(f.tasa_iva),
     exento: bool(f.exento),
+    descuentoPct: Number(f.descuento_pct ?? 0),
     favorito: bool(f.favorito),
     revisar: bool(f.revisar),
     actualizadoEn: String(f.actualizado_en),
@@ -165,12 +166,16 @@ export interface DatosProducto {
   cabys?: string | null;
   tasaIva?: number;
   exento?: boolean;
+  /** % de descuento fijo del producto (0–100, entero). */
+  descuentoPct?: number;
 }
 
 function validarDatos(d: DatosProducto) {
   if (!d.nombre.trim()) throw new Error("Escriba el nombre del producto");
   if (!d.departamentoId) throw new Error("Elija el departamento");
   if (!Number.isSafeInteger(d.precio) || d.precio < 0) throw new Error("El precio debe ser un número entero de colones");
+  if (d.descuentoPct !== undefined && !(Number.isInteger(d.descuentoPct) && d.descuentoPct >= 0 && d.descuentoPct <= 100))
+    throw new Error("El descuento del producto es un porcentaje entero de 0 a 100");
   if (d.tasaIva !== undefined && !(d.tasaIva >= 0 && d.tasaIva <= 100)) throw new Error("La tasa de IVA debe estar entre 0 y 100");
   // CAByS: 13 dígitos (catálogo de Hacienda). Opcional.
   if (d.cabys && !/^\d{13}$/.test(d.cabys)) throw new Error("El código CAByS tiene 13 dígitos");
@@ -218,6 +223,7 @@ export async function crearProducto(
         datos.cabys || null,
         datos.tasaIva ?? 13,
         datos.exento ?? false,
+        datos.descuentoPct ?? 0,
         ahora,
         ahora,
       ],
@@ -237,14 +243,14 @@ export async function editarProducto(actor: Actor, id: string, cambios: Partial<
   validarDatos(n);
   const antes: Record<string, unknown> = {};
   const despues: Record<string, unknown> = {};
-  for (const k of ["nombre", "departamentoId", "precio", "activo", "cabys", "tasaIva", "exento"] as const)
+  for (const k of ["nombre", "departamentoId", "precio", "activo", "cabys", "tasaIva", "exento", "descuentoPct"] as const)
     if (n[k] !== p[k]) (antes[k] = p[k]), (despues[k] = n[k]);
   if (!Object.keys(despues).length) return;
 
   const sentencias: Sentencia[] = [
     {
       id: "producto.editar",
-      params: [n.nombre, normalizar(n.nombre), n.departamentoId, n.precio, n.activo, n.cabys, n.tasaIva, n.exento, ahoraIso(), id],
+      params: [n.nombre, normalizar(n.nombre), n.departamentoId, n.precio, n.activo, n.cabys, n.tasaIva, n.exento, n.descuentoPct, ahoraIso(), id],
     },
   ];
   // El cambio de precio va en su propia entrada para encontrarlo fácil en la bitácora.

@@ -49,6 +49,8 @@ export interface Producto {
   cabys: string | null;
   tasaIva: number;
   exento: boolean;
+  /** % de descuento fijo: se aplica solo al agregarlo a una venta. */
+  descuentoPct: number;
   /** Aparece como tarjeta en la pantalla de venta. */
   favorito: boolean;
   /** Entró de la web sin categoría o sin mapeo: el dueño debería revisarlo (se limpia al editarlo). */
@@ -234,6 +236,8 @@ export interface LineaEspera {
   precioUnitario: number;
   /** Descuento de la línea en colones. */
   descuento: number;
+  /** % de descuento del producto en el catálogo al agregarlo (lo puso el dueño: no cuenta contra el tope). */
+  descuentoCatalogo?: number;
   tasaIva: number;
   exento: boolean;
 }
