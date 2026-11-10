@@ -1019,14 +1019,20 @@ mod tests_instancia {
 pub fn run() {
     // Una sola ventana del programa por usuario: dos abiertas serían dos escritores sobre la misma
     // base (y dos cajas cobrando con el mismo consecutivo en pantalla).
+    // Solo al desarrollar (nunca en el instalador): POS_DATOS=<carpeta> usa otra carpeta de datos,
+    // para probar o tomar capturas sin tocar la base real ni chocar con la app instalada.
+    let datos_de_prueba = if cfg!(debug_assertions) { std::env::var_os("POS_DATOS").map(std::path::PathBuf::from) } else { None };
     #[cfg(windows)]
-    if ya_abierto("Local\\PuntoDeVenta-una-sola-vez") {
+    if datos_de_prueba.is_none() && ya_abierto("Local\\PuntoDeVenta-una-sola-vez") {
         avisar("El Punto de Venta ya está abierto. Búsquelo en la barra de tareas.");
         return;
     }
     tauri::Builder::default()
-        .setup(|app| {
-            let dir = app.path().data_dir()?.join(CARPETA_DATOS);
+        .setup(move |app| {
+            let dir = match &datos_de_prueba {
+                Some(d) => d.clone(),
+                None => app.path().data_dir()?.join(CARPETA_DATOS),
+            };
             let _ = std::fs::create_dir_all(&dir);
             diagnostico::anotar_cierres(&dir);
             // Un fallo interno (panic) cierra el programa en la versión instalada (panic = "abort"):
@@ -1042,7 +1048,8 @@ pub fn run() {
                 }));
             }
             // Versiones anteriores: datos en la carpeta del identifier → se trasladan una vez.
-            let (bd, clave) = match respaldo::trasladar_datos(&app.path().app_config_dir()?, &dir) {
+            let traslado = if datos_de_prueba.is_some() { Ok(false) } else { respaldo::trasladar_datos(&app.path().app_config_dir()?, &dir) };
+            let (bd, clave) = match traslado {
                 Err(err) => (Err(err), None),
                 Ok(_) => tauri::async_runtime::block_on(preparar(&dir)),
             };

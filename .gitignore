@@ -39,3 +39,6 @@ credentials*.json
 # Respaldos de prueba por versión (datos inventados): se versionan, nunca se borran.
 !tests/fixtures/*.posbak
 pos.clave
+
+# Capturas del manual de pruebas (pesan ~10 MB; se regeneran)
+manual/capturas/
