@@ -236,6 +236,19 @@ pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) 
         let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM proveedores WHERE id = ? AND eliminado_en IS NULL").bind(p).fetch_optional(&mut *tx).await.map_err(e)?;
         ok.ok_or("El proveedor ya no existe")?;
     }
+    // La misma factura digitada dos veces duplicaría la existencia.
+    if !factura.is_empty() {
+        let ya: Option<String> = sqlx::query_scalar("SELECT fecha FROM inventario_entradas WHERE sucursal_id = ? AND proveedor_id IS ? AND factura = ? COLLATE NOCASE LIMIT 1")
+            .bind(&suc)
+            .bind(proveedor)
+            .bind(&factura)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(e)?;
+        if let Some(f) = ya {
+            return Err(format!("La factura {factura} de ese proveedor ya se registró (fecha {f}). Si es otra parte de la misma factura, agréguele algo al número, p. ej. «{factura}-2»."));
+        }
+    }
     let id = ulid();
     let fecha = ahora_iso();
     sqlx::query("INSERT INTO inventario_entradas (id, sucursal_id, proveedor_id, factura, fecha, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -425,10 +438,19 @@ pub async fn conteo_guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, id: Opt
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let id = match id {
         Some(id) => {
-            let n = sqlx::query("UPDATE inventario_conteos SET datos = ?, actualizado_en = ? WHERE id = ? AND estado = 'abierto'").bind(&txt).bind(&ahora).bind(id).execute(&mut *tx).await.map_err(e)?.rows_affected();
-            if n == 0 {
-                return Err("Ese conteo ya se aplicó o se descartó".into());
-            }
+            let f = sqlx::query("SELECT datos, contado_en FROM inventario_conteos WHERE id = ? AND estado = 'abierto'").bind(id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Ese conteo ya se aplicó o se descartó")?;
+            let antes: HashMap<String, i64> = serde_json::from_str(&f.get::<String, _>("datos")).unwrap_or_default();
+            let sellos_antes: HashMap<String, String> = serde_json::from_str(&f.get::<String, _>("contado_en")).unwrap_or_default();
+            // La hora de un producto se conserva mientras su cantidad no cambie (el conteo se guarda solo cada rato).
+            let sellos: HashMap<&String, &str> = datos.iter().map(|(pid, n)| (pid, sellos_antes.get(pid).filter(|_| antes.get(pid) == Some(n)).map_or(ahora.as_str(), String::as_str))).collect();
+            sqlx::query("UPDATE inventario_conteos SET datos = ?, contado_en = ?, actualizado_en = ? WHERE id = ?")
+                .bind(&txt)
+                .bind(serde_json::to_string(&sellos).map_err(e)?)
+                .bind(&ahora)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(e)?;
             id.to_string()
         }
         None => {
@@ -438,11 +460,13 @@ pub async fn conteo_guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, id: Opt
             }
             let suc = sucursal_de(&mut tx, caja_id).await?;
             let id = ulid();
-            sqlx::query("INSERT INTO inventario_conteos (id, sucursal_id, departamento_id, datos, usuario_id, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            let sellos: HashMap<&String, &str> = datos.keys().map(|pid| (pid, ahora.as_str())).collect();
+            sqlx::query("INSERT INTO inventario_conteos (id, sucursal_id, departamento_id, datos, contado_en, usuario_id, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&id)
                 .bind(&suc)
                 .bind(departamento_id.filter(|s| !s.is_empty()))
                 .bind(&txt)
+                .bind(serde_json::to_string(&sellos).map_err(e)?)
                 .bind(&a.id)
                 .bind(&ahora)
                 .bind(&ahora)
@@ -469,13 +493,27 @@ pub struct FilaConteo {
     pub diferencia: Option<i64>,
 }
 
+/// Lo que entró (+) o salió (−) de un producto después de `desde`: ventas, entradas, ajustes.
+async fn movido_desde(c: &mut SqliteConnection, producto_id: &str, sucursal_id: &str, desde: Option<&String>) -> Res<i64> {
+    let Some(desde) = desde else { return Ok(0) }; // conteo anterior a la migración 13: sin hora
+    sqlx::query_scalar("SELECT COALESCE(SUM(cantidad), 0) FROM inventario_movimientos WHERE producto_id = ? AND sucursal_id = ? AND fecha > ?")
+        .bind(producto_id)
+        .bind(sucursal_id)
+        .bind(desde)
+        .fetch_one(c)
+        .await
+        .map_err(e)
+}
+
 /// Productos del conteo (su departamento, o todos) con lo contado contra el sistema.
+/// "Sistema" es lo que había al contar cada producto: lo vendido después no cuenta como diferencia.
 pub async fn conteo_diferencias(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Vec<FilaConteo>> {
     exigir(a)?;
-    let f = sqlx::query("SELECT sucursal_id, departamento_id, datos FROM inventario_conteos WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Conteo no encontrado")?;
+    let f = sqlx::query("SELECT sucursal_id, departamento_id, datos, contado_en FROM inventario_conteos WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Conteo no encontrado")?;
     let suc: String = f.get("sucursal_id");
     let dep: Option<String> = f.get("departamento_id");
     let datos: HashMap<String, i64> = serde_json::from_str(&f.get::<String, _>("datos")).unwrap_or_default();
+    let sellos: HashMap<String, String> = serde_json::from_str(&f.get::<String, _>("contado_en")).unwrap_or_default();
     let filas = sqlx::query(
         "SELECT p.id, p.nombre, p.controla_inventario, COALESCE(x.cantidad, 0) AS sistema,
                 COALESCE((SELECT group_concat(c.codigo, ' ') FROM codigos c WHERE c.producto_id = p.id), '') AS codigos
@@ -489,15 +527,16 @@ pub async fn conteo_diferencias(pool: &SqlitePool, a: &Actor, id: &str) -> Res<V
     .fetch_all(pool)
     .await
     .map_err(e)?;
-    Ok(filas
-        .iter()
-        .map(|f| {
-            let pid: String = f.get("id");
-            let sistema: i64 = f.get("sistema");
-            let contado = datos.get(&pid).copied();
-            FilaConteo { nombre: f.get("nombre"), codigos: f.get("codigos"), controla: f.get::<i64, _>("controla_inventario") == 1, sistema, contado, diferencia: contado.map(|c| c - sistema), producto_id: pid }
-        })
-        .collect())
+    let mut c = pool.acquire().await.map_err(e)?;
+    let mut out = Vec::with_capacity(filas.len());
+    for f in &filas {
+        let pid: String = f.get("id");
+        let contado = datos.get(&pid).copied();
+        let despues = if contado.is_some() { movido_desde(&mut c, &pid, &suc, sellos.get(&pid)).await? } else { 0 };
+        let sistema = f.get::<i64, _>("sistema") - despues;
+        out.push(FilaConteo { nombre: f.get("nombre"), codigos: f.get("codigos"), controla: f.get::<i64, _>("controla_inventario") == 1, sistema, contado, diferencia: contado.map(|n| n - sistema), producto_id: pid });
+    }
+    Ok(out)
 }
 
 /// Aplica todo lo contado como ajustes con motivo "Conteo". Devuelve cuántos productos cambiaron.
@@ -505,9 +544,10 @@ pub async fn conteo_aplicar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str) -
     exigir(a)?;
     let dueno = usuarios::confirmar_dueno(pool, a, pin, "aplicar conteo de inventario").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let f = sqlx::query("SELECT sucursal_id, datos FROM inventario_conteos WHERE id = ? AND estado = 'abierto'").bind(id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Ese conteo ya se aplicó o se descartó")?;
+    let f = sqlx::query("SELECT sucursal_id, datos, contado_en FROM inventario_conteos WHERE id = ? AND estado = 'abierto'").bind(id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Ese conteo ya se aplicó o se descartó")?;
     let suc: String = f.get("sucursal_id");
     let datos: BTreeMap<String, i64> = serde_json::from_str(&f.get::<String, _>("datos")).unwrap_or_default();
+    let sellos: HashMap<String, String> = serde_json::from_str(&f.get::<String, _>("contado_en")).unwrap_or_default();
     let fecha = ahora_iso();
     let mut cambios = 0;
     for (pid, contado) in &datos {
@@ -515,7 +555,8 @@ pub async fn conteo_aplicar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str) -
         if producto(&mut tx, pid).await.is_err() {
             continue;
         }
-        let dif = contado - existencia(&mut tx, pid, &suc).await?;
+        // Lo vendido o recibido después de contar este producto sigue valiendo: contado + eso es lo que debe haber ahora.
+        let dif = contado + movido_desde(&mut tx, pid, &suc, sellos.get(pid)).await? - existencia(&mut tx, pid, &suc).await?;
         activar_control(&mut tx, pid, &fecha).await?;
         if dif != 0 {
             mover(&mut tx, &Mov { producto_id: pid, sucursal_id: &suc, tipo: "ajuste", cantidad: dif, costo: None, motivo: "Conteo", ref_tipo: Some("conteo"), ref_id: Some(id), usuario_id: &a.id, turno_id: None, fecha: &fecha }).await?;
@@ -1135,6 +1176,9 @@ mod tests {
         config::guardar(p, &dueno, "venta_mostrar_existencia", &json!(true)).await.unwrap();
         let err = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &efectivo(&e)).await.unwrap_err();
         assert!(err.contains("Lápiz (hay 1)"), "{err}");
+        // El aviso previo al cobro dice lo mismo; lo que alcanza no avisa.
+        assert_eq!(crate::ventas::faltantes(p, &cajero, CAJA_1, &[(Some(lapiz.clone()), 2)]).await.unwrap(), vec!["Lápiz (hay 1)"]);
+        assert!(crate::ventas::faltantes(p, &cajero, CAJA_1, &[(Some(lapiz.clone()), 1)]).await.unwrap().is_empty());
         assert!(cobrar_con(p, &cajero, CAJA_1, &esp.id, &e, &efectivo(&e), Some("000000")).await.is_err());
         assert_eq!(hay(p, &lapiz).await, 1);
         // Lo que sí alcanza se vende sin PIN.
@@ -1176,7 +1220,9 @@ mod tests {
         // Recibir mercadería de un producto sin control lo pone bajo control.
         let c: i64 = sqlx::query_scalar("SELECT controla_inventario FROM productos WHERE id = ?").bind(&regla).fetch_one(p).await.unwrap();
         assert_eq!(c, 1);
-        entrada(p, &dueno, CAJA_1, &en(true, Some(1200))).await.unwrap();
+        // La misma factura del mismo proveedor no entra dos veces (duplicaría la existencia).
+        assert!(entrada(p, &dueno, CAJA_1, &en(true, Some(1200))).await.unwrap_err().contains("ya se registró"));
+        entrada(p, &dueno, CAJA_1, &Entrada { factura: "F-101".into(), ..en(true, Some(1200)) }).await.unwrap();
         let (costo, precio): (i64, i64) = sqlx::query_as("SELECT k.costo, p.precio FROM productos p JOIN producto_costos k ON k.producto_id = p.id WHERE p.id = ?").bind(&lapiz).fetch_one(p).await.unwrap();
         assert_eq!((costo, precio, hay(p, &lapiz).await), (400, 1200, 20));
         let comp = entrada_obtener(p, &dueno, &id).await.unwrap();
@@ -1184,7 +1230,7 @@ mod tests {
         assert_eq!(comp["proveedor"], "Distribuidora X");
         let k = kardex(p, &dueno, &lapiz, "2000-01-01", "2999-01-01").await.unwrap();
         assert_eq!(k.iter().map(|f| (f.tipo.as_str(), f.cantidad, f.existencia)).collect::<Vec<_>>(), vec![("entrada", 10, 20), ("entrada", 10, 10)]);
-        assert!(k[0].referencia.as_deref().unwrap().contains("F-100"));
+        assert!(k[0].referencia.as_deref().unwrap().contains("F-101"));
         // Datos malos: nada se guarda.
         let mut mala = en(false, None);
         mala.lineas[1].cantidad = 0;
@@ -1233,9 +1279,15 @@ mod tests {
         let d = |pid: &str| dif.iter().find(|f| f.producto_id == pid).map(|f| (f.sistema, f.contado, f.diferencia)).unwrap();
         assert_eq!(d(&a1), (10, Some(7), Some(-3)));
         assert_eq!(d(&b1), (0, Some(4), Some(4)));
+        // Salen 2 de Alfa DESPUÉS de contarlo (una venta con la tienda abierta): la diferencia del
+        // conteo sigue siendo −3 y al aplicar quedan 7 − 2, no 7.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        ajustar(p, &dueno, CAJA_1, &Ajuste { producto_id: a1.clone(), nueva: None, diferencia: Some(-2), motivo: "Merma".into(), detalle: String::new() }, PIN_DUENO).await.unwrap();
+        let dif = conteo_diferencias(p, &dueno, &id).await.unwrap();
+        assert_eq!(dif.iter().find(|f| f.producto_id == a1).map(|f| (f.sistema, f.diferencia)), Some((10, Some(-3))));
         assert!(conteo_aplicar(p, &dueno, &id, "000000").await.is_err());
         assert_eq!(conteo_aplicar(p, &dueno, &id, PIN_DUENO).await.unwrap(), 3);
-        assert_eq!((hay(p, &a1).await, hay(p, &b1).await, hay(p, &c1).await), (7, 4, 2));
+        assert_eq!((hay(p, &a1).await, hay(p, &b1).await, hay(p, &c1).await), (5, 4, 2));
         let motivos: Vec<String> = sqlx::query_scalar("SELECT DISTINCT motivo FROM inventario_movimientos WHERE referencia_id = ?").bind(&id).fetch_all(p).await.unwrap();
         assert_eq!(motivos, vec!["Conteo".to_string()]);
         assert!(conteo_abierto(p, &dueno).await.unwrap().is_none());

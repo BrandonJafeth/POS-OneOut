@@ -91,6 +91,11 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
             Some(c) if c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit()) => Ok(()),
             _ => Err("«departamentos_color»: \"cada_uno\", \"ninguno\" o un color como \"#2563eb\"".into()),
         },
+        // Vacío, o la fecha que da el mensaje de «reloj atrasado» (se compara como texto con las fechas guardadas).
+        "reloj_ignorar_hasta" => match v.as_str() {
+            Some(t) if t.is_empty() || chrono::DateTime::parse_from_rfc3339(t).is_ok() => Ok(()),
+            _ => Err("«reloj_ignorar_hasta»: vacío o una fecha como \"2027-01-31T18:00:00.000Z\"".into()),
+        },
         "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
         _ => Ok(()),
     }

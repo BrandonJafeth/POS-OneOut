@@ -3,7 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import { Fragment } from "react";
 import type { Detalle } from "../../db/caja";
-import { DENOMINACIONES, descuadres, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
+import { DENOMINACIONES, descuadres, horaCierre, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
 import { fechaHora, monto, montoConSigno as signo } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Badge from "../../ui/Badge";
@@ -32,7 +32,7 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
         </div>
         <div>
           <dt>Cerró</dt>
-          <dd>{t.cerradoEn ? `${t.usuarioCierre} · ${hora(t.cerradoEn)}` : "Abierta"}</dd>
+          <dd>{t.cerradoEn ? `${t.usuarioCierre} · ${horaCierre(t)}` : "Abierta"}</dd>
         </div>
         {r.supervisor && (
           <div>

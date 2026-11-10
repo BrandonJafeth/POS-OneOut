@@ -31,7 +31,7 @@ export default function Productos() {
   const [inactivos, setInactivos] = useState(false);
   const [mostrar, setMostrar] = useState<"" | FiltroProductosImportados>("");
   const [filas, setFilas] = useState<ProductoLista[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(null); // null: todavía cargando
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [importando, setImportando] = useState(false);
   const [error, setError] = useState("");
@@ -175,7 +175,9 @@ export default function Productos() {
       </div>
       <Mensaje error={error} />
       <section className="card">
-        {total === 0 ? (
+        {total === null ? (
+          <p className="muted">Cargando…</p>
+        ) : total === 0 ? (
           <EmptyState
             icono={PackageSearch}
             titulo={texto || depto || mostrar ? "No hay productos que coincidan" : "Todavía no hay productos"}

@@ -16,7 +16,7 @@ import { listarDepartamentos } from "../db/departamentos";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { ORDENES_PRODUCTOS, productoPorCodigo, type OrdenProductos } from "../db/productos";
 import { existenciaVenta } from "../db/inventario";
-import { autorizarDescuento, cobrarVenta, SIN_EXISTENCIA, type ResultadoCobro } from "../db/ventas";
+import { autorizarDescuento, cobrarVenta, faltantesVenta, SIN_EXISTENCIA, type ResultadoCobro } from "../db/ventas";
 import { conMiles, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
@@ -73,6 +73,18 @@ export default function Venta() {
   }, [productos, config.venta_mostrar_existencia]);
 
   const estado = activa?.estado ?? estadoVacio();
+  // Si la configuración no deja vender sin existencia, se avisa antes de cobrar (Rust lo revisa de nuevo al cobrar).
+  const [faltan, setFaltan] = useState<string[]>([]);
+  const cantidades = estado.lineas.map((l) => `${l.productoId}:${l.cantidad}`).join();
+  useEffect(() => {
+    if (config.permitir_vender_sin_existencia || !estado.lineas.some((l) => l.productoId)) return setFaltan([]);
+    let vivo = true;
+    const espera = setTimeout(() => faltantesVenta(estado.lineas).then((l) => vivo && setFaltan(l), () => vivo && setFaltan([])), 200);
+    return () => {
+      vivo = false;
+      clearTimeout(espera);
+    };
+  }, [cantidades, config.permitir_vender_sin_existencia]);
   const t = useMemo(() => calcularTotales(estado, config.redondeo_total), [estado, config.redondeo_total]);
   const tope = topeDescuento(actor.rol, config.descuento_max_pct);
   const modal = dialogo !== null || pendiente !== null || cobrada !== null;
@@ -547,6 +559,11 @@ export default function Venta() {
         )}
 
         <div className="tiquete-pie">
+          {faltan.length > 0 && (
+            <Alert tono="aviso" titulo="No hay suficiente existencia">
+              {faltan.join(", ")}. Baje la cantidad, o cobre con el PIN del dueño.
+            </Alert>
+          )}
           {(config.mostrar_iva || t.descuentoLineas > 0 || t.descuento > 0 || t.redondeo !== 0) && (
             <div className="totales" aria-live="polite">
               {(config.mostrar_iva || t.descuentoLineas > 0 || t.descuento > 0) && <Fila k="Subtotal" v={monto(t.bruto)} />}
@@ -593,7 +610,7 @@ export default function Venta() {
       {dialogo === "noventa" && caja && (
         <NoVenta motivos={caja.noVentaMotivos} onCerrar={() => (setDialogo(null), alBuscador())} onListo={() => (setDialogo(null), toast.ok("Gaveta abierta. Quedó anotado."), alBuscador())} />
       )}
-      {dialogo === "cobro" && <Cobro total={t.total} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
+      {dialogo === "cobro" && <Cobro total={t.total} totalExacto={t.total - t.redondeo} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
       {sinExistencia && (
         <PinDueno motivo={sinExistencia.mensaje} onCerrar={() => setSinExistencia(null)} onPin={(pin) => cobrar(sinExistencia.pagos, pin)} />
       )}

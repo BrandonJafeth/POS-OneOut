@@ -16,7 +16,7 @@ import { useToast } from "../ui/Toast";
 
 export default function PendientesFactura() {
   const { actor } = useSesion();
-  const [lista, setLista] = useState<PendienteFactura[]>([]);
+  const [lista, setLista] = useState<PendienteFactura[] | null>(null); // null: todavía cargando
   const [marcando, setMarcando] = useState<PendienteFactura | null>(null);
   const [error, setError] = useState("");
   const toast = useToast();
@@ -42,7 +42,9 @@ export default function PendientesFactura() {
       <p className="muted" style={{ marginTop: -8 }}>Hágalas en el sistema de facturación y márquelas aquí.</p>
       <Mensaje error={error} />
       <section className="card">
-        {lista.length === 0 ? (
+        {!lista ? (
+          <p className="muted">Cargando…</p>
+        ) : lista.length === 0 ? (
           <EmptyState icono={CheckCircle2} titulo="No hay facturas pendientes" texto="Cuando una venta pida factura electrónica, aparecerá aquí hasta que la marque como emitida." />
         ) : (
         <table className="tbl tbl-grande">

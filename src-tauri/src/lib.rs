@@ -16,6 +16,8 @@ mod impresoras;
 #[cfg(test)]
 mod invariantes;
 #[cfg(test)]
+mod casos_raros;
+#[cfg(test)]
 mod tabla_permisos;
 mod inventario;
 mod negocio;
@@ -498,6 +500,12 @@ async fn venta_espera_descartar(st: St<'_>, id: String) -> Res<()> {
 async fn venta_autorizar_descuento(st: St<'_>, espera_id: String, pct: f64, pin: String) -> Res<ventas::AutorizacionEmitida> {
     let a = st.actor().await?;
     ventas::autorizar_descuento(st.pool()?, &a, &espera_id, pct, &pin).await
+}
+
+#[tauri::command]
+async fn venta_faltantes(st: St<'_>, lineas: Vec<(Option<String>, i64)>) -> Res<Vec<String>> {
+    let a = st.actor().await?;
+    ventas::faltantes(st.pool()?, &a, caja::CAJA_1, &lineas).await
 }
 
 #[tauri::command]
@@ -1115,6 +1123,7 @@ pub fn run() {
             venta_espera_guardar,
             venta_espera_descartar,
             venta_autorizar_descuento,
+            venta_faltantes,
             venta_cobrar,
             venta_obtener,
             venta_listar_dia,

@@ -141,7 +141,9 @@ pub async fn descartar_espera(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()>
     a.exigir("venta", "descartar ventas")?;
     let paso = config::entero(pool, "redondeo_total", 5).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let Some(f) = sqlx::query("SELECT * FROM ventas_espera WHERE id = ? AND eliminado_en IS NULL").bind(id).fetch_optional(&mut *tx).await.map_err(e)? else {
+    // Con SELECT_ESPERA (trae el nombre del usuario): con SELECT * a_espera() no encuentra «usuario»
+    // y el comando se cae sin responder (la venta no se descartaba).
+    let Some(f) = sqlx::query(&format!("{SELECT_ESPERA} WHERE e.id = ? AND e.eliminado_en IS NULL")).bind(id).fetch_optional(&mut *tx).await.map_err(e)? else {
         return Ok(());
     };
     let esp = a_espera(&f);
@@ -253,6 +255,20 @@ pub async fn cobrar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str
     cobrar_con(pool, a, caja_id, espera_id, est, pagos, None).await
 }
 
+/// Lo que no alcanza para esta venta, para avisarlo ANTES de cobrar (mismo texto que el rechazo de
+/// `cobrar_con`). Vacío si la configuración deja vender sin existencia.
+pub async fn faltantes(pool: &SqlitePool, a: &Actor, caja_id: &str, lineas: &[(Option<String>, i64)]) -> Res<Vec<String>> {
+    a.exigir("venta", "vender")?;
+    let mut c = pool.acquire().await.map_err(e)?;
+    if config::booleano_con(&mut c, "permitir_vender_sin_existencia", true).await {
+        return Ok(vec![]);
+    }
+    let sucursal = inventario::sucursal_de(&mut c, caja_id).await?;
+    let controladas = inventario::controladas(&mut c, lineas).await?;
+    let ve_cantidad = puede(a.rol, "inventario") || config::booleano_con(&mut c, "venta_mostrar_existencia", false).await;
+    inventario::faltantes(&mut c, &sucursal, &controladas, ve_cantidad).await
+}
+
 /// `pin_existencia`: PIN del dueño para vender sin existencia cuando la configuración no lo permite
 /// (la pantalla lo pide al recibir el error SIN_EXISTENCIA y reintenta).
 pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>) -> Res<ResultadoCobro> {
@@ -314,7 +330,11 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
             return Err(format!("{}No hay existencia de: {}. Para vender igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, sin_existencia.join(", ")));
         }
     }
-    let tot = calculo::totales(&e2, paso);
+    // El redondeo es del efectivo (no hay monedas de ¢1): tarjeta, SINPE y transferencia cobran el
+    // monto exacto. Sin pagos (venta que redondea a ¢0) se mantiene el redondeo.
+    let fs = formas(&mut tx).await?;
+    let con_efectivo = pagos.is_empty() || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
+    let tot = calculo::totales(&e2, if con_efectivo { paso } else { 1 });
     let mut autorizado_por = None;
     if tot.pct_descuento > tope + 1e-9 {
         let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
@@ -333,7 +353,6 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         Some(n) => Some(texto(n, 80, "nombre en tiquete", false)?).filter(|s| !s.is_empty()),
         None => None,
     };
-    let fs = formas(&mut tx).await?;
     let rp = calculo::pagos(tot.total, pagos, &fs);
     if !rp.errores.is_empty() {
         return Err(rp.errores.join(". "));
@@ -683,6 +702,8 @@ pub struct CambioPago {
     pub ultimos4: Option<String>,
 }
 
+const SIN_EFECTIVO: &str = "En la caja ya no queda ese efectivo (salió en retiros o salidas). Registre primero una entrada de efectivo por lo que falta y vuelva a intentarlo.";
+
 /// Caja donde queda un ajuste posterior al cierre: la abierta de hoy (el dueño puede usar la de un cajero).
 async fn turno_para_ajuste(c: &mut SqliteConnection, caja_id: &str) -> Res<Turno> {
     match caja::turno_abierto(c, caja_id).await? {
@@ -813,6 +834,10 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
             .execute(&mut *tx)
             .await
             .map_err(e)?;
+        // Sacar del efectivo un pago cuyo dinero ya salió de la caja dejaría el efectivo esperado negativo.
+        if estaba_efectivo && !nueva.da_vuelto && caja::resumen(&mut tx, t).await?.efectivo_esperado < 0 {
+            return Err(SIN_EFECTIVO.into());
+        }
         bitacora::registrar(&mut tx, Some(&a.id), "venta.pago_corregido", "venta", Some(&venta_id), &json!({"pagoId": pago_id, "correccionId": id, "monto": monto, "antes": antes, "despues": despues, "autorizadoPor": autorizado})).await?;
     } else {
         let actual = turno_para_ajuste(&mut tx, caja_id).await?;
@@ -886,6 +911,15 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         .execute(&mut *tx)
         .await
         .map_err(e)?;
+    // Turno abierto: la anulación saca de la caja el efectivo de la venta. Si ese dinero ya salió
+    // (retiro, salida), no hay de dónde devolverlo y el efectivo esperado quedaría negativo.
+    if !cerrado {
+        if let Some(t) = turno_de_venta(&mut tx, v.get("turno_id")).await? {
+            if caja::resumen(&mut tx, &t).await?.efectivo_esperado < 0 {
+                return Err(SIN_EFECTIVO.into());
+            }
+        }
+    }
     let mut det = json!({"numero": numero, "total": total, "motivo": motivo, "autorizadoPor": dueno});
     // Con factura electrónica hecha, falta la nota de crédito en el otro sistema: queda anotado.
     if v.get::<i64, _>("factura_emitida") == 1 {
@@ -1131,6 +1165,13 @@ mod tests {
         let turno: String = sqlx::query_scalar("SELECT turno_id FROM ventas WHERE id = ?").bind(&r.venta_id).fetch_one(p).await.unwrap();
         // fondo + recibido − vuelto
         assert_eq!(detalle(p, &dueno, &turno).await.unwrap().resumen.efectivo_esperado, 10000 + 5000 - 4000);
+        // El redondeo es del efectivo: ¢998 con tarjeta se cobra exacto; en efectivo, ¢1.000.
+        let fino = est(&pid, &dep, 1000, 1, 2);
+        let tj = vender(p, &cajero, &fino, &[pago(TJ, 998)]).await;
+        let ef = vender(p, &cajero, &fino, &[pago(EF, 1000)]).await;
+        let tj: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&tj.venta_id).fetch_one(p).await.unwrap();
+        let ef: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&ef.venta_id).fetch_one(p).await.unwrap();
+        assert_eq!((tj, ef), ((998, 0), (1000, 2)));
     }
 
     #[tokio::test]

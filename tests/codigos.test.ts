@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { leerConfig } from "../src/db/config";
 import { asociarCodigo, crearProducto, generarCodigoInterno, obtenerProducto, productoPorCodigo, siguienteCodigoInterno } from "../src/db/productos";
-import { codigoInterno, ean13CheckDigit, isValidEan13 } from "../src/lib/ean13";
+import { codigoInterno, ean13CheckDigit, isValidEan13, variantesCodigo } from "../src/lib/ean13";
 import { etiquetaProducto } from "../src/lib/impresion";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS } from "../src/lib/tickets";
@@ -87,6 +87,16 @@ describe("lector que manda lecturas repetidas o pegadas", () => {
     expect(esRepetida(u, "7401234567895", 1200, 400)).toBe(true);
     expect(esRepetida(u, "7401234567895", 1500, 400)).toBe(false);
     expect(esRepetida(u, "7409999999995", 1200, 400)).toBe(false);
+  });
+
+  it("UPC-A de 12 dígitos e ISBN-10 encuentran el mismo producto que su EAN-13", () => {
+    expect(variantesCodigo("036000291452")).toEqual(["0036000291452"]);
+    expect(variantesCodigo("0036000291452")).toEqual(["036000291452"]);
+    expect(variantesCodigo("0306406152")).toEqual(["9780306406157"]);
+    expect(variantesCodigo("9780306406157")).toEqual(["0306406152"]);
+    // Un código interno de 10 dígitos que no es ISBN-10 válido no se convierte.
+    expect(variantesCodigo("0306406153")).toEqual([]);
+    expect(variantesCodigo("07toc")).toEqual([]);
   });
 
   it("dos códigos pegados sin Enter son UNA lectura (código desconocido → aviso), no dos productos", () => {

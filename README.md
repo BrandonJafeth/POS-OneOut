@@ -46,7 +46,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 - Atajos: F2 nueva venta en espera · F3 buscar · F4 precio libre · F6 por departamento · F7 cliente · F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · `3*código` = 3 unidades.
 - Ventas en espera: se guardan en SQLite en cada cambio (tabla `ventas_espera`).
 - Consecutivo: `prefijo de la caja + número`, tomado dentro de la transacción del cobro (`BEGIN IMMEDIATE`): sin saltos ni repetidos.
-- Total redondeado al múltiplo de `redondeo_total` (₡5 por defecto, al más cercano). Descuento por rol: `descuento_max_pct`; si se pasa, PIN de dueño.
+- Total redondeado al múltiplo de `redondeo_total` (₡5 por defecto, al más cercano) solo si hay efectivo entre los pagos; con tarjeta, SINPE o transferencia se cobra exacto. Descuento por rol: `descuento_max_pct`; si se pasa, PIN de dueño.
 - Pago dividido: el tiquete (y la COPIA, y el detalle en pantalla) trae una línea por pago con forma, banco (abreviatura, p. ej. BCR), referencia y monto; si hubo efectivo, el recibido y el vuelto.
 - Anular o cambiar la forma de pago de una venta cobrada: solo el dueño, con su PIN y motivo. El cajero puede quitar líneas antes de cobrar; desde `caja_quitar_linea_bitacora` colones queda en la bitácora.
 - El POS no emite facturas electrónicas: "Pendientes de factura" lista las que se deben hacer en el sistema externo.

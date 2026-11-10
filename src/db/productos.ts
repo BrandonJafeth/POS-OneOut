@@ -1,6 +1,6 @@
 // Productos y sus códigos. Por defecto todo excluye lo eliminado (eliminado_en IS NULL).
 import type { Actor, Codigo, Producto, ProductoConCodigos, ProductoLista, TipoCodigo } from "../tipos";
-import { codigoInterno } from "../lib/ean13";
+import { codigoInterno, variantesCodigo } from "../lib/ean13";
 import { puede, SinPermiso } from "../lib/permisos";
 import { ahoraIso, limpiarNombre, normalizar } from "../lib/texto";
 import { ulid } from "../lib/ulid";
@@ -129,15 +129,14 @@ export async function obtenerProducto(id: string, opc: { incluirEliminados?: boo
   return f ? { ...aProducto(f), codigos: await codigosDe(String(f.id)) } : null;
 }
 
-/** Producto vigente que tiene ese código (sin distinguir mayúsculas), o null. */
+/** Producto vigente que tiene ese código (sin distinguir mayúsculas), o null.
+ *  Si no está tal cual, se prueba como UPC-A/EAN-13 e ISBN-10/13 (variantesCodigo). */
 export async function productoPorCodigo(codigo: string): Promise<ProductoConCodigos | null> {
-  const f = (
-    await db().select(
-      "SELECT p.id FROM codigos c JOIN productos p ON p.id = c.producto_id WHERE c.codigo = ? AND p.eliminado_en IS NULL",
-      [codigo.trim()],
-    )
-  )[0];
-  return f ? obtenerProducto(String(f.id)) : null;
+  for (const c of [codigo.trim(), ...variantesCodigo(codigo)]) {
+    const f = (await db().select("SELECT p.id FROM codigos c JOIN productos p ON p.id = c.producto_id WHERE c.codigo = ? AND p.eliminado_en IS NULL", [c]))[0];
+    if (f) return obtenerProducto(String(f.id));
+  }
+  return null;
 }
 
 /** Dueño actual del código (incluye productos eliminados, para poder liberarlo). */

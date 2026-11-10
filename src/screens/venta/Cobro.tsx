@@ -8,6 +8,7 @@ import Modal from "../../components/Modal";
 import Mensaje, { textoError } from "../../components/Mensaje";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
+import { useEscaner } from "../../lib/useEscaner";
 import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
 import Alert from "../../ui/Alert";
@@ -31,11 +32,13 @@ interface Fila extends Omit<PagoEntrada, "monto"> {
   texto: string; // lo que se escribe en el monto
 }
 
-export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: Banco[]; onCobrar(pagos: PagoEntrada[]): Promise<void>; onCerrar(): void }) {
+/** `total`: redondeado, lo que se cobra en efectivo. `totalExacto`: sin redondear, lo que se cobra si no hay efectivo. */
+export default function Cobro(p: { total: number; totalExacto: number; formas: FormaPago[]; bancos: Banco[]; onCobrar(pagos: PagoEntrada[]): Promise<void>; onCerrar(): void }) {
   const { config } = useSesion();
   const efectivo = p.formas.find((f) => f.daVuelto) ?? p.formas[0];
   const clave = useRef(1);
-  const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: conMiles(String(p.total)) }] : []);
+  const totalDe = (f?: FormaPago) => (f?.daVuelto ? p.total : p.totalExacto);
+  const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: conMiles(String(totalDe(efectivo))) }] : []);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const primerMonto = useRef<HTMLInputElement>(null);
@@ -50,13 +53,32 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
   // se escribe cuánto va en tarjeta/SINPE y el resto es efectivo).
   const filaAuto = mixto ? filas.find((f) => forma(f.formaPagoId)?.daVuelto && !f.texto.trim()) : undefined;
   const otrosMontos = filas.filter((f) => f !== filaAuto).reduce((s, f) => s + (leerMontoEntero(f.texto) ?? 0), 0);
-  const restoEfectivo = Math.max(0, p.total - otrosMontos);
+  const restoEfectivo = Math.max(0, p.total - otrosMontos); // el efectivo siempre paga sobre el total redondeado
   const pagos: PagoEntrada[] = filas.map((f) => ({ ...f, monto: f === filaAuto ? restoEfectivo : (leerMontoEntero(f.texto) ?? 0) }));
   // Un monto borrado cuenta como 0 (se ve "Falta"): nunca se cobra un campo vacío como exacto.
   const pagosEfectivos = pagos.filter((x) => x.monto > 0);
+  // El redondeo es del efectivo. Igual que Rust (ventas::cobrar_con): se cobra el monto exacto solo
+  // si hay pagos y ninguno es efectivo.
+  const total = pagosEfectivos.length > 0 && !pagosEfectivos.some((x) => forma(x.formaPagoId)?.daVuelto) ? p.totalExacto : p.total;
+
+  // Una lectura del lector con el cobro abierto no es un monto: se deshace lo que escribió y no confirma.
+  // `estable` es lo que había antes de la ráfaga (el lector escribe todo en menos de 300 ms).
+  const estable = useRef(filas);
+  useEffect(() => {
+    const t = setTimeout(() => (estable.current = filas), 300);
+    return () => clearTimeout(t);
+  }, [filas]);
+  useEscaner(
+    () => {
+      setFilas(estable.current);
+      setError("Se leyó un código con el cobro abierto y no se tomó como monto. Para agregar productos, cierre el cobro.");
+    },
+    { debounceMs: 0, activo: !ocupado },
+  );
+
   // Pago dividido: una fila sin monto es un olvido (no un 0), salvo el efectivo que cubre lo que falta.
   const sinMonto = mixto ? filas.filter((f, i) => f !== filaAuto && pagos[i].monto <= 0) : [];
-  const r = useMemo(() => calcularPagos(p.total, pagosEfectivos, p.formas), [p.total, JSON.stringify(pagosEfectivos), p.formas]);
+  const r = useMemo(() => calcularPagos(total, pagosEfectivos, p.formas), [total, JSON.stringify(pagosEfectivos), p.formas]);
   const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
   const nuevaFila = useRef<HTMLInputElement>(null);
 
@@ -83,6 +105,8 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
       await p.onCobrar(pagosEfectivos);
     } catch (e) {
       setError(textoError(e));
+    } finally {
+      // También si el cobro quedó esperando el PIN del dueño y se canceló: se puede reintentar.
       setOcupado(false);
     }
   }
@@ -131,8 +155,13 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
       >
         <div className="cobro-total">
           <span>Total</span>
-          <strong>{monto(p.total)}</strong>
+          <strong>{monto(total)}</strong>
         </div>
+        {p.total !== p.totalExacto && (
+          <p className="muted">
+            En efectivo se redondea a {monto(p.total)}. Con tarjeta, SINPE o transferencia se cobra exacto: {monto(p.totalExacto)}.
+          </p>
+        )}
 
         {!mixto && filas[0] && (
           <>
@@ -147,7 +176,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
                     aria-checked={filas[0].formaPagoId === f.id}
                     aria-pressed={filas[0].formaPagoId === f.id}
                     className="forma"
-                    onClick={() => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(p.total)) }])}
+                    onClick={() => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(totalDe(f))) }])}
                   >
                     <Icono size={20} aria-hidden /> {f.nombre}
                   </button>
@@ -226,7 +255,7 @@ export default function Cobro(p: { total: number; formas: FormaPago[]; bancos: B
             </>
           )}
         </div>
-        {p.total === 0 && <Alert tono="aviso">El total es ¢0: la venta queda registrada sin cobrar nada.</Alert>}
+        {total === 0 && <Alert tono="aviso">El total es ¢0: la venta queda registrada sin cobrar nada.</Alert>}
         {r.vuelto > VUELTO_GRANDE && (
           <Alert tono="aviso" titulo={`Vuelto de ${monto(r.vuelto)}`}>
             Revise que de verdad recibió {monto(r.pagado)}: un cero de más da un vuelto que sale de la gaveta.

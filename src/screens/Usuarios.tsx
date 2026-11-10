@@ -15,7 +15,7 @@ type Dialogo = { tipo: "nuevo" } | { tipo: "pin"; usuario: Usuario } | { tipo: "
 export default function Usuarios() {
   const { actor, usuario: yo } = useSesion();
   const confirmar = useConfirmar();
-  const [lista, setLista] = useState<Usuario[]>([]);
+  const [lista, setLista] = useState<Usuario[] | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [error, setError] = useState("");
   const roles = rolesAdministrables(actor.rol);
@@ -55,7 +55,14 @@ export default function Usuarios() {
             </tr>
           </thead>
           <tbody>
-            {lista.map((u) => (
+            {!lista && !error && (
+              <tr>
+                <td colSpan={4} className="muted" aria-live="polite">
+                  Cargando usuarios…
+                </td>
+              </tr>
+            )}
+            {lista?.map((u) => (
               <tr key={u.id} className={u.activo ? "" : "inactivo"}>
                 <td>
                   {u.nombre} {u.id === yo.id && <span className="muted">(usted)</span>}

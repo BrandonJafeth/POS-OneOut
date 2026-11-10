@@ -17,7 +17,7 @@ import NuevoCliente from "./clientes/NuevoCliente";
 export default function Clientes() {
   const { actor, config } = useSesion();
   const [texto, setTexto] = useState("");
-  const [lista, setLista] = useState<Cliente[]>([]);
+  const [lista, setLista] = useState<Cliente[] | null>(null); // null: todavía cargando
   const [sugeridos, setSugeridos] = useState<ClienteBasico[]>([]);
   const [abierto, setAbierto] = useState<{ id: string; retencion?: boolean } | null>(null);
   const [nuevo, setNuevo] = useState(false);
@@ -64,7 +64,9 @@ export default function Clientes() {
         </div>
       </Field>
       <section className="card">
-        {lista.length === 0 ? (
+        {!lista ? (
+          <p className="muted">Cargando…</p>
+        ) : lista.length === 0 ? (
           <EmptyState icono={Users} titulo={texto ? "Ningún cliente coincide" : "Todavía no hay clientes"} texto="Los clientes se crean desde la venta (botón Cliente) o con «Nuevo cliente»." />
         ) : (
         <table className="tbl tbl-grande">

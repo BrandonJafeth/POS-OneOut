@@ -12,6 +12,7 @@ import { agruparPorForma } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { escribirEncabezado } from "../impresion";
+import { diaLocal } from "../texto";
 import { columnas, cortar, fechaHora, lr, monto, montoConSigno, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
 /** Una línea del reporte, independiente de la impresora. */
@@ -43,6 +44,13 @@ export const LEYENDA_CODIGOS = "Co=Contado Ta=Tarjeta De=Depósito/SINPE/Transf.
 export const NOTA_USUARIOS = "Efectivo y diferencia corresponden a la caja, no a cada usuario.";
 
 const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
+/** Hora del cierre; con día/mes si se cerró otro día (un turno que quedó abierto de un día para otro). */
+export function horaCierre(t: { dia: string; cerradoEn: string | null }): string {
+  if (!t.cerradoEn) return "";
+  const d = new Date(t.cerradoEn);
+  const f = fechaHora(d);
+  return diaLocal(d) === t.dia ? f.slice(11, 16) : `${f.slice(0, 5)} ${f.slice(11, 16)}`;
+}
 const signo = (n: number) => montoConSigno(n, "-");
 const den = (d: number) => (d >= 1000 ? `${d / 1000} mil` : String(d));
 
@@ -115,7 +123,7 @@ function cabeceraTurno(d: Detalle, cols: number, nombreNegocio: string): LineaDo
   if (nombreNegocio) l.push({ t: lr("Negocio:", cortar(nombreNegocio, cols - 9), cols) });
   l.push({ t: lr("Caja:", cortar(t.caja || "Caja", cols - 6), cols) }, { t: lr("Día:", t.dia, cols) });
   l.push({ t: lr("Abrió:", `${cortar(t.usuarioApertura, cols - 14)} ${hora(t.abiertoEn)}`, cols) });
-  if (t.cerradoEn) l.push({ t: lr("Cerró:", `${cortar(t.usuarioCierre ?? "", cols - 14)} ${hora(t.cerradoEn)}`, cols) });
+  if (t.cerradoEn) l.push({ t: lr("Cerró:", `${cortar(t.usuarioCierre ?? "", cols - 9 - horaCierre(t).length)} ${horaCierre(t)}`, cols) });
   return l;
 }
 

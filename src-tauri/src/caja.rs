@@ -277,10 +277,14 @@ pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
     .await
     .map_err(e)?;
     let margen = (chrono::Utc::now() + chrono::Duration::minutes(10)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    if let Some(u) = ultimo.filter(|u| *u > margen) {
+    // Salida para el técnico: si el reloj estuvo ADELANTADO y ya se corrigió, lo registrado con fecha
+    // futura bloquearía la caja hasta que llegue ese día. La clave «reloj_ignorar_hasta» acepta lo
+    // registrado hasta esa fecha.
+    let ignorar = config::valor_con(c, "reloj_ignorar_hasta").await.and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    if let Some(u) = ultimo.filter(|u| *u > margen && *u > ignorar) {
         return Err(format!(
-            "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de {para}.",
-            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u)
+            "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de {para}. Si Windows ya tiene la fecha correcta, el técnico lo autoriza en Configuración técnica → Claves: reloj_ignorar_hasta = \"{u}\".",
+            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u.clone())
         ));
     }
     Ok(())

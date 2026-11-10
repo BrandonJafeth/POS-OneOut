@@ -244,7 +244,7 @@ export default function EntradaMercaderia() {
                   <input className="small" inputMode="numeric" aria-label={`Cantidad de ${l.nombre}`} value={l.cantidad} onChange={(e) => set(i, { cantidad: e.target.value.replace(/\D/g, "") })} />
                 </td>
                 <td className="num">
-                  <input className="small" inputMode="numeric" aria-label={`Costo de ${l.nombre}`} value={l.costo} onChange={(e) => set(i, { costo: e.target.value.replace(/\D/g, "") })} />
+                  <input className="small" inputMode="numeric" aria-label={`Costo de ${l.nombre}`} placeholder="Igual" value={l.costo} onChange={(e) => set(i, { costo: e.target.value.replace(/\D/g, "") })} />
                 </td>
                 <td className="num">
                   <input className="small" inputMode="numeric" aria-label={`Precio nuevo de ${l.nombre}`} placeholder="Igual" value={l.precioNuevo} onChange={(e) => set(i, { precioNuevo: e.target.value.replace(/\D/g, "") })} />
@@ -257,8 +257,9 @@ export default function EntradaMercaderia() {
           </tbody>
         </table>
       )}
+      {lineas.length > 0 && <p className="muted">Costo o precio en blanco: el producto conserva el que ya tiene.</p>}
       <label className="row">
-        <input type="checkbox" checked={actualizarCosto} onChange={(e) => setActualizarCosto(e.target.checked)} /> Guardar el costo de cada línea como último costo del producto
+        <input type="checkbox" checked={actualizarCosto} onChange={(e) => setActualizarCosto(e.target.checked)} /> Guardar el costo que escriba como último costo del producto
       </label>
       <Mensaje error={error} />
       <Button variante="primario" icono={PackagePlus} disabled={ocupado || !lineas.length || lineas.some((l) => !(Number(l.cantidad) > 0))} onClick={guardar}>

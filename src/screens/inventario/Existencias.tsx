@@ -56,7 +56,7 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
   // El botón «Ver cuáles» de arriba cambia el filtro sin borrar lo que se buscó.
   useEffect(() => setFiltroLocal(p.filtroInicial ?? "con_control"), [p.filtroInicial]);
   const [filas, setFilas] = useState<FilaInventario[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(null); // null: todavía cargando
   const [error, setError] = useState("");
   const [dialogo, setDialogo] = useState<{ tipo: "ajuste" | "kardex" | "ficha"; fila: FilaInventario } | null>(null);
   const consulta = useRef(0);
@@ -108,7 +108,9 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
         </Field>
       </div>
       <Mensaje error={error} />
-      {filas.length === 0 ? (
+      {total === null ? (
+        <p className="muted">Cargando…</p>
+      ) : filas.length === 0 ? (
         filtro === "con_control" && !texto && !depto ? (
           <EmptyState
             icono={ClipboardList}
@@ -165,7 +167,7 @@ export default function Existencias(p: { filtroInicial?: FiltroInventario; onFil
           </tbody>
         </table>
       )}
-      {filas.length < total && <Button onClick={() => void cargar(true)}>Ver más ({total - filas.length})</Button>}
+      {total !== null && filas.length < total && <Button onClick={() => void cargar(true)}>Ver más ({total - filas.length})</Button>}
       {dialogo?.tipo === "ajuste" && <AjusteDialogo fila={dialogo.fila} onCerrar={cerrar} />}
       {dialogo?.tipo === "kardex" && <KardexDialogo fila={dialogo.fila} onCerrar={() => cerrar(false)} />}
       {dialogo?.tipo === "ficha" && <FichaDialogo fila={dialogo.fila} onCerrar={cerrar} />}

@@ -292,7 +292,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
   const textoCaja = !caja?.turno
     ? "Caja cerrada"
     : caja.deOtroDia
-      ? `Caja abierta desde el ${caja.turno.dia}`
+      ? `Abierta desde el ${caja.turno.dia}`
       : caja.puedeUsar
         ? `Caja abierta · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`
         : `Caja de ${caja.turno.usuarioApertura.split(" ")[0]} · ${fechaHora(new Date(caja.turno.abiertoEn)).slice(11, 16)}`;

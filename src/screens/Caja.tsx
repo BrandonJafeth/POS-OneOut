@@ -27,9 +27,9 @@ import { listarUsuarios } from "../db/usuarios";
 import { listarEsperas } from "../db/ventas";
 import { imprimirCorte, imprimirMovimiento, imprimirZ } from "../lib/caja/imprimir";
 import { pdfCierre } from "../lib/caja/pdfZ";
-import { opcionesPorDefecto } from "../lib/caja/reporteZ";
+import { horaCierre, opcionesPorDefecto } from "../lib/caja/reporteZ";
 import { descargar } from "../lib/exportarCliente";
-import { DIAS_SIN_RESPALDO, ultimoRespaldo } from "../lib/respaldoApi";
+import { DIAS_SIN_RESPALDO, estadoAutomatico, ultimoRespaldo } from "../lib/respaldoApi";
 import { diaLocal, plural } from "../lib/texto";
 import { fechaHora, monto, montoConSigno as signo } from "../lib/tickets";
 import type { Usuario } from "../tipos";
@@ -72,7 +72,8 @@ export default function Caja() {
 
   // Una falla del disco se lleva todas las ventas: se avisa si el respaldo es viejo o no existe.
   useEffect(() => {
-    if (puede("respaldo")) ultimoRespaldo().then(setRespaldo, () => undefined);
+    // Sin respaldo automático ya avisa la franja de arriba (AvisoRespaldo): aquí no se repite.
+    if (puede("respaldo")) Promise.all([ultimoRespaldo(), estadoAutomatico()]).then(([u, a]) => a.configurado && setRespaldo(u), () => undefined);
   }, []);
   const diasSinRespaldo = respaldo ? Math.floor((Date.now() - Date.parse(respaldo)) / 86_400_000) : null;
 
@@ -564,7 +565,7 @@ function Historial(p: { admin: boolean; onVer(id: string): void }) {
                 <td>
                   {t.usuarioApertura} · {hora(t.abiertoEn)}
                 </td>
-                <td>{t.cerradoEn ? `${t.usuarioCierre ?? ""} · ${hora(t.cerradoEn)}` : <Badge tono="ok">Abierta</Badge>}</td>
+                <td>{t.cerradoEn ? `${t.usuarioCierre ?? ""} · ${horaCierre(t)}` : <Badge tono="ok">Abierta</Badge>}</td>
                 <td className="num">{t.ventas ?? <span className="muted" title="Se ve al cerrar">—</span>}</td>
                 <td className="num">{t.total == null ? <span className="muted" title="Se ve al cerrar">—</span> : monto(t.total)}</td>
                 <td className="num">{t.diferencia == null ? "" : signo(t.diferencia)}</td>

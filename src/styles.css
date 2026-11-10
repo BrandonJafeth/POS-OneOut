@@ -2008,19 +2008,14 @@ mark {
   font-size: 15px;
 }
 
+/* Cifras en una sola franja con reglas (como el papel del cierre), no una fila de tarjetas. */
 .caja-cifras {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--e3);
+  gap: var(--e3) var(--e6);
   margin: 0;
-}
-
-.caja-cifras > div {
-  min-width: 140px;
-  padding: var(--e3) var(--e4);
-  border: 1px solid var(--hair);
-  border-radius: var(--radio-g);
-  background: var(--card2);
+  padding: var(--e3) 0;
+  border-block: 1px solid var(--hair);
 }
 
 .caja-cifras dt {
@@ -2035,9 +2030,15 @@ mark {
   font-variant-numeric: tabular-nums;
 }
 
+/* Lo que debe haber en la gaveta: al final de la franja, a la derecha. */
 .caja-cifras .destacado {
-  border-color: var(--accent);
-  background: var(--card);
+  margin-left: auto;
+  text-align: right;
+}
+
+.caja-cifras .destacado dt {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .caja-movs {

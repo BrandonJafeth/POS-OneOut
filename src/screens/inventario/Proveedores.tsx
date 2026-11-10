@@ -13,7 +13,7 @@ const VACIO: Proveedor = { id: "", nombre: "", telefono: "", notas: "" };
 
 export default function Proveedores() {
   const confirmar = useConfirmar();
-  const [lista, setLista] = useState<Proveedor[]>([]);
+  const [lista, setLista] = useState<Proveedor[] | null>(null); // null: todavía cargando
   const [editando, setEditando] = useState<Proveedor | null>(null);
   const [error, setError] = useState("");
   const cargar = () => listarProveedores().then(setLista, (e) => setError(textoError(e)));
@@ -24,7 +24,9 @@ export default function Proveedores() {
         Nuevo proveedor
       </Button>
       <Mensaje error={error} />
-      {lista.length === 0 ? (
+      {!lista ? (
+        <p className="muted">Cargando…</p>
+      ) : lista.length === 0 ? (
         <EmptyState icono={Truck} titulo="Sin proveedores" texto="Son opcionales en la entrada de mercadería." />
       ) : (
         <table className="tbl">

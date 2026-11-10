@@ -18,6 +18,31 @@ export function isIsbn13(code: string): boolean {
   return isValidEan13(code) && /^97[89]/.test(code);
 }
 
+/**
+ * Otras formas en que el mismo código puede estar guardado o salir del lector: UPC-A de 12 dígitos
+ * = EAN-13 con un 0 adelante, e ISBN-10 = ISBN-13 con prefijo 978. Sin esto, un producto que sí
+ * está en el catálogo sale como "no registrado".
+ */
+export function variantesCodigo(codigo: string): string[] {
+  const c = codigo.trim().replace(/-/g, "").toUpperCase();
+  const out: string[] = [];
+  if (/^\d{12}$/.test(c)) out.push("0" + c);
+  if (/^0\d{12}$/.test(c)) out.push(c.slice(1));
+  const pesos = (nueve: string) => [...nueve].reduce((s, d, i) => s + Number(d) * (10 - i), 0);
+  // ISBN-10 válido (verificador módulo 11, X = 10) → su ISBN-13.
+  if (/^\d{9}[\dX]$/.test(c) && (pesos(c.slice(0, 9)) + (c[9] === "X" ? 10 : Number(c[9]))) % 11 === 0) {
+    const base = "978" + c.slice(0, 9);
+    out.push(base + ean13CheckDigit(base));
+  }
+  // ISBN-13 con prefijo 978 → su ISBN-10 (los 979 no tienen).
+  if (/^978\d{10}$/.test(c) && isValidEan13(c)) {
+    const nueve = c.slice(3, 12);
+    const v = (11 - (pesos(nueve) % 11)) % 11;
+    out.push(nueve + (v === 10 ? "X" : String(v)));
+  }
+  return out;
+}
+
 // Tablas de codificación EAN-13 (para dibujar las barras en la vista previa).
 const L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
 const G = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111"];

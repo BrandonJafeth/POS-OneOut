@@ -37,8 +37,10 @@ export default function VentasHoy() {
   const [hasta, setHasta] = useState("");
   const [filtro, setFiltro] = useState("todas");
 
+  const [cargado, setCargado] = useState(false);
   const cargar = async () => {
     setLista(await listarVentasDia(dia));
+    setCargado(true);
   };
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [dia]);
 
@@ -117,7 +119,9 @@ export default function VentasHoy() {
         </section>
       )}
       <section className="card">
-        {lista.length === 0 ? (
+        {!cargado ? (
+          <p className="muted">Cargando…</p>
+        ) : lista.length === 0 ? (
           <EmptyState icono={ReceiptText} titulo="Todavía no hay ventas este día" texto="Las ventas cobradas aparecen aquí para reimprimir, corregir el pago o anular." />
         ) : (
         <>
