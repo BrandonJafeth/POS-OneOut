@@ -99,6 +99,7 @@ Prepare: la POS-58 (tiquetes, con la gaveta) y otra impresora para etiquetas (o 
 1. Como Ana, abra la caja y haga una venta. **Cambiar usuario** → Luis.
    - Luis vende en el mismo turno sin abrir otro. En la barra dice "Caja abierta".
    - No queda ninguna pantalla de Ana a la vista ni ningún total (Caja dice "Los totales se ven al cerrar"; Mis turnos muestra "—").
+   - En **Ventas del día**, Luis ve también el tiquete de Ana (para atender un reclamo si ella no está): lo abre y lo reimprime como COPIA. No ve la suma de lo vendido; anular y corregir el pago siguen pidiendo el PIN del dueño.
 2. Deje una venta en espera como Ana y entre como Luis. → La pestaña dice "Venta 2 · Ana"; Luis la cobra. En Ventas del día (como Ana): "cobró Luis (la empezó Ana)".
 3. Cierre como Luis. → En el Z: "Abrió Ana · Cerró Luis" y "VENTAS POR USUARIO" con la nota "Efectivo y diferencia corresponden a la caja…".
 4. En **Administración → Caja y cierre**, desmarque "Permitir que otros usuarios usen un turno abierto por otro" (lea el texto de ayuda). Ana abre; Luis entra. → Luis no puede vender ni mover efectivo en ese turno.
@@ -174,6 +175,10 @@ Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio
 4. **Anular una venta facturada.** → Aviso rojo de nota de crédito; en la bitácora, `venta.anular` lleva la referencia de la factura.
 5. **Importar sin códigos internos.** En Productos → Importar, deje apagado «Generar un código interno…» (viene apagado). → Los productos nuevos quedan sin código; se les escanea el código de barras después. Enciéndalo y vuelva a importar: reciben código interno. La opción queda guardada.
 6. **Nombres con espacios o tildes raras.** Cree un producto «Café   con  leche» copiando el nombre de una página web. → Se guarda «Café con leche»; buscar «cafe con leche» lo encuentra y el tiquete imprime la tilde bien.
+7. **Nombre repetido.** Cree «Copia» y después «copia», «COPIA» y «Cópia ». → Mientras escribe, debajo del nombre aparece en rojo «Ya existe "Copia" (¢…). Use otro nombre…» y **Crear producto** queda apagado. Renombrar otro producto a «copia» tampoco deja. En Productos → Mostrar → **Nombre repetido** salen los que ya venían repetidos (p. ej. de la importación), uno junto al otro. Al importar: si «Copia» se creó a mano en el POS y la web trae «copia», no se duplica: sale en «Se van a actualizar» (precio de la web, etc.) con el aviso «Se une con "Copia"…»; al reimportar ya se reconoce por su id. Si el del POS ya venía de **otro** producto de la web, la fila sale en **Problemas** diciendo cuál es y qué hacer.
+8. **Descuento fijo de producto.** En un producto ponga Descuento 10 %. → Abajo dice «Se vende a ¢…». Con 50 % o más pide confirmar. Como Luis (cajero, tope 10 %), véndalo: el descuento sale solo, sin PIN. Escanéelo otra vez: suma cantidad y el descuento se recalcula. Agréguele un F8 que pase el tope de Luis → pide PIN (solo cuenta lo de Luis). Deje una venta en espera con ese producto, cambie el % como Ana y cobre como Luis → «el descuento del producto cambió, vuelva a agregarlo». En el Z, «Descuentos de producto» sale aparte de «Descuentos dados».
+9. **Unidades al crear.** Cree un producto nuevo con «Unidades que hay» = 6. → En Existencias tiene 6 y en su Kardex, «Entrada de mercadería» de hoy. El campo no aparece al editar ni para quien no maneja inventario.
+10. **Páginas.** En Productos, Existencias, Conteo físico, Ventas del día y Clientes, con más de una página: «51–100 de N», Anterior / Siguiente y números. Busque algo que esté en la página 3 estando en la 1 → lo encuentra (la búsqueda es sobre todo). En el conteo, escanee un producto de otra página → salta a esa página y suma 1.
 
 5. **Impresora sin papel.** Quite el papel (o desconecte la USB a medio tiquete) y cobre. → En unos 10 s avisa que la impresora no contestó; la venta queda guardada y la siguiente venta se cobra normal. Con «No venta», si la gaveta no contesta, el aviso dice que quedó registrado.
 
@@ -220,7 +225,7 @@ Se hace una vez, en la computadora del negocio, antes de dejarla en uso. Marque 
 - [ ] 17. **Ajuste de inventario** de un producto con control. → El kardex muestra el movimiento con el motivo.
 - [ ] 18. **No venta** (abrir gaveta sin vender). → Pide motivo; queda registrada.
 - [ ] 19. **Corte** a medio turno. → Imprime corte; la caja sigue abierta.
-- [ ] 20. **Cambiar de usuario** con la caja abierta (cajero ↔ dueño). → Cada uno ve solo lo suyo; el cajero no entra a Administración.
+- [ ] 20. **Cambiar de usuario** con la caja abierta (cajero ↔ dueño). → El cajero ve en Ventas del día los tiquetes de todos (sin totales del turno) y no entra a Administración.
 
 ### Cerrar
 - [ ] 21. **Cierre ciego**: el cajero cuenta sin ver el esperado. → Al confirmar muestra la diferencia.

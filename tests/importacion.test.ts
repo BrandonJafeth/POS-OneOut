@@ -242,7 +242,7 @@ describe("plan de importación", () => {
       [8, "El slug tiene caracteres no válidos"],
       [9, 'Precio no numérico: "diez"'],
       [11, "Slug repetido (igual que la fila 10)"],
-      [12, "Nombre repetido (igual que la fila 10)"],
+      [12, "Nombre repetido (igual que la fila 10, sin contar mayúsculas ni tildes): cámbielo en la web"],
     ]);
     expect(plan.nuevos.map((i) => i.webId)).toEqual(["9"]);
   });
@@ -283,8 +283,10 @@ describe("plan de importación", () => {
     expect(plan.actualizar.find((i) => i.productoId === "p1")).toMatchObject({ departamentoId: D("11"), favorito: true, cambios: ["departamento", "favorito"] });
   });
 
-  it("reconoce por slug si el id cambió en la web; no resucita lo eliminado; avisa homónimos", () => {
-    const fuente = leerCsvWeb(`${CAB}\nNUEVO-ID,lapiz-hb,Lápiz HB,400,disponible,simple,false,true,,Escolar\nw9,borrado,Borrado,1,disponible,simple,false,true,,Escolar\nw8,x,cartulina,1,disponible,simple,false,true,,Escolar`);
+  it("reconoce por slug si el id cambió en la web; no resucita lo eliminado; une el creado a mano; avisa homónimos", () => {
+    const fuente = leerCsvWeb(
+      `${CAB}\nNUEVO-ID,lapiz-hb,Lápiz HB,400,disponible,simple,false,true,,Escolar\nw9,borrado,Borrado,1,disponible,simple,false,true,,Escolar\nw8,x,cartulina,1,disponible,simple,false,true,,Escolar\nw6,y,regla,1,disponible,simple,false,true,,Escolar`,
+    );
     const base = { activo: true, favorito: false, categoriasOrigen: null, tieneInterno: false, departamentoId: D("01") };
     const plan = crearPlan(
       fuente,
@@ -292,13 +294,20 @@ describe("plan de importación", () => {
         { ...base, id: "p1", webId: "VIEJO", slug: "lapiz-hb", nombre: "Lápiz HB", precio: 350, eliminado: false },
         { ...base, id: "p9", webId: "w9", slug: "borrado", nombre: "Borrado", precio: 1, eliminado: true },
         { ...base, id: "p3", webId: null, slug: null, nombre: "Cartulina", precio: 1, eliminado: false },
+        { ...base, id: "p4", webId: "w5", slug: "regla-vieja", nombre: "Regla", precio: 1, eliminado: false },
       ]),
       op({ codigosInternos: true }),
     );
-    expect(plan.actualizar).toMatchObject([{ productoId: "p1", webId: "NUEVO-ID", codigo: "01lap" }]);
+    expect(plan.actualizar).toMatchObject([
+      { productoId: "p1", webId: "NUEVO-ID", codigo: "01lap" },
+      // "Cartulina" se creó a mano: se une con la de la web (no se duplica ni da error).
+      { productoId: "p3", webId: "w8", nombre: "cartulina" },
+    ]);
     expect(plan.actualizar[0].cambios).toEqual(["precio", "codigo", "slug", "categorias"]);
+    expect(plan.avisos.map((a) => a.mensaje)).toContain('Se une con "Cartulina", que ya estaba en el POS (creado a mano)');
     expect(plan.omitidos).toHaveLength(1);
-    expect(plan.errores[0].mensaje).toContain("Ya existe otro producto");
+    // "Regla" ya viene de OTRO producto de la web: ese sí es un homónimo.
+    expect(plan.errores.map((e) => e.mensaje)).toEqual([expect.stringContaining('Ya hay otro producto llamado "Regla"')]);
   });
 });
 

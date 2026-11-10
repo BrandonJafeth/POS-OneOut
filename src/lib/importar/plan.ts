@@ -237,7 +237,9 @@ export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones
       ] as const
     ).find(([k, v]) => v && vistos[k].has(v));
     if (repetido) {
-      error(`${repetido[2]} repetido (igual que la fila ${vistos[repetido[0]].get(repetido[1])})`);
+      const otra = vistos[repetido[0]].get(repetido[1]);
+      // Mayúsculas, tildes y espacios no cuentan: "Copia" y "copia" son el mismo nombre.
+      error(repetido[0] === "nombre" ? `Nombre repetido (igual que la fila ${otra}, sin contar mayúsculas ni tildes): cámbielo en la web` : `${repetido[2]} repetido (igual que la fila ${otra})`);
       continue;
     }
     vistos.id.set(f.webId, f.fila);
@@ -247,8 +249,14 @@ export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones
     let existente = porWebId.get(f.webId);
     if (!existente && f.slug) existente = porSlug.get(f.slug);
     const homonimo = porNombre.get(clave);
+    // Creado a mano en el POS (nunca vino de la web) con el mismo nombre: es el mismo producto. Se une
+    // con el de la web en vez de dar error en cada importación; sale en "actualizar" con sus cambios.
+    if (!existente && homonimo && !homonimo.webId) {
+      existente = homonimo;
+      plan.avisos.push({ fila: f.fila, nombre: f.nombre, mensaje: `Se une con "${homonimo.nombre}", que ya estaba en el POS (creado a mano)` });
+    }
     if (homonimo && homonimo.id !== existente?.id) {
-      error(`Ya existe otro producto con ese nombre ("${homonimo.nombre}")`);
+      error(`Ya hay otro producto llamado "${homonimo.nombre}" en el POS: cámbiele el nombre a uno de los dos (en la web o en Productos) y vuelva a importar`);
       continue;
     }
     if (existente?.eliminado) {

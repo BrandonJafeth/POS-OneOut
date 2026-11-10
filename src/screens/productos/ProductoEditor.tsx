@@ -13,7 +13,9 @@ import {
   eliminarProducto,
   generarCodigoInterno,
   limpiarCodigo,
+  NombreRepetido,
   obtenerProducto,
+  productoConNombre,
   quitarCodigo,
 } from "../../db/productos";
 import { estadoInventario, registrarEntrada } from "../../db/inventario";
@@ -59,6 +61,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   const [conflicto, setConflicto] = useState<{ error: CodigoOcupado; tipo: TipoCodigo } | null>(null);
   const [etiqueta, setEtiqueta] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Aviso mientras escribe: el nombre no puede repetirse (sin contar mayúsculas, tildes ni espacios).
+  const [repetido, setRepetido] = useState<NombreRepetido | null>(null);
   const toast = useToast();
 
   async function cargar(pid: string) {
@@ -78,6 +82,11 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   useEffect(() => {
     if (productoId) void cargar(productoId).catch((e) => setError(textoError(e)));
   }, [productoId]);
+
+  useEffect(() => {
+    const t = setTimeout(() => productoConNombre(nombre, id).then((o) => setRepetido(o && new NombreRepetido(o)), () => setRepetido(null)), 250);
+    return () => clearTimeout(t);
+  }, [nombre, id]);
 
   const precioNum = leerMontoEntero(precio);
   const tasaNum = Number(tasaIva.replace(",", "."));
@@ -216,7 +225,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
           )}
           <span className="separador" />
           <Button onClick={onCerrar}>{sucio ? "Cancelar" : "Cerrar"}</Button>
-          <Button type="submit" form="form-producto" variante="primario" icono={Save} disabled={!sucio}>
+          <Button type="submit" form="form-producto" variante="primario" icono={Save} disabled={!sucio || !!repetido}>
             {id ? "Guardar cambios" : "Crear producto"}
           </Button>
         </>
@@ -231,7 +240,12 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
       >
         <label className="campo">
           Nombre
-          <input autoFocus={!id} value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          <input autoFocus={!id} value={nombre} aria-invalid={!!repetido} aria-describedby={repetido ? "nombre-repetido" : undefined} onChange={(e) => setNombre(e.target.value)} />
+          {repetido && (
+            <span id="nombre-repetido" className="campo-error" role="alert">
+              {repetido.message}
+            </span>
+          )}
         </label>
         <div className="row">
           <label className="campo" style={{ flex: 1 }}>

@@ -30,7 +30,7 @@ export default function Productos() {
   const [texto, setTexto] = useState("");
   const [depto, setDepto] = useState("");
   const [inactivos, setInactivos] = useState(false);
-  const [mostrar, setMostrar] = useState<"" | FiltroProductosImportados>("");
+  const [mostrar, setMostrar] = useState<"" | FiltroProductosImportados | "repetidos">("");
   const [filas, setFilas] = useState<ProductoLista[]>([]);
   const [total, setTotal] = useState<number | null>(null); // null: todavía cargando
   const [pagina, setPagina] = useState(1);
@@ -61,6 +61,7 @@ export default function Productos() {
           incluirInactivos: inactivos,
           sinBarras: mostrar === "sinBarras",
           paraRevisar: mostrar === "revisar",
+          repetidos: mostrar === "repetidos",
           limite: POR_PAGINA,
           desplazamiento: (nPagina - 1) * POR_PAGINA,
         });
@@ -171,6 +172,7 @@ export default function Productos() {
             <option value="">Todos</option>
             <option value="sinBarras">Sin código de barras</option>
             <option value="revisar">Para revisar (importados)</option>
+            <option value="repetidos">Nombre repetido</option>
           </select>
         </Field>
         <label className="check" style={{ marginTop: 28 }}>

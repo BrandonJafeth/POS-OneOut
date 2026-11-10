@@ -17,6 +17,33 @@ export class CodigoOcupado extends Error {
   }
 }
 
+/** Ya hay otro producto con ese nombre (sin contar mayúsculas, tildes ni espacios de más). */
+export class NombreRepetido extends Error {
+  constructor(readonly producto: { id: string; nombre: string; precio: number; activo: boolean }) {
+    super(
+      `Ya existe "${producto.nombre}" (${producto.activo ? "" : "inactivo, "}¢${producto.precio.toLocaleString("es-CR")}). ` +
+        "Use otro nombre: agregue la marca, el tamaño o el color.",
+    );
+  }
+}
+
+/** Otro producto con ese nombre ("Copia", "copia" y "Cópia " son el mismo), o null. Los eliminados no cuentan. */
+export async function productoConNombre(nombre: string, menosId: string | null): Promise<NombreRepetido["producto"] | null> {
+  if (!normalizar(nombre)) return null;
+  const f = (
+    await db().select("SELECT id, nombre, precio, activo FROM productos WHERE nombre_busqueda = ? AND eliminado_en IS NULL AND id IS NOT ? LIMIT 1", [
+      normalizar(nombre),
+      menosId,
+    ])
+  )[0];
+  return f ? { id: String(f.id), nombre: String(f.nombre), precio: Number(f.precio), activo: bool(f.activo) } : null;
+}
+
+async function exigirNombreLibre(nombre: string, menosId: string | null) {
+  const otro = await productoConNombre(nombre, menosId);
+  if (otro) throw new NombreRepetido(otro);
+}
+
 function aProducto(f: Record<string, unknown>): Producto {
   return {
     id: String(f.id),
@@ -67,6 +94,8 @@ export interface FiltroProductos {
   sinBarras?: boolean;
   /** Marcados para revisión por la importación. */
   paraRevisar?: boolean;
+  /** Con el mismo nombre que otro producto (para limpiar repetidos que ya existían). */
+  repetidos?: boolean;
   /** Orden de la lista (por defecto A–Z). Al buscar, lo que coincide exacto por código va primero igual. */
   orden?: OrdenProductos;
   departamentoId?: string;
@@ -87,6 +116,8 @@ export async function buscarProductos(f: FiltroProductos = {}): Promise<{ filas:
   if (f.soloFavoritos) where.push("p.favorito = 1");
   if (f.sinBarras) where.push("NOT EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.tipo = 'barras')");
   if (f.paraRevisar) where.push("p.revisar = 1");
+  if (f.repetidos)
+    where.push("p.nombre_busqueda IN (SELECT nombre_busqueda FROM productos WHERE eliminado_en IS NULL GROUP BY nombre_busqueda HAVING COUNT(*) > 1)");
   const texto = (f.texto ?? "").trim();
   const base = ORDEN_SQL[f.orden ?? "nombre"] ?? ORDEN_SQL.nombre;
   let orden = base;
@@ -208,6 +239,7 @@ export async function crearProducto(
 ): Promise<string> {
   permitir(actor);
   validarDatos(datos);
+  await exigirNombreLibre(datos.nombre, null);
   const id = ulid();
   const ahora = ahoraIso();
   const sentencias: Sentencia[] = [
@@ -246,6 +278,7 @@ export async function editarProducto(actor: Actor, id: string, cambios: Partial<
   for (const k of ["nombre", "departamentoId", "precio", "activo", "cabys", "tasaIva", "exento", "descuentoPct"] as const)
     if (n[k] !== p[k]) (antes[k] = p[k]), (despues[k] = n[k]);
   if (!Object.keys(despues).length) return;
+  if (normalizar(n.nombre) !== normalizar(p.nombre)) await exigirNombreLibre(n.nombre, id);
 
   const sentencias: Sentencia[] = [
     {

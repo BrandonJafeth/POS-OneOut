@@ -297,13 +297,16 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
         .map_err(e)?;
         id
     } else {
-        // Se confirma que el producto sigue vigente y que de verdad es ese (mismo id de la web o mismo slug).
+        // Se confirma que el producto sigue vigente y que de verdad es ese: mismo id de la web, mismo slug,
+        // o creado a mano (sin id de la web) con el mismo nombre, que así queda unido al de la web.
         let id: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM productos WHERE id = ? AND eliminado_en IS NULL AND (web_id = ? OR (web_slug IS NOT NULL AND web_slug = ?))",
+            "SELECT id FROM productos WHERE id = ? AND eliminado_en IS NULL
+               AND (web_id = ? OR (web_slug IS NOT NULL AND web_slug = ?) OR (web_id IS NULL AND nombre_busqueda = ?))",
         )
         .bind(it.producto_id.as_deref().unwrap_or(""))
         .bind(&it.web_id)
         .bind(&it.slug)
+        .bind(normalizar(&it.nombre))
             .fetch_optional(&mut *c)
             .await
             .map_err(e)?;
@@ -641,6 +644,21 @@ mod tests {
         // La pantalla no puede usar "actualizar" para pisar un producto cualquiera.
         let mal = Item { producto_id: Some(otro), slug: "nada".into(), ..act };
         assert!(aplicar(&bd.pool, &dueno, PIN_DUENO, &pedido("todo", vec![mal])).await.unwrap_err().contains("ya no existe"));
+    }
+
+    #[tokio::test]
+    async fn el_creado_a_mano_con_el_mismo_nombre_se_une_con_el_de_la_web() {
+        let (bd, _, dueno, _) = base_con_usuarios().await;
+        let p = &bd.pool;
+        sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES ('MANO', 'Cartulina', 'cartulina', ?, 80)").bind(D01).execute(p).await.unwrap();
+        let unir = Item { accion: "actualizar".into(), producto_id: Some("MANO".into()), codigo: None, ..item(2, "W8", "cartulina", 100) };
+        // Con otro nombre no se deja: "actualizar" no sirve para pisar un producto cualquiera.
+        assert!(aplicar(p, &dueno, PIN_DUENO, &pedido("todo", vec![Item { nombre: "Otra cosa".into(), ..unir.clone() }])).await.unwrap_err().contains("ya no existe"));
+        aplicar(p, &dueno, PIN_DUENO, &pedido("todo", vec![unir])).await.unwrap();
+        let (web, precio): (String, i64) = sqlx::query_as("SELECT web_id, precio FROM productos WHERE id = 'MANO'").fetch_one(p).await.unwrap();
+        assert_eq!((web.as_str(), precio), ("W8", 100));
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM productos").fetch_one(p).await.unwrap();
+        assert_eq!(n, 1);
     }
 
     #[tokio::test]

@@ -10,10 +10,12 @@ import {
   eliminarProducto,
   obtenerProducto,
   marcarFavoritos,
+  NombreRepetido,
   productoPorCodigo,
   quitarCodigo,
 } from "../src/db/productos";
 import type { Actor } from "../src/tipos";
+import type { DatabaseSync } from "node:sqlite";
 import { baseDePrueba, entradasBitacora as listarBitacora } from "./driverNode";
 
 const DUENO: Actor = { id: "D", rol: "dueno" };
@@ -21,11 +23,27 @@ const CAJERO: Actor = { id: "C", rol: "cajero" };
 const LIBRERIA = "00000000000000000000000D01";
 const OFICINA = "00000000000000000000000D02";
 
+let sqlite: DatabaseSync;
 beforeEach(() => {
-  baseDePrueba({ rol: "dueno", usuarioId: DUENO.id });
+  sqlite = baseDePrueba({ rol: "dueno", usuarioId: DUENO.id }).sqlite;
 });
 
 describe("productos", () => {
+  it("no deja dos productos con el mismo nombre (sin contar mayúsculas, tildes ni espacios)", async () => {
+    const copia = await crearProducto(DUENO, { nombre: "Copia", departamentoId: OFICINA, precio: 50 });
+    for (const nombre of ["Copia", "copia", "  CÓPIA "]) await expect(crearProducto(DUENO, { nombre, departamentoId: OFICINA, precio: 50 })).rejects.toBeInstanceOf(NombreRepetido);
+    // Renombrar a uno que ya existe, tampoco; editar otra cosa o cambiar solo mayúsculas del propio, sí.
+    const otra = await crearProducto(DUENO, { nombre: "Copia color", departamentoId: OFICINA, precio: 100 });
+    await expect(editarProducto(DUENO, otra, { nombre: "COPIA" })).rejects.toThrow("Ya existe");
+    await editarProducto(DUENO, copia, { nombre: "copia", precio: 60 });
+    // Eliminado, el nombre queda libre.
+    await eliminarProducto(DUENO, copia);
+    await expect(crearProducto(DUENO, { nombre: "Copia", departamentoId: OFICINA, precio: 50 })).resolves.toBeTruthy();
+    // Los repetidos que ya había (p. ej. importados) se encuentran con el filtro.
+    sqlite.prepare("UPDATE productos SET nombre_busqueda = 'copia' WHERE id = ?").run(otra);
+    expect((await buscarProductos({ repetidos: true })).total).toBe(2);
+  });
+
   it("busca por nombre sin tildes ni mayúsculas y por código", async () => {
     await crearProducto(DUENO, { nombre: "Lápiz HB Mongol", departamentoId: OFICINA, precio: 350 }, [{ codigo: "07TOC", tipo: "manual" }]);
     await crearProducto(DUENO, { nombre: "Cuaderno cosido", departamentoId: LIBRERIA, precio: 1250 });
