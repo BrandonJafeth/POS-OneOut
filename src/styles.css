@@ -3125,6 +3125,11 @@ button.toast-cerrar:hover {
   margin-top: 2px;
 }
 
+/* Mismo aire que deja un .campo, para que el botón del modal no quede pegado. */
+.modal-cuerpo .opcion {
+  margin-bottom: var(--e4);
+}
+
 .opcion > span {
   display: flex;
   flex-direction: column;
