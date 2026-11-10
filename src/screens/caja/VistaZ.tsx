@@ -301,6 +301,7 @@ function LecturaDia({ r }: { r: Detalle["resumen"] }) {
                   </tr>
                   {c.precioLibre > 0 && <Fila k={`Venta simple (${c.precioLibre})`} v={monto(c.montoPrecioLibre)} />}
                   {c.descuentos > 0 && <Fila k="Descuentos dados" v={monto(c.descuentos)} />}
+                  {!!c.descuentosProducto && <Fila k="Descuentos de producto" v={monto(c.descuentosProducto)} />}
                   {c.lineasQuitadas > 0 && <Fila k={`Quitado antes de cobrar (${c.lineasQuitadas})`} v={monto(c.montoQuitado)} />}
                 </Fragment>
               ))}

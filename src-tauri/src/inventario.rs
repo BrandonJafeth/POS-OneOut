@@ -1104,7 +1104,7 @@ mod tests {
     }
 
     fn linea(pid: Option<&str>, cantidad: i64) -> Linea {
-        Linea { id: ulid(), producto_id: pid.map(Into::into), codigo: None, descripcion: "x".into(), departamento_id: DEP.into(), cantidad, precio_unitario: 1000, descuento: 0, tasa_iva: 13.0, exento: false }
+        Linea { id: ulid(), producto_id: pid.map(Into::into), codigo: None, descripcion: "x".into(), departamento_id: DEP.into(), cantidad, precio_unitario: 1000, descuento: 0, descuento_catalogo: 0, tasa_iva: 13.0, exento: false }
     }
 
     fn est(lineas: Vec<Linea>) -> Estado {

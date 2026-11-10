@@ -17,6 +17,9 @@ pub struct Linea {
     pub cantidad: i64,
     pub precio_unitario: i64,
     pub descuento: i64,
+    /// % de descuento del producto cuando se agregó (Rust lo compara con el del catálogo al cobrar).
+    #[serde(default)]
+    pub descuento_catalogo: i64,
     pub tasa_iva: f64,
     pub exento: bool,
 }
@@ -234,7 +237,7 @@ mod tests {
     use super::*;
 
     fn linea(precio: i64, cantidad: i64, descuento: i64) -> Linea {
-        Linea { id: "x".into(), producto_id: None, codigo: None, descripcion: "A".into(), departamento_id: "D".into(), cantidad, precio_unitario: precio, descuento, tasa_iva: 13.0, exento: false }
+        Linea { id: "x".into(), producto_id: None, codigo: None, descripcion: "A".into(), departamento_id: "D".into(), cantidad, precio_unitario: precio, descuento, descuento_catalogo: 0, tasa_iva: 13.0, exento: false }
     }
     fn formas() -> Vec<Forma> {
         vec![

@@ -143,6 +143,7 @@ export function lineasLectura(r: Resumen, cols: number): LineaDoc[] {
       l.push({ t: cortar(c.usuario, cols), b: true });
       if (c.precioLibre) l.push({ t: lr(`  Venta simple (${c.precioLibre})`, monto(c.montoPrecioLibre), cols) });
       if (c.descuentos) l.push({ t: lr("  Descuentos dados", monto(c.descuentos), cols) });
+      if (c.descuentosProducto) l.push({ t: lr("  Desc. de producto", monto(c.descuentosProducto), cols) });
       if (c.lineasQuitadas) l.push({ t: lr(`  Quitado antes de cobrar (${c.lineasQuitadas})`, monto(c.montoQuitado), cols) });
     }
     if (x.control.some((c) => c.lineasQuitadas)) wrap(`Quitado: solo líneas de ${monto(x.umbralQuitar)} o más.`, cols).forEach((y) => l.push({ t: y }));

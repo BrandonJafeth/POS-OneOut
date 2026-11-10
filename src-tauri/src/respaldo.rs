@@ -719,7 +719,7 @@ pub mod tests {
         let cli = crate::clientes::crear(p, &dueno, &crate::clientes::Datos { nombre: "Cliente Prueba".into(), telefono: "8000-0000".into(), ..Default::default() }, true, "1").await.unwrap();
         abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
         for (forma, cant) in [("0000000000000000000000FP01", 2), ("0000000000000000000000FP02", 1)] {
-            let l = Linea { id: crate::util::ulid(), producto_id: Some("PFIX1".into()), codigo: None, descripcion: "Cuaderno de prueba".into(), departamento_id: "00000000000000000000000D01".into(), cantidad: cant, precio_unitario: 1000, descuento: 0, tasa_iva: 13.0, exento: false };
+            let l = Linea { id: crate::util::ulid(), producto_id: Some("PFIX1".into()), codigo: None, descripcion: "Cuaderno de prueba".into(), departamento_id: "00000000000000000000000D01".into(), cantidad: cant, precio_unitario: 1000, descuento: 0, descuento_catalogo: 0, tasa_iva: 13.0, exento: false };
             let mut e = Estado { lineas: vec![l], ..Default::default() };
             if cant == 1 {
                 e.cliente = serde_json::from_value(json!({"id": cli.id, "nombre": "Cliente Prueba"})).ok();

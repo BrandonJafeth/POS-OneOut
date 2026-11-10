@@ -199,7 +199,7 @@ export interface Resumen {
 /** Lectura del día (estadisticas.rs). */
 export interface Estadisticas {
   /** Por usuario: venta simple (precio a mano), descuentos dados y líneas quitadas antes de cobrar. */
-  control: { usuario: string; precioLibre: number; montoPrecioLibre: number; descuentos: number; lineasQuitadas: number; montoQuitado: number }[];
+  control: { usuario: string; precioLibre: number; montoPrecioLibre: number; descuentos: number; descuentosProducto?: number; lineasQuitadas: number; montoQuitado: number }[];
   /** Desde qué monto una línea quitada queda anotada. */
   umbralQuitar: number;
   porHora: { hora: number; ventas: number; total: number }[];

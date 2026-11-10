@@ -31,7 +31,7 @@ fn formas() -> Vec<Forma> {
 }
 
 fn linea(precio: i64, cantidad: i64, descuento: i64) -> Linea {
-    Linea { id: ulid(), producto_id: None, codigo: None, descripcion: "x".into(), departamento_id: DEP.into(), cantidad, precio_unitario: precio, descuento, tasa_iva: 13.0, exento: false }
+    Linea { id: ulid(), producto_id: None, codigo: None, descripcion: "x".into(), departamento_id: DEP.into(), cantidad, precio_unitario: precio, descuento, descuento_catalogo: 0, tasa_iva: 13.0, exento: false }
 }
 
 fn pago(f: &str, m: i64) -> PagoEntrada {

@@ -104,6 +104,9 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
     if (precioNum === null) return setError("Precio inválido: use solo números (ej. 1500 o 1.500)");
     if (!Number.isFinite(tasaNum)) return setError("Tasa de IVA inválida");
     if (!(descuentoNum <= 100)) return setError("El descuento va de 0 a 100 %");
+    // Un 50 % o más casi siempre es un dedo (5 → 50); se vende así sin pedir PIN, por eso se confirma.
+    if (descuentoNum >= 50 && descuentoNum !== prod?.descuentoPct && !(await confirmar({ titulo: `¿Descuento de ${descuentoNum} %?`, texto: "Se aplica solo en cada venta de este producto, sin pedir PIN.", aceptar: `Guardar con ${descuentoNum} %`, peligro: true })))
+      return;
     if (precioNum === 0 && prod?.precio !== 0 && !(await confirmar({ titulo: "¿Precio ¢0?", texto: "El producto se venderá gratis cada vez que se escanee o se toque.", aceptar: "Guardar en ¢0", peligro: true })))
       return;
     const datos = { nombre, departamentoId, precio: precioNum, activo, cabys: cabys.trim() || null, tasaIva: tasaNum, exento, descuentoPct: descuentoNum };

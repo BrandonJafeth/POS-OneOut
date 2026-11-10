@@ -321,7 +321,8 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     // Precio, IVA y departamento de un producto salen de la base, no de la pantalla.
     let mut lineas = est.lineas.clone();
     // Descuento fijo del producto (lo puso el dueño en el catálogo): no cuenta contra el tope del rol.
-    let mut del_catalogo = 0i64;
+    // Por línea, en colones: se guarda aparte para que el Z no se lo cargue al cajero.
+    let mut catalogo: Vec<i64> = vec![];
     for l in lineas.iter_mut() {
         if let Some(pid) = l.producto_id.as_deref() {
             let p = sqlx::query("SELECT nombre, precio, tasa_iva, exento, departamento_id, activo, descuento_pct FROM productos WHERE id = ? AND eliminado_en IS NULL")
@@ -341,8 +342,12 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
             l.exento = p.get::<i64, _>("exento") == 1;
             l.departamento_id = p.get("departamento_id");
             let pct: i64 = p.get("descuento_pct");
-            del_catalogo += l.descuento.min(((calculo::bruto(l) * pct) as f64 / 100.0).round() as i64);
+            if pct != l.descuento_catalogo {
+                return Err(format!("\"{}\": el descuento del producto cambió, vuelva a agregarlo", l.descripcion));
+            }
+            catalogo.push(l.descuento.min(((calculo::bruto(l) * pct) as f64 / 100.0).round() as i64));
         } else {
+            catalogo.push(0);
             let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM departamentos WHERE id = ? AND eliminado_en IS NULL").bind(&l.departamento_id).fetch_optional(&mut *tx).await.map_err(e)?;
             if ok.is_none() {
                 return Err(format!("\"{}\": departamento inválido", l.descripcion));
@@ -366,7 +371,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     let fs = formas(&mut tx).await?;
     let con_efectivo = pagos.is_empty() || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
     let tot = calculo::totales(&e2, if con_efectivo { paso } else { 1 });
-    let pct_tope = if tot.bruto > 0 { ((tot.descuento_lineas - del_catalogo + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 };
+    let pct_tope = if tot.bruto > 0 { ((tot.descuento_lineas - catalogo.iter().sum::<i64>() + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 };
     let mut autorizado_por = None;
     if pct_tope > tope + 1e-9 {
         let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
@@ -442,7 +447,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     for (i, l) in e2.lineas.iter().enumerate() {
         sqlx::query(
             "INSERT INTO venta_lineas (id, venta_id, producto_id, codigo, descripcion, departamento_id, cantidad, precio_unitario,
-               descuento, total, tasa_iva, iva, orden, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               descuento, descuento_catalogo, total, tasa_iva, iva, orden, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(ulid())
         .bind(&venta_id)
@@ -453,6 +458,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .bind(l.cantidad)
         .bind(l.precio_unitario)
         .bind(l.descuento)
+        .bind(catalogo[i])
         .bind(calculo::importe(l))
         .bind(if l.exento { 0.0 } else { l.tasa_iva })
         .bind(tot.iva_lineas[i])
@@ -1095,7 +1101,7 @@ mod tests {
     }
 
     fn linea(pid: &str, nombre: &str, dep: &str, precio: i64, cantidad: i64, descuento: i64) -> Linea {
-        Linea { id: ulid(), producto_id: Some(pid.into()), codigo: None, descripcion: nombre.into(), departamento_id: dep.into(), cantidad, precio_unitario: precio, descuento, tasa_iva: 13.0, exento: false }
+        Linea { id: ulid(), producto_id: Some(pid.into()), codigo: None, descripcion: nombre.into(), departamento_id: dep.into(), cantidad, precio_unitario: precio, descuento, descuento_catalogo: 0, tasa_iva: 13.0, exento: false }
     }
 
     fn est(pid: &str, dep: &str, precio: i64, cantidad: i64, descuento: i64) -> Estado {
@@ -1199,9 +1205,18 @@ mod tests {
         // Descuento fijo del producto (30 %, lo puso el dueño): el cajero lo da sin PIN; lo que pase de
         // ese 30 % sí cuenta contra su tope.
         sqlx::query("UPDATE productos SET descuento_pct = 30 WHERE id = ?").bind(&pid).execute(p).await.unwrap();
-        vender(p, &cajero, &est(&pid, &dep, 1000, 2, 600), &[pago(EF, 1400)]).await;
+        let con_pct = |desc: i64, pct: i64| {
+            let mut x = est(&pid, &dep, 1000, 2, desc);
+            x.lineas[0].descuento_catalogo = pct;
+            x
+        };
+        let r = vender(p, &cajero, &con_pct(600, 30), &[pago(EF, 1400)]).await;
+        let guardado: i64 = sqlx::query_scalar("SELECT descuento_catalogo FROM venta_lineas WHERE venta_id = ?").bind(&r.venta_id).fetch_one(p).await.unwrap();
+        assert_eq!(guardado, 600);
         let esp2 = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
-        assert!(cobrar(p, &cajero, CAJA_1, &esp2.id, &est(&pid, &dep, 1000, 2, 900), &[pago(EF, 1100)]).await.unwrap_err().contains("PIN"));
+        assert!(cobrar(p, &cajero, CAJA_1, &esp2.id, &con_pct(900, 30), &[pago(EF, 1100)]).await.unwrap_err().contains("PIN"));
+        // El dueño cambió el % con la venta en espera: se vuelve a agregar (como cuando cambia el precio).
+        assert!(cobrar(p, &cajero, CAJA_1, &esp2.id, &con_pct(600, 20), &[pago(EF, 1400)]).await.unwrap_err().contains("descuento del producto cambió"));
     }
 
     #[tokio::test]
@@ -1495,16 +1510,21 @@ mod tests {
         // Dueño: una venta simple (precio escrito a mano) y otra con lápices.
         let libre = Linea { producto_id: None, ..linea("x", "Regalo", LIBRERIA, 2500, 1, 0) };
         vender(p, &dueno, &Estado { lineas: vec![libre], ..Default::default() }, &[pago(EF, 2500)]).await;
-        vender(p, &dueno, &est(&lapiz, LIBRERIA, 300, 1, 0), &[pago(TJ, 300)]).await;
+        // Lápiz con 10 % fijo de producto: va aparte, no como descuento que dio el dueño.
+        sqlx::query("UPDATE productos SET descuento_pct = 10 WHERE id = ?").bind(&lapiz).execute(p).await.unwrap();
+        let mut con_pct = est(&lapiz, LIBRERIA, 300, 1, 30);
+        con_pct.lineas[0].descuento_catalogo = 10;
+        vender(p, &dueno, &con_pct, &[pago(TJ, 270)]).await;
 
         let t = caja::turno_abierto(&mut p.acquire().await.unwrap(), CAJA_1).await.unwrap().unwrap();
         let x = detalle(p, &dueno, &t.id).await.unwrap().resumen.estadisticas;
         let k = |u: &str| x.control.iter().find(|c| c.usuario == u).cloned().unwrap_or_default();
         assert_eq!((k("Luis").descuentos, k("Luis").lineas_quitadas, k("Luis").monto_quitado, k("Luis").precio_libre), (90, 1, 12000, 0));
+        assert_eq!((k("Ana").descuentos, k("Ana").descuentos_producto), (0, 30));
         assert_eq!((k("Ana").precio_libre, k("Ana").monto_precio_libre, k("Ana").descuentos), (1, 2500, 0));
         assert_eq!(x.por_hora.iter().map(|h| h.ventas).sum::<i64>(), 3);
-        assert_eq!(x.tiquete_promedio, (12810 + 2500 + 300) / 3);
-        assert_eq!((x.hoy.ventas, x.hoy.total, x.semana_anterior.ventas), (3, 15610, 0));
+        assert_eq!(x.tiquete_promedio, (12810 + 2500 + 270) / 3);
+        assert_eq!((x.hoy.ventas, x.hoy.total, x.semana_anterior.ventas), (3, 15580, 0));
         // Más vendidos: por cantidad, solo del catálogo (la venta simple ya sale en Control).
         assert_eq!(x.top_productos.iter().map(|t| (t.producto.as_str(), t.cantidad)).collect::<Vec<_>>(), [("Lápiz", 4), ("Calculadora", 1)]);
         // Con el turno abierto, el cajero no recibe nada de esto.

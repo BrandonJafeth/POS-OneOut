@@ -17,8 +17,10 @@ pub struct Control {
     /// Líneas de "Venta simple" (precio escrito a mano, sin producto del catálogo).
     pub precio_libre: i64,
     pub monto_precio_libre: i64,
-    /// Descuentos de línea y al total que dio.
+    /// Descuentos de línea y al total que dio (sin los del producto).
     pub descuentos: i64,
+    /// Descuentos fijos de producto que puso el dueño en el catálogo (no los decidió el cajero).
+    pub descuentos_producto: i64,
     /// Líneas quitadas de una venta antes de cobrarla (solo las de ¢umbral o más quedan anotadas).
     pub lineas_quitadas: i64,
     pub monto_quitado: i64,
@@ -85,7 +87,8 @@ pub async fn calcular(c: &mut SqliteConnection, t: &Turno) -> Res<Estadisticas> 
         k.monto_precio_libre = f.get("monto");
     }
     let descuentos = sqlx::query(&format!(
-        "SELECT u.nombre, COALESCE(SUM(v.descuento), 0) + COALESCE(SUM((SELECT SUM(l.descuento) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL)), 0) AS d
+        "SELECT u.nombre, COALESCE(SUM(v.descuento), 0) + COALESCE(SUM((SELECT SUM(l.descuento - l.descuento_catalogo) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL)), 0) AS d,
+           COALESCE(SUM((SELECT SUM(l.descuento_catalogo) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL)), 0) AS dp
          FROM ventas v JOIN usuarios u ON u.id = v.usuario_id WHERE {VENTAS_DEL_TURNO} GROUP BY u.id"
     ))
     .bind(&t.id)
@@ -93,9 +96,11 @@ pub async fn calcular(c: &mut SqliteConnection, t: &Turno) -> Res<Estadisticas> 
     .await
     .map_err(e)?;
     for f in &descuentos {
-        let d: i64 = f.get("d");
-        if d > 0 {
-            control.entry(f.get("nombre")).or_default().descuentos = d;
+        let (d, dp): (i64, i64) = (f.get("d"), f.get("dp"));
+        if d > 0 || dp > 0 {
+            let k = control.entry(f.get("nombre")).or_default();
+            k.descuentos = d;
+            k.descuentos_producto = dp;
         }
     }
     // ventas::guardar_espera anota cada línea quitada de ¢umbral o más; aquí, las de esta caja en el turno.
