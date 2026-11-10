@@ -50,6 +50,9 @@ export const SIN_EXISTENCIA = "SIN_EXISTENCIA: ";
 export const faltantesVenta = (lineas: { productoId?: string | null; cantidad: number }[]) =>
   invocar<string[]>("venta_faltantes", { lineas: lineas.map((l) => [l.productoId ?? null, l.cantidad]) });
 
+/** Tiquete que ya usó esa referencia con esa forma de pago ("A12 del 2026-11-10"), o null. */
+export const referenciaUsada = (formaPagoId: string, referencia: string) => invocar<string | null>("venta_referencia_usada", { formaPagoId, referencia });
+
 /** Sin caja abierta de hoy, Rust lo rechaza ("La caja está cerrada…"). */
 export function cobrarVenta(_actor: Actor, esperaId: string, estado: EstadoEspera, pagos: PagoEntrada[], pinExistencia?: string): Promise<ResultadoCobro> {
   return invocar<ResultadoCobro>("venta_cobrar", { esperaId, estado, pagos, pinExistencia: pinExistencia ?? null });

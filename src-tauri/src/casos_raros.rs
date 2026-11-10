@@ -145,3 +145,39 @@ async fn descartar_una_venta_en_espera_con_productos() {
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'venta_espera.descartar'").fetch_one(p).await.unwrap();
     assert_eq!(n, 1);
 }
+
+#[tokio::test]
+async fn comprobante_sinpe_repetido_avisa_y_queda_en_bitacora() {
+    let (bd, _, _, cajero) = base_con_usuarios().await;
+    let p = &bd.pool;
+    let pid = prod(p, 1000).await;
+    caja::abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+    let sinpe = |r: &str| [PagoEntrada { referencia: Some(r.into()), ..pago(SP, 1000) }];
+    let uno = || est(vec![linea(Some(&pid), 1000, 1, 0)]);
+    assert_eq!(ventas::referencia_usada(p, &cajero, SP, "88123456").await.unwrap(), None);
+    let v = cobrar(p, &cajero, &uno(), &sinpe("88123456")).await.unwrap();
+    // Mismo comprobante otra vez: se avisa con el tiquete donde ya se usó (sin importar espacios).
+    let aviso = ventas::referencia_usada(p, &cajero, SP, " 88123456 ").await.unwrap().unwrap();
+    assert!(aviso.starts_with(&v.numero), "{aviso}");
+    // Otra forma de pago, otra referencia o una muy corta: no avisa.
+    assert_eq!(ventas::referencia_usada(p, &cajero, TJ, "88123456").await.unwrap(), None);
+    assert_eq!(ventas::referencia_usada(p, &cajero, SP, "88123457").await.unwrap(), None);
+    assert_eq!(ventas::referencia_usada(p, &cajero, SP, "88").await.unwrap(), None);
+    // No se bloquea, pero el dueño lo ve en la bitácora.
+    cobrar(p, &cajero, &uno(), &sinpe("88123456")).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'venta.referencia_repetida'").fetch_one(p).await.unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn caja_de_ayer_deja_anotar_el_gasto_olvidado_pero_no_vender() {
+    let (bd, _, _, cajero) = base_con_usuarios().await;
+    let p = &bd.pool;
+    let pid = prod(p, 1000).await;
+    caja::abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
+    sqlx::query("UPDATE caja_turnos SET dia = '2020-01-01'").execute(p).await.unwrap();
+    assert!(cobrar(p, &cajero, &est(vec![linea(Some(&pid), 1000, 1, 0)]), &[pago(EF, 1000)]).await.unwrap_err().contains("Quedó abierta"));
+    assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.unwrap_err().contains("Quedó abierta"));
+    caja::movimiento(p, &cajero, CAJA_1, &salida(1000), None).await.unwrap();
+    assert_eq!(caja::cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 4)]), "").await.unwrap().diferencia, Some(0));
+}

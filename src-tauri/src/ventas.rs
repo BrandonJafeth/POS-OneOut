@@ -234,6 +234,32 @@ async fn banco_valido(c: &mut SqliteConnection, id: Option<&str>) -> Res<()> {
     Ok(())
 }
 
+/// Tiquete vigente que ya usó esa referencia con esa forma de pago ("A123 del 2026-11-10").
+/// El mismo comprobante de SINPE o transferencia mostrado dos veces es el fraude más común: se
+/// avisa (no se bloquea: dos bancos pueden repetir un número) y queda en la bitácora.
+async fn referencia_repetida(c: &mut SqliteConnection, forma_pago_id: &str, referencia: &str) -> Res<Option<String>> {
+    let r = referencia.trim();
+    if r.chars().count() < 4 {
+        return Ok(None); // muy corta para decir que es el mismo comprobante
+    }
+    sqlx::query_scalar(
+        "SELECT v.numero || ' del ' || v.dia FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id
+         WHERE p.forma_pago_id = ? AND p.referencia = ? COLLATE NOCASE AND p.eliminado_en IS NULL AND v.estado = 'completada' AND v.eliminado_en IS NULL
+         ORDER BY v.fecha DESC LIMIT 1",
+    )
+    .bind(forma_pago_id)
+    .bind(r)
+    .fetch_optional(c)
+    .await
+    .map_err(e)
+}
+
+/// Para avisar en el cobro, antes de confirmar.
+pub async fn referencia_usada(pool: &SqlitePool, a: &Actor, forma_pago_id: &str, referencia: &str) -> Res<Option<String>> {
+    a.exigir("venta", "vender")?;
+    referencia_repetida(&mut *pool.acquire().await.map_err(e)?, forma_pago_id, referencia).await
+}
+
 pub async fn tope_descuento(pool: &SqlitePool, rol: Rol) -> f64 {
     config::valor(pool, "descuento_max_pct").await.and_then(|v| v.get(rol.como_str()).and_then(|x| x.as_f64())).unwrap_or(if rol == Rol::Cajero { 10.0 } else { 100.0 })
 }
@@ -360,8 +386,14 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     if rp.faltante > 0 {
         return Err(format!("Todavía faltan {} por pagar.", crate::util::colones(rp.faltante)));
     }
+    let mut repetidas = vec![];
     for p in pagos {
         banco_valido(&mut tx, p.banco_id.as_deref()).await?;
+        if let Some(r) = p.referencia.as_deref() {
+            if let Some(tiquete) = referencia_repetida(&mut tx, &p.forma_pago_id, r).await? {
+                repetidas.push(json!({"referencia": r.trim(), "monto": p.monto, "yaUsadaEn": tiquete}));
+            }
+        }
     }
 
     let venta_id = ulid();
@@ -459,6 +491,9 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
     if !sin_existencia.is_empty() {
         bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
+    }
+    if !repetidas.is_empty() {
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.referencia_repetida", "venta", Some(&venta_id), &json!({"pagos": repetidas})).await?;
     }
     if let Some(d) = &autorizado_por {
         bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (tot.pct_descuento * 10.0).round() / 10.0, "autorizadoPor": d})).await?;

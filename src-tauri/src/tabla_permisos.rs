@@ -55,6 +55,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("venta_espera_descartar", true, true, false),
     ("venta_autorizar_descuento", true, true, false),
     ("venta_faltantes", true, true, false),
+    ("venta_referencia_usada", true, true, false),
     ("venta_cobrar", true, true, false),
     ("venta_obtener", true, true, false),
     ("venta_listar_dia", true, true, false),
@@ -140,6 +141,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("venta_espera_descartar", denegado(ventas::descartar_espera(p, a, x).await));
     s("venta_autorizar_descuento", denegado(ventas::autorizar_descuento(p, a, x, 50.0, "000000").await));
     s("venta_faltantes", denegado(ventas::faltantes(p, a, CAJA_1, &[]).await));
+    s("venta_referencia_usada", denegado(ventas::referencia_usada(p, a, x, "12345").await));
     s("venta_cobrar", denegado(ventas::cobrar_con(p, a, CAJA_1, x, &de(json!({"lineas": [], "descuentoTotal": 0, "requiereFactura": false})), &[], None).await));
     s("venta_obtener", denegado(ventas::obtener(p, a, x).await));
     s("venta_listar_dia", denegado(ventas::listar_dia(p, a, CAJA_1, "2026-01-01").await));

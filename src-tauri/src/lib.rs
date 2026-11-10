@@ -509,6 +509,12 @@ async fn venta_faltantes(st: St<'_>, lineas: Vec<(Option<String>, i64)>) -> Res<
 }
 
 #[tauri::command]
+async fn venta_referencia_usada(st: St<'_>, forma_pago_id: String, referencia: String) -> Res<Option<String>> {
+    let a = st.actor().await?;
+    ventas::referencia_usada(st.pool()?, &a, &forma_pago_id, &referencia).await
+}
+
+#[tauri::command]
 async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>, pin_existencia: Option<String>) -> Res<ventas::ResultadoCobro> {
     let a = st.actor().await?;
     ventas::cobrar_con(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos, pin_existencia.as_deref()).await
@@ -1023,6 +1029,18 @@ pub fn run() {
             let dir = app.path().data_dir()?.join(CARPETA_DATOS);
             let _ = std::fs::create_dir_all(&dir);
             diagnostico::anotar_cierres(&dir);
+            // Un fallo interno (panic) cierra el programa en la versión instalada (panic = "abort"):
+            // que no desaparezca sin explicación. En desarrollo el comando se quedaba sin responder
+            // y el botón colgado; se cierra igual, para que el fallo se vea y no se esconda.
+            #[cfg(windows)]
+            {
+                let anterior = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| {
+                    anterior(info);
+                    avisar("El Punto de Venta tuvo un error interno y se va a cerrar.\n\nLo que ya se cobró y las ventas en espera quedaron guardados. Ábralo de nuevo y avise al técnico: el detalle quedó en el registro de errores.");
+                    std::process::abort();
+                }));
+            }
             // Versiones anteriores: datos en la carpeta del identifier → se trasladan una vez.
             let (bd, clave) = match respaldo::trasladar_datos(&app.path().app_config_dir()?, &dir) {
                 Err(err) => (Err(err), None),
@@ -1124,6 +1142,7 @@ pub fn run() {
             venta_espera_descartar,
             venta_autorizar_descuento,
             venta_faltantes,
+            venta_referencia_usada,
             venta_cobrar,
             venta_obtener,
             venta_listar_dia,

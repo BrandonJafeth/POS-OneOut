@@ -190,6 +190,7 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `venta_espera_descartar` | ✔ | ✔ | — |
 | `venta_autorizar_descuento` | ✔ | ✔ | — |
 | `venta_faltantes` | ✔ | ✔ | — |
+| `venta_referencia_usada` | ✔ | ✔ | — |
 | `venta_cobrar` | ✔ | ✔ | — |
 | `venta_obtener` | ✔ | ✔ | — |
 | `venta_listar_dia` | ✔ | ✔ | — |

@@ -411,6 +411,9 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
         None
     };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    // A propósito NO se exige que el turno sea de hoy (vender y «no venta» sí): en una caja que
+    // quedó abierta de ayer hay que poder anotar el gasto o el ingreso olvidado antes de cerrarla,
+    // para que el conteo cuadre.
     let t = turno_abierto(&mut tx, caja_id).await?.ok_or("La caja está cerrada: ábrala primero.")?;
     let comp = compartido(&mut tx).await;
     puede_operar(a, &t, comp)?;

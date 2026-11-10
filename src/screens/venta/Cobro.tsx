@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Modal from "../../components/Modal";
 import Mensaje, { textoError } from "../../components/Mensaje";
+import { referenciaUsada } from "../../db/ventas";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import { useEscaner } from "../../lib/useEscaner";
@@ -79,6 +80,25 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   // Pago dividido: una fila sin monto es un olvido (no un 0), salvo el efectivo que cubre lo que falta.
   const sinMonto = mixto ? filas.filter((f, i) => f !== filaAuto && pagos[i].monto <= 0) : [];
   const r = useMemo(() => calcularPagos(total, pagosEfectivos, p.formas), [total, JSON.stringify(pagosEfectivos), p.formas]);
+  // Comprobante repetido (el mismo SINPE mostrado dos veces): se avisa, no se bloquea.
+  const [repetidas, setRepetidas] = useState<string[]>([]);
+  const referencias = filas.map((f) => `${f.formaPagoId}|${(f.referencia ?? "").trim()}`).join("\n");
+  useEffect(() => {
+    let vivo = true;
+    const t = setTimeout(async () => {
+      const avisos: string[] = [];
+      for (const f of filas) {
+        const ref = (f.referencia ?? "").trim();
+        const tiquete = ref.length >= 4 ? await referenciaUsada(f.formaPagoId, ref).catch(() => null) : null;
+        if (tiquete) avisos.push(`La referencia ${ref} ya se usó en el tiquete ${tiquete}.`);
+      }
+      if (vivo) setRepetidas(avisos);
+    }, 300);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
+  }, [referencias]);
   const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
   const nuevaFila = useRef<HTMLInputElement>(null);
 
@@ -259,6 +279,11 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
         {r.vuelto > VUELTO_GRANDE && (
           <Alert tono="aviso" titulo={`Vuelto de ${monto(r.vuelto)}`}>
             Revise que de verdad recibió {monto(r.pagado)}: un cero de más da un vuelto que sale de la gaveta.
+          </Alert>
+        )}
+        {repetidas.length > 0 && (
+          <Alert tono="aviso" titulo="Comprobante repetido">
+            {repetidas.join(" ")} Revise en el banco que este pago sí entró antes de entregar.
           </Alert>
         )}
         {sinMonto.length > 0 && (
