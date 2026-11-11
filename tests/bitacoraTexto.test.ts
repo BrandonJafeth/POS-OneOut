@@ -19,6 +19,13 @@ describe("bitácora en palabras", () => {
     expect(falta.importante).toBe(true);
   });
 
+  it("entrar, consultar clientes o cambiar el tema son rutina (se ocultan); lo importante nunca", () => {
+    expect(describir(entrada("login.ok", {})).rutina).toBe(true);
+    expect(describir(entrada("config.cambiar", { despues: "oscuro" }, "tema"))).toMatchObject({ rutina: true, texto: "Cambió el tema de la pantalla a oscuro." });
+    expect(describir(entrada("respaldo.automatico", { verificado: false })).rutina).toBe(false);
+    expect(describir(entrada("venta.anular", { total: 1 })).rutina).toBe(false);
+  });
+
   it("una acción nueva o un detalle raro no rompe la pantalla", () => {
     expect(describir(entrada("algo.nuevo", null)).texto).toContain("algo.nuevo");
     expect(() => describir(entrada("caja.salida", "texto"))).not.toThrow();

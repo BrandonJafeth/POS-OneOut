@@ -193,7 +193,8 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   facturas: "Pendientes de factura electrónica",
   caja: "Caja: abrir, movimientos, no venta, cerrar (conteo ciego)",
   "caja.admin": "Caja: totales en vivo, cortes, todos los turnos, reabrir, anular",
-  impresoras: "Impresoras y gaveta",
+  impresoras: "Impresoras: agregar, cambiar, quitar y gaveta",
+  "impresoras.asignar": "Impresoras: ver, probar y asignar documentos",
   inventario: "Inventario: existencias, entradas, ajustes, conteos, costos",
 };
 

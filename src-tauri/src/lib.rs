@@ -297,10 +297,10 @@ async fn negocio_logo(st: St<'_>, logo: Option<negocio::Logo>) -> Res<()> {
 }
 
 #[tauri::command]
-async fn bitacora_listar(st: St<'_>, limite: i64, entidad: Option<String>) -> Res<Vec<bitacora::Entrada>> {
+async fn bitacora_listar(st: St<'_>, limite: i64, entidad: Option<String>, desde: Option<String>, hasta: Option<String>) -> Res<Vec<bitacora::Entrada>> {
     let a = st.actor().await?;
     a.exigir("reportes", "ver la bitácora")?;
-    bitacora::listar(st.pool()?, limite.clamp(1, 2000), entidad.as_deref()).await
+    bitacora::listar(st.pool()?, limite.clamp(1, 2000), entidad.as_deref(), desde.as_deref(), hasta.as_deref()).await
 }
 
 #[tauri::command]

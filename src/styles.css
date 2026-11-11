@@ -190,16 +190,37 @@ kbd {
 }
 
 /* Bitácora del dueño: un encabezado por día, hora · quién · qué pasó. */
+.historial {
+  table-layout: fixed;
+}
+
 .historial td {
   vertical-align: top;
 }
 
+.historial-hora {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .historial-dia th {
-  padding-top: var(--e4);
+  padding-top: var(--e5);
   text-align: left;
-  font-size: 14px;
-  color: var(--muted);
-  text-transform: capitalize;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.historial-filtros {
+  display: grid;
+  gap: var(--e3);
+  padding-bottom: var(--e3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.historial-casillas {
+  display: grid;
+  gap: var(--e1);
+  align-self: center;
 }
 
 /* Ayuda de atajos (Venta → F1): tecla a la izquierda, qué hace a la derecha. */

@@ -20,7 +20,11 @@ export interface Frase {
   grupo: Grupo;
   /** Lo que el dueño debería mirar: anulaciones, diferencias, gaveta, PIN equivocado, alteraciones… */
   importante: boolean;
+  /** Pasa muchas veces al día y no cambia nada (entrar, consultar clientes, el tema…): se oculta por defecto. */
+  rutina: boolean;
 }
+
+const RUTINA = new Set(["login.ok", "cliente.ver", "cliente.listar", "cliente.copiar", "respaldo.automatico"]);
 
 type D = Record<string, unknown>;
 const txt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
@@ -31,10 +35,16 @@ const rol = (r: unknown) => ({ dueno: "dueño", cajero: "cajero", tecnico: "téc
 
 /** `nombres`: id de usuario → nombre, para decir quién autorizó con su PIN. */
 export function describir(e: EntradaBitacora, nombres: Record<string, string> = {}): Frase {
+  const frase = frasePara(e, nombres);
+  const rutina = !frase.importante && (RUTINA.has(e.accion) || (e.accion === "config.cambiar" && e.entidadId === "tema"));
+  return { ...frase, rutina };
+}
+
+function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Frase, "rutina"> {
   const d: D = e.detalle && typeof e.detalle === "object" ? (e.detalle as D) : {};
   const quien = (id: unknown) => nombres[String(id)] ?? "";
   const autorizo = txt(d.autorizadoPor) ? ` (autorizó ${quien(d.autorizadoPor) || "el dueño"} con su PIN)` : "";
-  const f = (grupo: Grupo, texto: string, importante = false): Frase => ({ grupo, texto, importante });
+  const f = (grupo: Grupo, texto: string, importante = false) => ({ grupo, texto, importante });
   const antes = (d.antes ?? {}) as D;
   const despues = (d.despues ?? {}) as D;
 
@@ -194,7 +204,8 @@ export function describir(e: EntradaBitacora, nombres: Record<string, string> = 
     case "respaldo.restaurar_fallido":
       return f("sistema", "Intentó restaurar un respaldo y no se pudo.", true);
     case "config.cambiar":
-      return f("sistema", `Cambió la configuración «${e.entidadId ?? ""}».`);
+      if (e.entidadId === "tema") return f("sistema", `Cambió el tema de la pantalla a ${d.despues === "oscuro" ? "oscuro" : "claro"}.`);
+      return f("sistema", `Cambió la configuración «${CONFIG[e.entidadId ?? ""] ?? e.entidadId ?? ""}».`);
     case "negocio.cambiar":
       return f("sistema", "Cambió los datos del negocio.");
     case "negocio.logo":
@@ -216,6 +227,18 @@ export function describir(e: EntradaBitacora, nombres: Record<string, string> = 
   }
   return f("sistema", `Acción del sistema (${e.accion}).`);
 }
+
+// Las claves de configuración que más cambia el dueño, con su nombre en pantalla.
+const CONFIG: Record<string, string> = {
+  departamentos_color: "colores de los departamentos",
+  caja_turno_compartido: "turno compartido",
+  caja_umbral_diferencia: "diferencia permitida al cerrar",
+  caja_salida_max_sin_pin: "salida máxima sin PIN",
+  permitir_vender_sin_existencia: "vender sin existencia",
+  venta_mostrar_existencia: "mostrar la existencia en la venta",
+  descuento_max_pct: "descuento máximo por rol",
+  redondeo_total: "redondeo del total",
+};
 
 const CAMPO: Record<string, string> = {
   nombre: "nombre",

@@ -19,7 +19,7 @@ const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; per
   { id: "usuarios", texto: "Usuarios", detalle: "Cajeros, PIN y accesos", icono: UserCog, permisos: ["usuarios"], pantalla: <Usuarios /> },
   { id: "departamentos", texto: "Departamentos", detalle: "Nombres, orden y color en la venta", icono: FolderTree, permisos: ["departamentos"], pantalla: <Departamentos /> },
   { id: "negocio", texto: "Datos del negocio", detalle: "Teléfono, logo, pie del tiquete y aviso de privacidad", icono: Building2, permisos: ["negocio"], pantalla: <Negocio /> },
-  { id: "impresoras", texto: "Impresoras", detalle: "Tiquetes, cierres, etiquetas y gaveta", icono: Printer, permisos: ["impresoras"], pantalla: <Impresoras /> },
+  { id: "impresoras", texto: "Impresoras", detalle: "Tiquetes, cierres, etiquetas y gaveta", icono: Printer, permisos: ["impresoras.asignar"], pantalla: <Impresoras /> },
   { id: "caja", texto: "Caja y cierre", detalle: "Turno compartido, cierre Z y no venta", icono: Landmark, permisos: ["caja.admin", "config.tecnica"], pantalla: <ConfigCaja /> },
   { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permisos: ["respaldo"], pantalla: <Respaldo /> },
   { id: "bitacora", texto: "Bitácora", detalle: "Quién hizo qué y cuándo: anulaciones, gaveta, cambios", icono: ScrollText, permisos: ["reportes"], pantalla: <Historial /> },

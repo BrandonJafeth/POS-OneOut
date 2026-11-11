@@ -133,14 +133,26 @@ pub struct Entrada {
     pub detalle: Value,
 }
 
-pub async fn listar(pool: &SqlitePool, limite: i64, entidad: Option<&str>) -> Res<Vec<Entrada>> {
+/// `desde`/`hasta`: instantes ISO (UTC) que arma la pantalla con el inicio del día local; `hasta`
+/// no se incluye. Así "el 11 de noviembre" son las 24 h de ese día en la hora de la caja.
+pub async fn listar(pool: &SqlitePool, limite: i64, entidad: Option<&str>, desde: Option<&str>, hasta: Option<&str>) -> Res<Vec<Entrada>> {
+    let mut filtros = vec![];
+    if entidad.is_some() {
+        filtros.push("b.entidad = ?");
+    }
+    if desde.is_some() {
+        filtros.push("b.fecha >= ?");
+    }
+    if hasta.is_some() {
+        filtros.push("b.fecha < ?");
+    }
     let sql = format!(
         "SELECT b.*, u.nombre AS usuario FROM bitacora b LEFT JOIN usuarios u ON u.id = b.usuario_id {} ORDER BY b.rowid DESC LIMIT ?",
-        if entidad.is_some() { "WHERE b.entidad = ?" } else { "" }
+        if filtros.is_empty() { String::new() } else { format!("WHERE {}", filtros.join(" AND ")) }
     );
     let mut q = sqlx::query(&sql);
-    if let Some(en) = entidad {
-        q = q.bind(en);
+    for v in [entidad, desde, hasta].into_iter().flatten() {
+        q = q.bind(v);
     }
     let filas = q.bind(limite.clamp(1, 1000)).fetch_all(pool).await.map_err(e)?;
     Ok(filas

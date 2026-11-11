@@ -88,7 +88,8 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("inventario_reporte_*", false, true, false),
     ("inventario_existencia (config apagada)", false, true, false),
     ("proveedores_*", false, true, false),
-    ("impresoras_listar / detectar / guardar / eliminar / asignar / probar", false, false, true),
+    ("impresoras_listar / asignar / probar", false, true, true),
+    ("impresoras_detectar / guardar / eliminar", false, false, true),
     ("impresora_ajustes (formato, sin destino)", true, true, true),
     ("imprimir (movimiento)", true, true, false),
     ("imprimir (etiqueta)", false, true, true),
@@ -174,7 +175,8 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("inventario_reporte_*", denegado(inventario::reporte_valorizado(p, a, CAJA_1).await));
     s("inventario_existencia (config apagada)", denegado(inventario::existencia_venta(p, a, CAJA_1, &[x.into()]).await));
     s("proveedores_*", denegado(inventario::proveedores(p, a).await));
-    s("impresoras_listar / detectar / guardar / eliminar / asignar / probar", denegado(impresoras::listar(p, a, CAJA_1).await));
+    s("impresoras_listar / asignar / probar", denegado(impresoras::listar(p, a, CAJA_1).await));
+    s("impresoras_detectar / guardar / eliminar", denegado(impresoras::detectar(a)));
     s("impresora_ajustes (formato, sin destino)", denegado(impresoras::ajustes(p, CAJA_1, "tiquete").await));
     // imprimir: el permiso depende del documento (lib.rs).
     s("imprimir (movimiento)", lib("caja"));

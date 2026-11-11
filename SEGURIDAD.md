@@ -224,7 +224,8 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `inventario_reporte_*` | — | ✔ | — |
 | `inventario_existencia (config apagada)` | — | ✔ | — |
 | `proveedores_*` | — | ✔ | — |
-| `impresoras_listar / detectar / guardar / eliminar / asignar / probar` | — | — | ✔ |
+| `impresoras_listar / asignar / probar` | — | ✔ | ✔ |
+| `impresoras_detectar / guardar / eliminar` | — | — | ✔ |
 | `impresora_ajustes (formato, sin destino)` | ✔ | ✔ | ✔ |
 | `imprimir (movimiento)` | ✔ | ✔ | — |
 | `imprimir (etiqueta)` | — | ✔ | ✔ |

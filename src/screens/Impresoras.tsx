@@ -28,6 +28,7 @@ import { useConfirmar } from "../ui/Confirmar";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
+import { useSesion } from "../app/sesion";
 import { useEnvio } from "../ui/useEnvio";
 
 const NUEVA: DatosImpresora = { nombre: "", conexion: "windows", destino: "", anchoMm: 58, columnas: 32, codePage: 19, sinModoChino: true, barras: "B", cortador: false, gaveta: false, baudios: 9600 };
@@ -48,12 +49,14 @@ export default function Impresoras() {
   const [probando, setProbando] = useState<string | null>(null);
   const toast = useToast();
   const confirmar = useConfirmar();
+  // Técnico: agrega, cambia y quita impresoras (soporte). Dueño: las ve, las prueba y asigna documentos.
+  const tecnico = useSesion().puede("impresoras");
 
   const cargar = async () => setLista(await listarImpresoras());
   const buscar = async () => setDetectadas(await detectarImpresoras());
   useEffect(() => {
     void cargar().catch((e) => setError(textoError(e)));
-    void buscar().catch((e) => setError(textoError(e)));
+    if (tecnico) void buscar().catch((e) => setError(textoError(e)));
   }, []);
 
   async function hacer(f: () => Promise<unknown>, ok: string) {
@@ -92,16 +95,21 @@ export default function Impresoras() {
       <section className="card">
         <div className="caja-cabeza">
           <h2>Impresoras de esta caja</h2>
-          <div className="fila-botones">
-            <Button icono={RefreshCw} onClick={() => buscar().then(() => toast.ok("Lista actualizada."), (e) => setError(textoError(e)))}>
-              Buscar de nuevo
-            </Button>
-            <Button variante="primario" icono={Plus} onClick={() => setEditando({ ...NUEVA })}>
-              Agregar impresora
-            </Button>
-          </div>
+          {tecnico && (
+            <div className="fila-botones">
+              <Button icono={RefreshCw} onClick={() => buscar().then(() => toast.ok("Lista actualizada."), (e) => setError(textoError(e)))}>
+                Buscar de nuevo
+              </Button>
+              <Button variante="primario" icono={Plus} onClick={() => setEditando({ ...NUEVA })}>
+                Agregar impresora
+              </Button>
+            </div>
+          )}
         </div>
-        {lista && lista.length === 0 && <EmptyState icono={Printer} titulo="No hay impresoras" texto="Agregue la de tiquetes y, si tiene, la de etiquetas." />}
+        {!tecnico && <p className="muted">Puede probarlas y elegir a cuál va cada documento. Para agregar, cambiar o quitar una impresora, llame al técnico.</p>}
+        {lista && lista.length === 0 && (
+          <EmptyState icono={Printer} titulo="No hay impresoras" texto={tecnico ? "Agregue la de tiquetes y, si tiene, la de etiquetas." : "Pida al técnico que conecte la de tiquetes."} />
+        )}
         {lista && lista.length > 0 && (
           <table className="tbl">
             <thead>
@@ -140,18 +148,22 @@ export default function Impresoras() {
                       <Button icono={Printer} disabled={probando === i.id} onClick={() => void probar(i)}>
                         Imprimir prueba
                       </Button>
-                      <Button variante="fantasma" icono={Pencil} aria-label={`Editar ${i.nombre}`} title="Editar" onClick={() => setEditando({ ...i })} />
-                      <Button
-                        variante="fantasma"
-                        className="texto-peligro"
-                        icono={Trash2}
-                        aria-label={`Quitar ${i.nombre}`}
-                        title="Quitar"
-                        onClick={async () => {
-                          if (await confirmar({ titulo: `¿Quitar ${i.nombre}?`, texto: "Los documentos que iban a esta impresora quedan sin asignar.", aceptar: "Quitar", peligro: true }))
-                            void hacer(() => eliminarImpresora(i.id), "Impresora quitada.");
-                        }}
-                      />
+                      {tecnico && (
+                        <>
+                          <Button variante="fantasma" icono={Pencil} aria-label={`Editar ${i.nombre}`} title="Editar" onClick={() => setEditando({ ...i })} />
+                          <Button
+                            variante="fantasma"
+                            className="texto-peligro"
+                            icono={Trash2}
+                            aria-label={`Quitar ${i.nombre}`}
+                            title="Quitar"
+                            onClick={async () => {
+                              if (await confirmar({ titulo: `¿Quitar ${i.nombre}?`, texto: "Los documentos que iban a esta impresora quedan sin asignar.", aceptar: "Quitar", peligro: true }))
+                                void hacer(() => eliminarImpresora(i.id), "Impresora quitada.");
+                            }}
+                          />
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -179,7 +191,12 @@ export default function Impresoras() {
             </Field>
           ))}
         </div>
-        {lista && !lista.some((i) => i.gaveta) && <Alert tono="aviso">Ninguna impresora tiene la gaveta. Márquela en la de tiquetes para que se abra con las ventas en efectivo.</Alert>}
+        {lista && lista.length > 0 && !lista.some((i) => i.gaveta) && (
+          <Alert tono="aviso">
+            Ninguna impresora tiene la gaveta.{" "}
+            {tecnico ? "Márquela en la de tiquetes para que se abra con las ventas en efectivo." : "Pida al técnico que la configure para que se abra con las ventas en efectivo."}
+          </Alert>
+        )}
       </section>
 
       {editando && (

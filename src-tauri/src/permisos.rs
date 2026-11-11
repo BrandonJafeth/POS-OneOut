@@ -44,10 +44,13 @@ const DUENO: &[&str] = &[
     "clientes",
     "respaldo",
     "facturas",
+    "impresoras.asignar",
     "inventario",
 ];
-// El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes. Las
-// impresoras (y la gaveta) son solo suyas: es parte del soporte. Imprimir sí puede cualquiera.
+// El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
+// Impresoras: agregarlas, cambiar su conexión o formato, quitarlas y la gaveta ("impresoras") son
+// del técnico (soporte). El dueño ve las que hay, las prueba y elige a cuál va cada documento
+// ("impresoras.asignar"). Imprimir puede cualquiera.
 const TECNICO: &[&str] = &[
     "productos",
     "productos.importar",
@@ -59,6 +62,7 @@ const TECNICO: &[&str] = &[
     "config.tecnica",
     "reportes",
     "impresoras",
+    "impresoras.asignar",
 ];
 
 pub fn puede(rol: Rol, permiso: &str) -> bool {

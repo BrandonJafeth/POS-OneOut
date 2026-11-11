@@ -72,7 +72,7 @@ const SELECT: &str = "SELECT i.*, (SELECT group_concat(d.documento) FROM impreso
     FROM impresoras i";
 
 pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<Vec<Impresora>> {
-    a.exigir("impresoras", "ver las impresoras")?;
+    a.exigir("impresoras.asignar", "ver las impresoras")?;
     let filas = sqlx::query(&format!("{SELECT} WHERE i.caja_id = ? AND i.eliminado_en IS NULL ORDER BY i.nombre")).bind(caja_id).fetch_all(pool).await.map_err(e)?;
     Ok(filas.iter().map(a_impresora).collect())
 }
@@ -197,7 +197,7 @@ pub async fn eliminar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
 
 /// Asigna (o quita, con None) la impresora de un documento.
 pub async fn asignar(pool: &SqlitePool, a: &Actor, caja_id: &str, documento: &str, impresora_id: Option<&str>) -> Res<()> {
-    a.exigir("impresoras", "asignar impresoras")?;
+    a.exigir("impresoras.asignar", "asignar impresoras")?;
     if !DOCUMENTOS.contains(&documento) {
         return Err("Documento desconocido".into());
     }
@@ -355,7 +355,7 @@ pub async fn enviar(pool: &SqlitePool, caja_id: &str, documento: &str, datos: &[
 
 /// "Imprimir prueba" de una impresora (aunque no tenga documentos asignados).
 pub async fn probar(pool: &SqlitePool, a: &Actor, id: &str, datos: &[u8]) -> Res<()> {
-    a.exigir("impresoras", "probar impresoras")?;
+    a.exigir("impresoras.asignar", "probar impresoras")?;
     escpos::validar(datos)?;
     let f = sqlx::query(&format!("{SELECT} WHERE i.id = ? AND i.eliminado_en IS NULL")).bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Esa impresora ya no existe")?;
     mandar(&a_impresora(&f), datos, true)
@@ -444,10 +444,11 @@ pub mod tests {
     async fn cada_documento_a_su_impresora_y_solo_destinos_detectados() {
         let (bd, tec, dueno, cajero) = base_con_usuarios().await;
         let p = &bd.pool;
-        // Ni el cajero ni el dueño configuran impresoras: es trabajo del técnico (soporte).
+        // Ni el cajero ni el dueño agregan ni cambian impresoras: es trabajo del técnico (soporte).
         assert!(guardar(p, &cajero, CAJA_1, &datos("X", "NADA", false)).await.unwrap_err().contains("permiso"));
         assert!(guardar(p, &dueno, CAJA_1, &datos("X", "NADA", false)).await.unwrap_err().contains("permiso"));
-        assert!(listar(p, &dueno, CAJA_1).await.unwrap_err().contains("permiso"));
+        assert!(detectar(&dueno).unwrap_err().contains("permiso"));
+        assert!(listar(p, &cajero, CAJA_1).await.unwrap_err().contains("permiso"));
         // Una ruta escrita a mano (no detectada) no se acepta.
         assert!(guardar(p, &tec, CAJA_1, &datos("Red", r"\\otra-pc\cola", false)).await.unwrap_err().contains("lista"));
         let (a, b) = dos_impresoras(p, &dueno, "IMP1").await;
@@ -468,8 +469,10 @@ pub mod tests {
         printer::simulada::apagar(&a, true);
         let err = enviar(p, CAJA_1, "tiquete", b"x\n").await.unwrap_err();
         assert!(err.contains("no respondió") && !err.contains("1801"), "{err}");
+        // El dueño sí ve las que hay y elige a cuál va cada documento.
+        assert_eq!(listar(p, &dueno, CAJA_1).await.unwrap().len(), 2);
         // Sin impresora asignada: se dice dónde se asigna.
-        asignar(p, &tec, CAJA_1, "movimiento", None).await.unwrap();
+        asignar(p, &dueno, CAJA_1, "movimiento", None).await.unwrap();
         assert!(enviar(p, CAJA_1, "movimiento", b"x\n").await.unwrap_err().contains("Impresoras"));
     }
 }

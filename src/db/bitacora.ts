@@ -20,8 +20,16 @@ export async function registrar(...args: Parameters<typeof bitacora>): Promise<v
   await db().lote([bitacora(...args)]);
 }
 
-export async function listarBitacora(limite = 200, entidad?: string): Promise<EntradaBitacora[]> {
-  return invocar<EntradaBitacora[]>("bitacora_listar", { limite, entidad: entidad ?? null });
+/** `dias`: del día local `desde` al `hasta` incluidos ("AAAA-MM-DD"). */
+export async function listarBitacora(limite = 200, entidad?: string, dias?: { desde: string; hasta: string }): Promise<EntradaBitacora[]> {
+  const inicio = (dia: string) => new Date(`${dia}T00:00:00`); // medianoche en la hora de la caja
+  const finExclusivo = (dia: string) => new Date(inicio(dia).getTime() + 86_400_000);
+  return invocar<EntradaBitacora[]>("bitacora_listar", {
+    limite,
+    entidad: entidad ?? null,
+    desde: dias ? inicio(dias.desde).toISOString() : null,
+    hasta: dias ? finExclusivo(dias.hasta).toISOString() : null,
+  });
 }
 
 export interface VerificacionBitacora {
