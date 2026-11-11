@@ -71,7 +71,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas"] },
 ];
 const AVANZADO: Seccion[] = [
-  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios", "negocio", "departamentos", "respaldo", "impresoras"] },
+  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios", "negocio", "departamentos", "respaldo", "impresoras", "reportes"] },
   { id: "config", texto: "Técnico", icono: Wrench, permisos: ["config.tecnica"] },
 ];
 

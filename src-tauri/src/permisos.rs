@@ -44,10 +44,10 @@ const DUENO: &[&str] = &[
     "clientes",
     "respaldo",
     "facturas",
-    "impresoras",
     "inventario",
 ];
-// El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
+// El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes. Las
+// impresoras (y la gaveta) son solo suyas: es parte del soporte. Imprimir sí puede cualquiera.
 const TECNICO: &[&str] = &[
     "productos",
     "productos.importar",

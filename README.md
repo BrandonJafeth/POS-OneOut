@@ -61,7 +61,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 
 ## Impresoras
 
-- Administración → Impresoras (dueño y técnico): varias impresoras (Windows, puerto serial o USB directo, elegidas de lo que detecta el sistema), 58/80 mm y columnas, code page, cortador y gaveta (una sola). Cada documento (tiquete, cierre y reportes, movimientos, etiquetas) va solo a la impresora asignada; "Imprimir prueba" por impresora.
+- Administración → Impresoras (solo el técnico: es parte del soporte; el dueño y el cajero solo imprimen): varias impresoras (Windows, puerto serial o USB directo, elegidas de lo que detecta el sistema), 58/80 mm y columnas, code page, cortador y gaveta (una sola). Cada documento (tiquete, cierre y reportes, movimientos, etiquetas) va solo a la impresora asignada; "Imprimir prueba" por impresora.
 - Si una impresora no responde, se avisa en palabras simples y la venta queda guardada para reimprimir.
 - La migración 8 pasó la impresora única de `config` a la tabla `impresoras` con los cuatro documentos asignados.
 

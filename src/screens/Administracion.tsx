@@ -1,5 +1,5 @@
 // Administración (dueño/técnico): fuera del flujo del cajero. Tarjetas grandes → subpantalla.
-import { ArrowLeft, Building2, DatabaseBackup, FolderTree, Landmark, Printer, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Building2, DatabaseBackup, FolderTree, Landmark, Printer, ScrollText, UserCog, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSesion } from "../app/sesion";
 import type { Permiso } from "../lib/permisos";
@@ -7,11 +7,12 @@ import Button from "../ui/Button";
 import ConfigCaja from "./ConfigCaja";
 import Departamentos from "./Departamentos";
 import Impresoras from "./Impresoras";
+import Historial from "./Historial";
 import Negocio from "./Negocio";
 import Respaldo from "./Respaldo";
 import Usuarios from "./Usuarios";
 
-type Sub = "usuarios" | "departamentos" | "negocio" | "impresoras" | "caja" | "respaldo";
+type Sub = "usuarios" | "departamentos" | "negocio" | "impresoras" | "caja" | "respaldo" | "bitacora";
 
 // permisos: basta uno.
 const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; permisos: Permiso[]; pantalla: ReactNode }[] = [
@@ -21,6 +22,7 @@ const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; per
   { id: "impresoras", texto: "Impresoras", detalle: "Tiquetes, cierres, etiquetas y gaveta", icono: Printer, permisos: ["impresoras"], pantalla: <Impresoras /> },
   { id: "caja", texto: "Caja y cierre", detalle: "Turno compartido, cierre Z y no venta", icono: Landmark, permisos: ["caja.admin", "config.tecnica"], pantalla: <ConfigCaja /> },
   { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permisos: ["respaldo"], pantalla: <Respaldo /> },
+  { id: "bitacora", texto: "Bitácora", detalle: "Quién hizo qué y cuándo: anulaciones, gaveta, cambios", icono: ScrollText, permisos: ["reportes"], pantalla: <Historial /> },
 ];
 
 export default function Administracion() {

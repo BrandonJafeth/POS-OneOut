@@ -88,7 +88,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("inventario_reporte_*", false, true, false),
     ("inventario_existencia (config apagada)", false, true, false),
     ("proveedores_*", false, true, false),
-    ("impresoras_listar / detectar / guardar / eliminar / asignar / probar", false, true, true),
+    ("impresoras_listar / detectar / guardar / eliminar / asignar / probar", false, false, true),
     ("impresora_ajustes (formato, sin destino)", true, true, true),
     ("imprimir (movimiento)", true, true, false),
     ("imprimir (etiqueta)", false, true, true),

@@ -88,7 +88,7 @@ Desconecte el cable de red o el Wi-Fi y repita una venta y un cierre de caja. �
 
 Prepare: la POS-58 (tiquetes, con la gaveta) y otra impresora para etiquetas (o "Microsoft Print to PDF" para probar).
 
-1. Como Ana, **Administración → Impresoras → Agregar impresora**. → La lista de impresoras solo trae las que detecta Windows; no se puede escribir una ruta.
+1. Como Ana (dueño), en **Administración** no aparece «Impresoras». Como el técnico (Ctrl+Alt+T), **Administración → Impresoras → Agregar impresora**. → La lista de impresoras solo trae las que detecta Windows; no se puede escribir una ruta.
 2. Deje "Tiquetes" (POS-58, 58 mm, 32 columnas, gaveta) y "Etiquetas". Asigne: tiquete, cierre y movimientos → Tiquetes; etiquetas → Etiquetas.
 3. **Imprimir prueba** en cada una. → Sale la hoja de prueba con el ancho, las tildes y un código de barras.
 4. Venda algo en efectivo. → El tiquete sale en la POS-58 y abre la gaveta. Imprima una etiqueta desde Productos. → Sale en la otra.

@@ -41,7 +41,6 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "clientes",
     "respaldo",
     "facturas",
-    "impresoras",
     "inventario",
   ],
   tecnico: [

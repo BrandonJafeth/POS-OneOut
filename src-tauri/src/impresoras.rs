@@ -384,7 +384,10 @@ pub mod tests {
     }
 
     /// Dos impresoras: tiquetes (con gaveta) y etiquetas. Devuelve sus destinos simulados.
-    pub async fn dos_impresoras(p: &SqlitePool, dueno: &Actor, prefijo: &str) -> (String, String) {
+    /// Las configura el técnico de la base (es el único que puede), sea quien sea `_quien`.
+    pub async fn dos_impresoras(p: &SqlitePool, _quien: &Actor, prefijo: &str) -> (String, String) {
+        let tecnico = crate::usuarios::tecnico_id(p).await.unwrap().expect("la base de prueba trae técnico");
+        let dueno = &Actor { id: tecnico, rol: crate::permisos::Rol::Tecnico, nombre: "Técnico".into() };
         let (a, b) = (format!("{prefijo}-TIQ"), format!("{prefijo}-ETQ"));
         printer::simulada::instalar("windows", &a);
         printer::simulada::instalar("windows", &b);
@@ -441,8 +444,10 @@ pub mod tests {
     async fn cada_documento_a_su_impresora_y_solo_destinos_detectados() {
         let (bd, tec, dueno, cajero) = base_con_usuarios().await;
         let p = &bd.pool;
-        // El cajero no configura impresoras.
+        // Ni el cajero ni el dueño configuran impresoras: es trabajo del técnico (soporte).
         assert!(guardar(p, &cajero, CAJA_1, &datos("X", "NADA", false)).await.unwrap_err().contains("permiso"));
+        assert!(guardar(p, &dueno, CAJA_1, &datos("X", "NADA", false)).await.unwrap_err().contains("permiso"));
+        assert!(listar(p, &dueno, CAJA_1).await.unwrap_err().contains("permiso"));
         // Una ruta escrita a mano (no detectada) no se acepta.
         assert!(guardar(p, &tec, CAJA_1, &datos("Red", r"\\otra-pc\cola", false)).await.unwrap_err().contains("lista"));
         let (a, b) = dos_impresoras(p, &dueno, "IMP1").await;
@@ -453,10 +458,10 @@ pub mod tests {
         // Nada con pulso de gaveta pasa por la impresión.
         assert!(enviar(p, CAJA_1, "tiquete", &[0x1b, b'p', 0, 25, 250]).await.unwrap_err().contains("no permitido"));
         // Una sola gaveta: marcarla en la de etiquetas la quita de la de tiquetes.
-        let l = listar(p, &dueno, CAJA_1).await.unwrap();
+        let l = listar(p, &tec, CAJA_1).await.unwrap();
         let etq = l.iter().find(|i| i.destino == b).unwrap();
-        guardar(p, &dueno, CAJA_1, &Datos { id: Some(etq.id.clone()), gaveta: true, ..datos(&etq.nombre, &b, true) }).await.unwrap();
-        let l = listar(p, &dueno, CAJA_1).await.unwrap();
+        guardar(p, &tec, CAJA_1, &Datos { id: Some(etq.id.clone()), gaveta: true, ..datos(&etq.nombre, &b, true) }).await.unwrap();
+        let l = listar(p, &tec, CAJA_1).await.unwrap();
         assert_eq!(l.iter().filter(|i| i.gaveta).count(), 1);
         assert!(l.iter().find(|i| i.destino == b).unwrap().gaveta);
         // Apagada: error simple, sin trabar nada.
@@ -464,8 +469,7 @@ pub mod tests {
         let err = enviar(p, CAJA_1, "tiquete", b"x\n").await.unwrap_err();
         assert!(err.contains("no respondió") && !err.contains("1801"), "{err}");
         // Sin impresora asignada: se dice dónde se asigna.
-        asignar(p, &dueno, CAJA_1, "movimiento", None).await.unwrap();
+        asignar(p, &tec, CAJA_1, "movimiento", None).await.unwrap();
         assert!(enviar(p, CAJA_1, "movimiento", b"x\n").await.unwrap_err().contains("Impresoras"));
-        let _ = tec;
     }
 }
