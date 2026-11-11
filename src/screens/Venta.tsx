@@ -29,6 +29,7 @@ import Alert from "../ui/Alert";
 import Button from "../ui/Button";
 import CampoMonto from "../ui/CampoMonto";
 import { useToast } from "../ui/Toast";
+import { useConfirmar } from "../ui/Confirmar";
 import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
@@ -122,7 +123,9 @@ export default function Venta() {
   }, [cantidades, config.permitir_vender_sin_existencia]);
   const t = useMemo(() => calcularTotales(estado, config.redondeo_total), [estado, config.redondeo_total]);
   const tope = topeDescuento(actor.rol, config.descuento_max_pct);
-  const modal = dialogo !== null || pendiente !== null || cobrada !== null;
+  const confirmar = useConfirmar();
+  const [confirmando, setConfirmando] = useState(false);
+  const modal = dialogo !== null || pendiente !== null || cobrada !== null || confirmando;
 
   useEffect(() => {
     (async () => {
@@ -220,9 +223,21 @@ export default function Venta() {
     alBuscador();
   }
 
-  // Descartar no pregunta: se hace al instante y el aviso ofrece "Deshacer" unos segundos
-  // (menos diálogos, y un toque equivocado se recupera). Queda anotado en la bitácora igual.
+  // Una venta con productos se descarta solo después de confirmarlo (un toque en la X no borra el
+  // trabajo de la cajera). Además el aviso ofrece "Deshacer" unos segundos. Queda en la bitácora.
   async function descartar(e: VentaEspera) {
+    if (e.estado.lineas.length) {
+      setConfirmando(true); // mientras pregunta, F12 y los demás atajos no actúan detrás
+      const total = monto(calcularTotales(e.estado, config.redondeo_total).total);
+      const si = await confirmar({
+        titulo: `¿Descartar la venta ${e.numero}?`,
+        texto: `Tiene ${plural(e.estado.lineas.length, "producto", "productos")} por ${total}. Se borra sin cobrar.`,
+        aceptar: "Descartar venta",
+        peligro: true,
+      });
+      setConfirmando(false);
+      if (!si) return alBuscador();
+    }
     if (!(await tabs.descartar(e))) return;
     alBuscador();
     if (!e.estado.lineas.length) return;

@@ -849,13 +849,48 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
         .execute(&mut *tx)
         .await
         .map_err(e)?;
+        // Tarjeta/SINPE → efectivo en una venta que no tenía efectivo: se cobró exacta, pero en efectivo
+        // se redondea igual que al cobrar (no hay monedas de ¢1). Si no, la caja esperaría ¢1–4 que
+        // nadie pudo recibir. Cambian el total de la venta y este pago por la misma diferencia, así
+        // el Z sigue cuadrando (ventas = suma de formas de pago).
+        let mut nuevo_monto = monto;
+        let mut ajuste_redondeo = 0;
+        if nueva.da_vuelto && !estaba_efectivo {
+            let otro_efectivo: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM venta_pagos p JOIN formas_pago f ON f.id = p.forma_pago_id WHERE p.venta_id = ? AND p.id != ? AND p.eliminado_en IS NULL AND f.da_vuelto = 1",
+            )
+            .bind(&venta_id)
+            .bind(pago_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(e)?;
+            if otro_efectivo == 0 {
+                let paso = config::entero_con(&mut tx, "redondeo_total", 5).await;
+                let (total, redondeo): (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&venta_id).fetch_one(&mut *tx).await.map_err(e)?;
+                let neto = total - redondeo;
+                let delta = calculo::redondear(neto, paso) - total;
+                if delta != 0 && monto + delta > 0 {
+                    sqlx::query("UPDATE ventas SET total = total + ?, redondeo = redondeo + ?, actualizado_en = ? WHERE id = ?")
+                        .bind(delta)
+                        .bind(delta)
+                        .bind(&ahora)
+                        .bind(&venta_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(e)?;
+                    nuevo_monto = monto + delta;
+                    ajuste_redondeo = delta;
+                }
+            }
+        }
         // Al pasar a efectivo, lo recibido es el monto (sin vuelto); al salir del efectivo se borra recibido/vuelto.
         let (recibido, vuelto) = match (nueva.da_vuelto, estaba_efectivo) {
             (true, true) => (Some(p.get::<Option<i64>, _>("recibido").unwrap_or(monto)), Some(p.get::<Option<i64>, _>("vuelto").unwrap_or(0))),
-            (true, false) => (Some(monto), Some(0)),
+            (true, false) => (Some(nuevo_monto), Some(0)),
             _ => (None, None),
         };
-        sqlx::query("UPDATE venta_pagos SET forma_pago_id = ?, banco_id = ?, referencia = ?, ultimos4 = ?, recibido = ?, vuelto = ?, actualizado_en = ? WHERE id = ?")
+        sqlx::query("UPDATE venta_pagos SET monto = ?, forma_pago_id = ?, banco_id = ?, referencia = ?, ultimos4 = ?, recibido = ?, vuelto = ?, actualizado_en = ? WHERE id = ?")
+            .bind(nuevo_monto)
             .bind(&nueva.id)
             .bind(&n_banco)
             .bind(&n_ref)
@@ -871,7 +906,7 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
         if estaba_efectivo && !nueva.da_vuelto && caja::resumen(&mut tx, t).await?.efectivo_esperado < 0 {
             return Err(SIN_EFECTIVO.into());
         }
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.pago_corregido", "venta", Some(&venta_id), &json!({"pagoId": pago_id, "correccionId": id, "monto": monto, "antes": antes, "despues": despues, "autorizadoPor": autorizado})).await?;
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.pago_corregido", "venta", Some(&venta_id), &json!({"pagoId": pago_id, "correccionId": id, "monto": monto, "redondeo": ajuste_redondeo, "antes": antes, "despues": despues, "autorizadoPor": autorizado})).await?;
     } else {
         let actual = turno_para_ajuste(&mut tx, caja_id).await?;
         let id = ulid();
@@ -1199,9 +1234,22 @@ mod tests {
         let fino = est(&pid, &dep, 1000, 1, 2);
         let tj = vender(p, &cajero, &fino, &[pago(TJ, 998)]).await;
         let ef = vender(p, &cajero, &fino, &[pago(EF, 1000)]).await;
+        let tj_id = tj.venta_id.clone();
         let tj: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&tj.venta_id).fetch_one(p).await.unwrap();
         let ef: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&ef.venta_id).fetch_one(p).await.unwrap();
         assert_eq!((tj, ef), ((998, 0), (1000, 2)));
+        // Se marcó tarjeta y era efectivo: al corregirlo se redondea como un cobro en efectivo (¢1.000),
+        // y la venta y el pago cambian juntos (el Z sigue cuadrando).
+        let antes = detalle(p, &dueno, &turno).await.unwrap().resumen.efectivo_esperado;
+        let pago_tj: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&tj_id).fetch_one(p).await.unwrap();
+        let a_ef = CambioPago { forma_pago_id: EF.into(), banco_id: None, referencia: None, ultimos4: None };
+        corregir_pago(p, &dueno, CAJA_1, &pago_tj, &a_ef, "Pagó en efectivo", Some("246813")).await.unwrap();
+        let venta: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&tj_id).fetch_one(p).await.unwrap();
+        let corregido: (i64, Option<i64>) = sqlx::query_as("SELECT monto, recibido FROM venta_pagos WHERE id = ?").bind(&pago_tj).fetch_one(p).await.unwrap();
+        assert_eq!((venta, corregido), ((1000, 2), (1000, Some(1000))));
+        let d = detalle(p, &dueno, &turno).await.unwrap();
+        assert_eq!(d.resumen.efectivo_esperado, antes + 1000);
+        assert!(d.resumen.cuadra, "{:?}", d.resumen.descuadres);
         // Descuento fijo del producto (30 %, lo puso el dueño): el cajero lo da sin PIN; lo que pase de
         // ese 30 % sí cuenta contra su tope.
         sqlx::query("UPDATE productos SET descuento_pct = 30 WHERE id = ?").bind(&pid).execute(p).await.unwrap();
