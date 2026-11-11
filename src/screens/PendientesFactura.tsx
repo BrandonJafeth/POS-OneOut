@@ -13,6 +13,7 @@ import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
+import { useEnvio } from "../ui/useEnvio";
 
 export default function PendientesFactura() {
   const { actor } = useSesion();
@@ -112,25 +113,15 @@ export default function PendientesFactura() {
 
 function MarcarEmitida(p: { pendiente: PendienteFactura; onCerrar(): void; onGuardar(ref: string): Promise<void> }) {
   const [ref, setRef] = useState("");
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   return (
     <Modal titulo={`Factura del tiquete ${p.pendiente.numero}`} onCerrar={p.onCerrar} ancho={460}>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setError("");
-          try {
-            await p.onGuardar(ref);
-          } catch (err) {
-            setError(textoError(err));
-          }
-        }}
-      >
+      <form onSubmit={(e) => (e.preventDefault(), void enviar(() => p.onGuardar(ref)))}>
         <Field label="Número consecutivo o clave de la factura electrónica" ayuda="Cópielo del sistema de facturación.">
           <input autoFocus className="mono" value={ref} onChange={(e) => setRef(e.target.value)} />
         </Field>
         <Mensaje error={error} />
-        <Button type="submit" variante="primario" icono={Save} disabled={!ref.trim()}>
+        <Button type="submit" variante="primario" icono={Save} disabled={!ref.trim() || ocupado}>
           Guardar
         </Button>
       </form>

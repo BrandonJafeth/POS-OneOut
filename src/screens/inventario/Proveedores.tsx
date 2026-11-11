@@ -9,11 +9,13 @@ import { useConfirmar } from "../../ui/Confirmar";
 import EmptyState from "../../ui/EmptyState";
 import Field from "../../ui/Field";
 import { useEnvio } from "../../ui/useEnvio";
+import { useToast } from "../../ui/Toast";
 
 const VACIO: Proveedor = { id: "", nombre: "", telefono: "", notas: "" };
 
 export default function Proveedores() {
   const confirmar = useConfirmar();
+  const toast = useToast();
   const [lista, setLista] = useState<Proveedor[] | null>(null); // null: todavía cargando
   const [editando, setEditando] = useState<Proveedor | null>(null);
   const [error, setError] = useState("");
@@ -75,6 +77,7 @@ export default function Proveedores() {
           onGuardar={async (p) => {
             await guardarProveedor(p);
             setEditando(null);
+            toast.ok(p.id ? "Proveedor guardado." : `Proveedor «${p.nombre.trim()}» creado.`);
             await cargar();
           }}
         />

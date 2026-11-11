@@ -28,6 +28,7 @@ import EmptyState from "../../ui/EmptyState";
 import Field from "../../ui/Field";
 import Paginacion from "../../ui/Paginacion";
 import { useToast } from "../../ui/Toast";
+import { useEnvio } from "../../ui/useEnvio";
 
 const POR_PAGINA = 100;
 
@@ -322,19 +323,18 @@ function FichaDialogo(p: { fila: FilaInventario; onCerrar(recargar: boolean): vo
   const [controla, setControla] = useState(p.fila.controla);
   const [minimo, setMinimo] = useState(String(p.fila.minimo));
   const [costo, setCosto] = useState(p.fila.costo == null ? "" : String(p.fila.costo));
-  const [error, setError] = useState("");
+  const toast = useToast();
+  const { ocupado, error, enviar } = useEnvio();
   return (
     <Modal titulo={p.fila.nombre} onCerrar={() => p.onCerrar(false)} ancho={440}>
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          setError("");
-          try {
+          void enviar(async () => {
             await guardarInventarioProducto(p.fila.productoId, controla, Number(minimo) || 0, costo.trim() === "" ? null : Number(costo));
+            toast.ok(`${p.fila.nombre}: guardado.`);
             p.onCerrar(true);
-          } catch (err) {
-            setError(textoError(err));
-          }
+          });
         }}
       >
         <label className="row">
@@ -347,7 +347,7 @@ function FichaDialogo(p: { fila: FilaInventario; onCerrar(recargar: boolean): vo
           <input inputMode="numeric" value={costo} onChange={(e) => setCosto(e.target.value.replace(/\D/g, ""))} />
         </Field>
         <Mensaje error={error} />
-        <Button type="submit" variante="primario" icono={Save}>
+        <Button type="submit" variante="primario" icono={Save} disabled={ocupado}>
           Guardar
         </Button>
       </form>

@@ -6,6 +6,7 @@ import { asociarCodigo, buscarProductos, CodigoOcupado } from "../../db/producto
 import { monto } from "../../lib/tickets";
 import type { ProductoLista } from "../../tipos";
 import FilaClic from "../../ui/FilaClic";
+import { useEnvio } from "../../ui/useEnvio";
 
 /** Se escaneó un código que no existe: asociarlo a un producto existente o crear uno nuevo. */
 export default function CodigoNuevo(p: { codigo: string; onAsociado(productoId: string): void; onCrear(): void; onCerrar(): void }) {
@@ -13,6 +14,7 @@ export default function CodigoNuevo(p: { codigo: string; onAsociado(productoId: 
   const [texto, setTexto] = useState("");
   const [lista, setLista] = useState<ProductoLista[]>([]);
   const [error, setError] = useState("");
+  const envio = useEnvio(); // doble clic en la fila: se asocia una vez
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -45,7 +47,7 @@ export default function CodigoNuevo(p: { codigo: string; onAsociado(productoId: 
       <table className="tbl tbl-grande" style={{ marginTop: 8 }}>
         <tbody>
           {lista.map((x) => (
-            <FilaClic key={x.id} etiqueta={`Asociar a ${x.nombre}`} onAbrir={() => elegir(x)}>
+            <FilaClic key={x.id} etiqueta={`Asociar a ${x.nombre}`} onAbrir={() => void envio.enviar(() => elegir(x))}>
               <td>{x.nombre}</td>
               <td className="muted">{x.departamento}</td>
               <td className="num">{monto(x.precio)}</td>

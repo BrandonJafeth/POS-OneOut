@@ -20,7 +20,7 @@ import {
 } from "../../db/productos";
 import { estadoInventario, registrarEntrada } from "../../db/inventario";
 import { isValidEan13 } from "../../lib/ean13";
-import { leerMontoEntero } from "../../lib/texto";
+import { leerMontoEntero, limpiarNombre } from "../../lib/texto";
 import { colones, monto } from "../../lib/tickets";
 import { useEscaner } from "../../lib/useEscaner";
 import type { Codigo, Departamento, ProductoConCodigos, TipoCodigo } from "../../tipos";
@@ -141,9 +141,9 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
           });
         setExistencia("");
       }
-      if (id) await cargar(id);
-      toast.ok("Producto guardado.");
+      toast.ok(id ? "Producto guardado." : `«${limpiarNombre(nombre)}» creado.`);
       onCambio();
+      onCerrar(); // listo: de vuelta a la lista (si algo falla, se queda abierto con el error)
     } catch (e) {
       if (e instanceof CodigoOcupado) setConflicto({ error: e, tipo: codigos.find((c) => c.codigo === e.codigo)?.tipo ?? "manual" });
       else setError(textoError(e));

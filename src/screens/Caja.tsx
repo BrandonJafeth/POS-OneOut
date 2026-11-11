@@ -40,6 +40,7 @@ import EmptyState from "../ui/EmptyState";
 import FilaClic from "../ui/FilaClic";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
+import { useEnvio } from "../ui/useEnvio";
 import { AbrirCaja, CasillasZ, CerrarCaja, CorteCaja, GavetaDueno, MovimientoCaja, NoVenta, type OpcionesCierre } from "./caja/Dialogos";
 import PagosElectronicos from "./caja/PagosElectronicos";
 import VistaZ from "./caja/VistaZ";
@@ -593,6 +594,8 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
   const [motivo, setMotivo] = useState("");
   const [opciones, setOpciones] = useState<OpcionesCierre>(opcionesPorDefecto(p.estado));
   const cargar = () => detalleTurno(p.turnoId).then(setD, (e) => setError(textoError(e)));
+  const toast = useToast();
+  const envio = useEnvio(); // reabrir y marcar revisada: un clic, una vez
   useEffect(() => {
     void cargar();
   }, [p.turnoId]);
@@ -615,24 +618,37 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
           )}
           {admin && t.diferencia != null && t.diferencia !== 0 && Math.abs(t.diferencia) >= umbral && !t.revisadaPor && (
             <Alert tono="aviso" titulo="Diferencia por revisar">
-              <Button icono={CheckCircle2} onClick={async () => (await marcarRevisada(t.id).catch((e) => setError(textoError(e))), await cargar(), await p.onCambio())}>
+              <Button
+                icono={CheckCircle2}
+                disabled={envio.ocupado}
+                onClick={() =>
+                  envio.enviar(async () => {
+                    await marcarRevisada(t.id).then(() => toast.ok("Diferencia marcada como revisada."), (e) => setError(textoError(e)));
+                    await cargar();
+                    await p.onCambio();
+                  })
+                }
+              >
                 Marcar como revisada
               </Button>
             </Alert>
           )}
           {reabrir ? (
             <form
-              onSubmit={async (e) => {
+              onSubmit={(e) => {
                 e.preventDefault();
                 setError("");
-                try {
-                  await reabrirCaja(t.id, pin, motivo);
-                  await p.onCambio();
-                  p.onCerrar();
-                } catch (err) {
-                  setPin("");
-                  setError(textoError(err));
-                }
+                void envio.enviar(async () => {
+                  try {
+                    await reabrirCaja(t.id, pin, motivo);
+                    await p.onCambio();
+                    toast.ok("Caja reabierta. Cuente otra vez al cerrar.");
+                    p.onCerrar();
+                  } catch (err) {
+                    setPin("");
+                    setError(textoError(err));
+                  }
+                });
               }}
             >
               <Alert tono="aviso">Reabrir borra el conteo de este cierre (queda en la bitácora) y deja contar otra vez.</Alert>
@@ -645,7 +661,7 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
               <div className="fila-botones">
                 <Button onClick={() => setReabrir(false)}>Cancelar</Button>
                 <span className="separador" />
-                <Button type="submit" variante="primario" icono={RotateCcw} disabled={!pin || motivo.trim().length < 5}>
+                <Button type="submit" variante="primario" icono={RotateCcw} disabled={!pin || motivo.trim().length < 5 || envio.ocupado}>
                   Reabrir caja
                 </Button>
               </div>

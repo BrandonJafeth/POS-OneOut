@@ -28,6 +28,7 @@ import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
 import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
+import { useEnvio } from "../../ui/useEnvio";
 import { opcionesPorDefecto } from "../../lib/caja/reporteZ";
 import ConteoDinero from "./Conteo";
 import PagosElectronicos from "./PagosElectronicos";
@@ -74,8 +75,9 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
   const [categoria, setCategoria] = useState(motivos[0] ?? "");
   const [texto, setTexto] = useState("");
   const [nota, setNota] = useState("");
-  const [error, setError] = useState("");
   const [pidePin, setPidePin] = useState(false);
+  // Dinero: un doble clic o doble Enter registraría la entrada dos veces.
+  const { ocupado, error, setError, enviar: unaVez } = useEnvio();
   const valor = leerMontoEntero(texto);
   const grande = p.tipo === "salida" && valor !== null && valor > p.estado.salidaMaxSinPin;
 
@@ -88,15 +90,11 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
   return (
     <Modal titulo={p.tipo === "salida" ? "Salida de efectivo" : "Entrada de efectivo"} onCerrar={p.onCerrar} ancho={460}>
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
           setError("");
           if (grande) return setPidePin(true);
-          try {
-            await enviar();
-          } catch (err) {
-            setError(textoError(err));
-          }
+          void unaVez(() => enviar());
         }}
       >
         <Field label="Monto">
@@ -114,7 +112,7 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
         </Field>
         {grande && <Alert tono="aviso">Pasa de {monto(p.estado.salidaMaxSinPin)}: pide el PIN del dueño.</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={p.tipo === "salida" ? ArrowUpFromLine : ArrowDownToLine} atajo="Enter" disabled={!categoria || !texto}>
+        <Button type="submit" variante="primario" icono={p.tipo === "salida" ? ArrowUpFromLine : ArrowDownToLine} atajo="Enter" disabled={!categoria || !texto || ocupado}>
           Registrar {valor ? monto(valor) : ""}
         </Button>
       </form>
@@ -345,20 +343,16 @@ export function NoVenta(p: { motivos: string[]; onCerrar(): void; onListo(): voi
 export function GavetaDueno(p: { onCerrar(): void; onListo(): void }) {
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   return (
     <Modal titulo="Abrir la gaveta (orden del dueño)" onCerrar={p.onCerrar} ancho={420}>
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          setError("");
-          try {
+          void enviar(async () => {
             await gavetaDueno(pin, motivo.trim());
             p.onListo();
-          } catch (err) {
-            setPin("");
-            setError(textoError(err));
-          }
+          }).then((ok) => ok || setPin(""));
         }}
       >
         <Field label="Motivo">
@@ -368,7 +362,7 @@ export function GavetaDueno(p: { onCerrar(): void; onListo(): void }) {
           <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </Field>
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={ShieldCheck} disabled={!pin || motivo.trim().length < 3}>
+        <Button type="submit" variante="primario" icono={ShieldCheck} disabled={!pin || motivo.trim().length < 3 || ocupado}>
           Abrir la gaveta
         </Button>
       </form>

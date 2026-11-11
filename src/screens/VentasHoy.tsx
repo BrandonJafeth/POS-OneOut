@@ -26,6 +26,7 @@ import FilaClic from "../ui/FilaClic";
 import Paginacion from "../ui/Paginacion";
 import PedirFactura from "./venta/PedirFactura";
 import { useToast } from "../ui/Toast";
+import { useEnvio } from "../ui/useEnvio";
 
 const POR_PAGINA = 50;
 
@@ -184,6 +185,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   const [factura, setFactura] = useState(false);
   const [error, setError] = useState("");
   const toast = useToast();
+  const impresion = useEnvio(); // doble clic en "Reimprimir" = un solo papel
 
   const cargar = async () => {
     const x = await obtenerVenta(p.ventaId);
@@ -297,7 +299,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
       )}
       <Mensaje error={error} />
       <div className="fila-botones">
-        <Button icono={Printer} onClick={reimprimir}>
+        <Button icono={Printer} disabled={impresion.ocupado} onClick={() => impresion.enviar(reimprimir)}>
           {v.impreso ? "Reimprimir (sale como COPIA)" : "Imprimir tiquete"}
         </Button>
         {v.estado === "completada" && !v.requiereFactura && puede("facturas") && (
@@ -370,7 +372,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
   const [ultimos4, setUltimos4] = useState(p.pago.ultimos4 ?? "");
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   useEffect(() => {
     void listarFormasPago().then(setFormas);
     void listarBancos().then(setBancos);
@@ -386,15 +388,12 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
   return (
     <Modal titulo={`Corregir pago de ${monto(p.pago.monto)}`} onCerrar={p.onCerrar} ancho={480}>
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          setError("");
-          try {
+          void enviar(async () => {
             await corregirPago(actor, p.pago.id, { formaPagoId: forma, bancoId: banco || null, referencia, ultimos4 }, motivo, pin || undefined);
             await p.onListo();
-          } catch (err) {
-            setError(textoError(err));
-          }
+          });
         }}
       >
         <p className="muted">El monto y el total no cambian; solo la forma de pago. Queda el historial.</p>
@@ -447,7 +446,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         </label>
         {sinCambios && <Alert tono="info">Esa ya es la forma de pago registrada. Elija la forma correcta (o cambie el banco o la referencia).</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || motivo.trim().length < 5}>
+        <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || motivo.trim().length < 5 || ocupado}>
           Guardar corrección
         </Button>
       </form>
@@ -460,21 +459,17 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
   const [devolver, setDevolver] = useState(conMiles(String(Math.max(0, p.efectivo))));
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   return (
     <Modal titulo={`Anular tiquete ${p.numero}`} onCerrar={p.onCerrar} ancho={420}>
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          setError("");
-          try {
+          void enviar(async () => {
             const dev = p.turnoAbierto ? 0 : Number(devolver.replace(/\D/g, "") || 0);
             await anularVenta(actor, p.ventaId, pin, motivo, dev);
             await p.onListo();
-          } catch (err) {
-            setError(textoError(err));
-            setPin("");
-          }
+          }).then((ok) => ok || setPin(""));
         }}
       >
         <Alert tono="aviso">La venta queda registrada como anulada (no se borra) y conserva su número. No se puede deshacer.</Alert>
@@ -505,7 +500,7 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
           <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </Field>
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="peligro-lleno" icono={ShieldCheck} disabled={!pin || !motivo.trim()}>
+        <Button type="submit" variante="peligro-lleno" icono={ShieldCheck} disabled={!pin || !motivo.trim() || ocupado}>
           Anular definitivamente
         </Button>
       </form>

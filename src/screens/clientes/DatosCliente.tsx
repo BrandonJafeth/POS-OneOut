@@ -20,6 +20,7 @@ import { monto } from "../../lib/tickets";
 import { plural } from "../../lib/texto";
 import { TIPO_IDENTIFICACION, type Cliente, type TipoIdentificacion } from "../../tipos";
 import { useToast } from "../../ui/Toast";
+import { useEnvio } from "../../ui/useEnvio";
 
 export default function DatosCliente(p: { clienteId: string; motivoSugerido?: MotivoAnonimizacion; onCerrar(): void; onCambio(): void }) {
   const { actor } = useSesion();
@@ -29,6 +30,7 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
   const [anonimizando, setAnonimizando] = useState(false);
   const [error, setError] = useState("");
   const toast = useToast();
+  const envio = useEnvio(); // guardar y exportar, de a uno (doble clic = un solo archivo)
 
   async function cargar() {
     const x = await obtenerCliente(actor, p.clienteId);
@@ -55,9 +57,9 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
         correo: form!.correo,
         notas: form!.notas,
       });
-      await cargar();
       p.onCambio();
       toast.ok("Datos corregidos.");
+      p.onCerrar();
     } catch (e) {
       setError(textoError(e));
     }
@@ -127,11 +129,15 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
       <Mensaje error={error} />
       {!anonimo && (
         <div className="row">
-          <button className="primary" disabled={!sucio} onClick={guardar}>
+          <button className="primary" disabled={!sucio || envio.ocupado} onClick={() => envio.enviar(guardar)}>
             Guardar corrección
           </button>
-          <button onClick={() => exportar("pdf")}>Exportar PDF</button>
-          <button onClick={() => exportar("csv")}>Exportar CSV</button>
+          <button disabled={envio.ocupado} onClick={() => envio.enviar(() => exportar("pdf"))}>
+            Exportar PDF
+          </button>
+          <button disabled={envio.ocupado} onClick={() => envio.enviar(() => exportar("csv"))}>
+            Exportar CSV
+          </button>
           <button className="peligro" onClick={() => setAnonimizando(true)}>
             Anonimizar…
           </button>
@@ -144,10 +150,9 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
           onCerrar={() => setAnonimizando(false)}
           onConfirmar={async (pin, motivo) => {
             await anonimizarCliente(actor, c.id, pin, motivo);
-            setAnonimizando(false);
-            await cargar();
             p.onCambio();
             toast.ok("Cliente anonimizado.");
+            p.onCerrar();
           }}
         />
       )}
@@ -163,23 +168,17 @@ function Anonimizar(p: {
 }) {
   const [pin, setPin] = useState("");
   const [motivo, setMotivo] = useState<MotivoAnonimizacion | "">(p.motivoSugerido ?? "");
-  const [error, setError] = useState("");
+  const { ocupado, error, setError, enviar } = useEnvio();
   return (
     <Modal titulo="Anonimizar cliente" onCerrar={p.onCerrar} ancho={460}>
       {p.bloqueo ? (
         <Mensaje error={p.bloqueo} />
       ) : (
         <form
-          onSubmit={async (e) => {
+          onSubmit={(e) => {
             e.preventDefault();
-            setError("");
             if (!motivo) return setError("Elija el motivo");
-            try {
-              await p.onConfirmar(pin, motivo);
-            } catch (err) {
-              setError(textoError(err));
-              setPin("");
-            }
+            void enviar(() => p.onConfirmar(pin, motivo)).then((ok) => ok || setPin(""));
           }}
         >
           <p>
@@ -202,7 +201,7 @@ function Anonimizar(p: {
             <input className="pin" type="password" inputMode="numeric" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </label>
           <Mensaje error={error} />
-          <button className="peligro" disabled={!pin || !motivo}>
+          <button className="peligro" disabled={!pin || !motivo || ocupado}>
             Anonimizar definitivamente
           </button>
         </form>

@@ -19,6 +19,9 @@ export default function Modal({ titulo, onCerrar, children, ancho = 560, pie }: 
   const id = useId();
   const cerrar = useRef(onCerrar);
   cerrar.current = onCerrar;
+  // Con algo escrito, un clic fuera de la ventana (sin querer, al soltar el mouse) NO la cierra:
+  // se perdería lo escrito. La X, Esc y los botones sí la cierran.
+  const escrito = useRef(false);
 
   useEffect(() => {
     const el = caja.current;
@@ -50,8 +53,8 @@ export default function Modal({ titulo, onCerrar, children, ancho = 560, pie }: 
   }, []);
 
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
-      <div ref={caja} className="modal" role="dialog" aria-modal="true" aria-labelledby={id} style={{ width: ancho }}>
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !escrito.current && onCerrar()}>
+      <div ref={caja} className="modal" role="dialog" aria-modal="true" aria-labelledby={id} style={{ width: ancho }} onInput={() => (escrito.current = true)}>
         <div className="modal-cab">
           <h2 id={id}>{titulo}</h2>
           <button type="button" className="btn btn-fantasma btn-md" onClick={onCerrar} aria-label="Cerrar" title="Cerrar (Esc)" style={{ width: 44, padding: 0 }}>
