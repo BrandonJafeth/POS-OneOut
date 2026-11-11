@@ -106,7 +106,7 @@ Prepare: la POS-58 (tiquetes, con la gaveta) y otra impresora para etiquetas (o 
 
 ## L. No venta, orden del dueño y corte
 
-1. En Venta o Caja pulse **No venta**, elija "Cambio de billetes". → Abre la gaveta. "Otro" pide escribir el motivo.
+1. En Venta o Caja pulse **Abrir gaveta**, elija "Cambio de billetes". → Abre la gaveta. "Otro" pide escribir el motivo.
 2. **Gaveta (dueño)**: pide el PIN del dueño y un motivo. El PIN de Luis no sirve.
 3. No hay otra forma de abrirla: Técnico → Hardware ya no tiene botón de gaveta, y una venta con tarjeta no la abre.
 4. Como Ana, **Caja → Corte** sin retiro. → Muestra e imprime lo vendido por forma de pago; la caja sigue abierta. Otro corte con retiro de ¢10.000 → pide su PIN y aparece como salida.
@@ -223,7 +223,7 @@ Se hace una vez, en la computadora del negocio, antes de dejarla en uso. Marque 
 - [ ] 15. **Anular** una venta (PIN del dueño). → Pide motivo; el efectivo esperado baja; queda en la bitácora.
 - [ ] 16. **Entrada** de efectivo y **salida** de efectivo. → Comprobante impreso; el esperado cambia.
 - [ ] 17. **Ajuste de inventario** de un producto con control. → El kardex muestra el movimiento con el motivo.
-- [ ] 18. **No venta** (abrir gaveta sin vender). → Pide motivo; queda registrada.
+- [ ] 18. **Abrir gaveta** sin vender. → Pide motivo; queda registrada.
 - [ ] 19. **Corte** a medio turno. → Imprime corte; la caja sigue abierta.
 - [ ] 20. **Cambiar de usuario** con la caja abierta (cajero ↔ dueño). → El cajero ve en Ventas del día los tiquetes de todos (sin totales del turno) y no entra a Administración.
 

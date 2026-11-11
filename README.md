@@ -43,7 +43,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 
 ## Venta (fase 2)
 
-- Atajos: F2 nueva venta en espera · F3 buscar · F4 precio libre · F6 por departamento · F7 cliente · F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · `3*código` = 3 unidades.
+- Atajos (botón «Atajos» o F1 en la venta): F2 nueva venta en espera · F3 buscar · F4 precio libre · F7 cliente · F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · `3*código` = 3 unidades.
 - Ventas en espera: se guardan en SQLite en cada cambio (tabla `ventas_espera`).
 - Consecutivo: `prefijo de la caja + número`, tomado dentro de la transacción del cobro (`BEGIN IMMEDIATE`): sin saltos ni repetidos.
 - Total redondeado al múltiplo de `redondeo_total` (₡5 por defecto, al más cercano) solo si hay efectivo entre los pagos; con tarjeta, SINPE o transferencia se cobra exacto. Descuento por rol: `descuento_max_pct`; si se pasa, PIN de dueño.

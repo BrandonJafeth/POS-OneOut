@@ -154,8 +154,8 @@ export default function Impresora({ settings, onSettings }: Props) {
           </button>
         </div>
         <p className="note">
-          La gaveta no se abre desde aquí: solo con una venta en efectivo, una «No venta» con motivo o una orden del dueño con
-          su PIN (Caja). Para probarla, use «No venta» en la caja.
+          La gaveta no se abre desde aquí: solo con una venta en efectivo, «Abrir gaveta» con motivo o una orden del dueño con
+          su PIN (Caja). Para probarla, use «Abrir gaveta» en la caja.
         </p>
         <p className="muted">
           "OK" = Windows aceptó el trabajo. Confirme siempre en el papel; si algo no sale, revise la cola de impresión

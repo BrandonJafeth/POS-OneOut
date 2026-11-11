@@ -1,12 +1,13 @@
 // Pantalla de venta: catálogo (favoritos, departamentos, búsqueda) a la izquierda y el tiquete a
 // la derecha. Pensada para teclado y lector: el foco vuelve al buscador.
-// Atajos: F2 nueva venta en espera · F3 buscar · F4 venta simple (precio libre) · F7 cliente ·
+// Atajos (F1 los muestra, ver ATAJOS): F2 nueva venta en espera · F3 buscar · F4 venta simple (precio libre) · F7 cliente ·
 // F8 descuento al total · F12 cobrar · Supr quitar línea · Ctrl+1…9 pestañas · ↑↓ elegir.
 // "3*código" agrega 3 unidades.
 // Las pestañas viven en useEsperas, el catálogo en useCatalogo y las reglas de dinero en
 // lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
 import { flechasPestanas } from "../ui/pestanas";
-import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus } from "lucide-react";
+import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
+import type { Permiso } from "../lib/permisos";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
@@ -37,7 +38,41 @@ import { useEsperas } from "./venta/useEsperas";
 import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { fondoPildora, textoSobre } from "../ui/departamentos";
 
-type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | null;
+type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | null;
+
+/** Lo que muestra el botón "Atajos" (F1). Debe coincidir con el manejador de teclas de Venta y con Cobro. */
+const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso?: Permiso }[] }[] = [
+  {
+    grupo: "Vender",
+    lista: [
+      { teclas: ["F3"], texto: "Ir al buscador" },
+      { teclas: ["3", "*", "código"], texto: "Agregar 3 unidades de una vez" },
+      { teclas: ["↑", "↓"], texto: "Elegir entre los resultados" },
+      { teclas: ["Enter"], texto: "Agregar el producto elegido" },
+      { teclas: ["Esc"], texto: "Borrar la búsqueda" },
+      { teclas: ["F4"], texto: "Venta simple (algo sin código, solo el monto)" },
+      { teclas: ["F7"], texto: "Cliente o factura", permiso: "clientes.basico" },
+    ],
+  },
+  {
+    grupo: "Tiquete",
+    lista: [
+      { teclas: ["F2"], texto: "Nueva venta en espera" },
+      { teclas: ["Ctrl", "1…9"], texto: "Cambiar de venta en espera" },
+      { teclas: ["Supr"], texto: "Quitar la línea abierta" },
+      { teclas: ["F8"], texto: "Descuento al total" },
+    ],
+  },
+  {
+    grupo: "Cobrar",
+    lista: [
+      { teclas: ["F12"], texto: "Abrir el cobro" },
+      { teclas: ["F12"], texto: "Dentro del cobro: confirmar (F12 dos veces = efectivo exacto)" },
+      { teclas: ["Enter"], texto: "Al terminar: siguiente venta" },
+      { teclas: ["Esc"], texto: "Cerrar cualquier ventana" },
+    ],
+  },
+];
 
 /** Igual que calculo.rs (validar_linea): unidades por línea. */
 const MAX_CANTIDAD = 100_000;
@@ -277,21 +312,30 @@ export default function Venta() {
     }
   }
 
-  // ── Atajos de teclado
+  // Sin caja abierta de hoy, o con un turno que este usuario no puede usar (turno por persona), no se
+  // vende (Rust también lo rechaza al cobrar). Con turno compartido, cualquiera vende en el abierto.
+  const ajena = !!caja?.turno && !caja.puedeUsar;
+  const cerrada = !!caja && (!caja.turno || caja.deOtroDia || ajena);
+
+  // ── Atajos de teclado (la lista visible está en ATAJOS, abajo: si cambia uno, cambiar los dos)
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
+      // Con la caja cerrada no hay venta en pantalla: un F4 dejaría un diálogo escondido que aparece al abrir.
+      if (cerrada) return;
       if (cobrada && (e.key === "Enter" || e.key === "Escape")) {
         e.preventDefault();
         return cerrarCobrada();
       }
       if (modal) return;
+      const vacia = () => setAviso("La venta está vacía: escanee o toque un producto primero.");
       const atajos: Record<string, () => void> = {
+        F1: () => setDialogo("atajos"),
         F2: () => void nuevaEspera(),
         F3: () => buscador.current?.select(),
         F4: () => setDialogo("libre"),
         F7: () => puede("clientes.basico") && setDialogo("cliente"),
-        F8: () => estado.lineas.length && setDialogo("descuento"),
-        F12: () => estado.lineas.length && setDialogo("cobro"),
+        F8: () => (estado.lineas.length ? setDialogo("descuento") : vacia()),
+        F12: () => (estado.lineas.length ? setDialogo("cobro") : vacia()),
       };
       if (atajos[e.key]) {
         e.preventDefault();
@@ -328,10 +372,7 @@ export default function Venta() {
   const articulos = estado.lineas.reduce((s, l) => s + l.cantidad, 0);
   const puedeFavoritos = puede("productos");
 
-  // Sin caja abierta de hoy, o con un turno que este usuario no puede usar (turno por persona), no se
-  // vende (Rust también lo rechaza al cobrar). Con turno compartido, cualquiera vende en el abierto.
-  const ajena = !!caja?.turno && !caja.puedeUsar;
-  if (caja && (!caja.turno || caja.deOtroDia || ajena))
+  if (caja && cerrada)
     return (
       <div className="screen centro">
         <section className="card login-card">
@@ -426,9 +467,12 @@ export default function Venta() {
           <span style={{ flex: 1 }} />
           {caja?.puedeUsar && (
             <Button variante="fantasma" icono={Inbox} onClick={() => setDialogo("noventa")} title="Abrir la gaveta sin vender (cambio de billetes…). Queda anotado.">
-              No venta
+              Abrir gaveta
             </Button>
           )}
+          <Button variante="fantasma" icono={Keyboard} atajo="F1" onClick={() => setDialogo("atajos")}>
+            Atajos
+          </Button>
           <label className="catalogo-orden">
             <span>Ordenar</span>
             <select value={orden} onChange={(e) => (cambiarOrden(e.target.value as OrdenProductos), alBuscador())}>
@@ -449,6 +493,7 @@ export default function Venta() {
             <button className="tile tile-libre" onClick={() => setDialogo("libre")} title="Atajo: F4">
               <Banknote size={30} aria-hidden strokeWidth={1.75} />
               <span>Venta simple</span>
+              <small>Algo sin código: solo el monto</small>
             </button>
           )}
           {productos.map((p, i) => (
@@ -559,6 +604,7 @@ export default function Venta() {
             ))}
           </ul>
         )}
+        {estado.lineas.length > 0 && !lineaSel && <p className="tiquete-pista">Toque un producto del tiquete para darle descuento o quitarlo.</p>}
 
         <div className="tiquete-pie">
           {faltan.length > 0 && (
@@ -574,7 +620,7 @@ export default function Venta() {
               {config.mostrar_iva && <Fila k="IVA incluido" v={monto(t.iva)} />}
             </div>
           )}
-          <Button variante="primario" tamano="xl" className="cobrar" atajo="F12" disabled={!estado.lineas.length} onClick={() => setDialogo("cobro")}>
+          <Button variante="primario" tamano="xl" className="cobrar" atajo="F12" verAtajo disabled={!estado.lineas.length} onClick={() => setDialogo("cobro")}>
             Cobrar
             <span className="cobrar-monto">{monto(t.total)}</span>
           </Button>
@@ -611,6 +657,31 @@ export default function Venta() {
       )}
       {dialogo === "noventa" && caja && (
         <NoVenta motivos={caja.noVentaMotivos} onCerrar={() => (setDialogo(null), alBuscador())} onListo={() => (setDialogo(null), toast.ok("Gaveta abierta. Quedó anotado."), alBuscador())} />
+      )}
+      {dialogo === "atajos" && (
+        <Modal titulo="Atajos de teclado" onCerrar={() => setDialogo(null)} ancho={620}>
+          <div className="atajos">
+            {ATAJOS.map((g) => (
+              <section key={g.grupo}>
+                <h3>{g.grupo}</h3>
+                <dl>
+                  {g.lista
+                    .filter((a) => !a.permiso || puede(a.permiso))
+                    .map((a) => (
+                      <div key={a.texto}>
+                        <dt>
+                          {a.teclas.map((x) => (
+                            <kbd key={x}>{x}</kbd>
+                          ))}
+                        </dt>
+                        <dd>{a.texto}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </Modal>
       )}
       {dialogo === "cobro" && <Cobro total={t.total} totalExacto={t.total - t.redondeo} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
       {sinExistencia && (

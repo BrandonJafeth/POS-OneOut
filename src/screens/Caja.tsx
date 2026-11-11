@@ -160,8 +160,8 @@ export default function Caja() {
                     <Button icono={ArrowUpFromLine} onClick={() => setDialogo("salida")}>
                       Salida
                     </Button>
-                    <Button icono={Inbox} onClick={() => setDialogo("noventa")} title="Abrir la gaveta sin vender (cambio de billetes…)">
-                      No venta
+                    <Button icono={Inbox} onClick={() => setDialogo("noventa")} title="Abrir la gaveta sin vender (cambio de billetes…). Queda anotado.">
+                      Abrir gaveta
                     </Button>
                   </>
                 )}

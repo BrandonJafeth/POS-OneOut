@@ -189,6 +189,50 @@ kbd {
   opacity: 0.75;
 }
 
+/* Ayuda de atajos (Venta → F1): tecla a la izquierda, qué hace a la derecha. */
+.atajos {
+  display: grid;
+  gap: 20px;
+}
+
+.atajos h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.atajos dl {
+  margin: 0;
+}
+
+.atajos dl > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 7px 0;
+  border-top: 1px solid var(--hair);
+}
+
+.atajos dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.atajos dd {
+  margin: 0;
+}
+
+.atajos kbd {
+  min-width: 28px;
+  padding: 2px 7px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+  border-color: var(--line);
+}
+
 .btn-primario,
 button.primary {
   background: var(--accent);
@@ -463,6 +507,9 @@ label.check {
 }
 
 .contenido {
+  /* Contenedor de lo oculto con .sr-only (p. ej. el <input type="file"> de "Subir imagen"): sin esto
+     queda posicionado contra la página, la alarga, y al enfocarlo la ventana entera se corre hacia arriba. */
+  position: relative;
   overflow: auto;
   padding: var(--e5) var(--e6);
   min-width: 0;
@@ -1320,6 +1367,20 @@ details.fiscal summary {
 
 .tile-libre span {
   font-size: 15px;
+}
+
+.tile-libre small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Pista para quien empieza: las líneas se abren con un toque (descuento, quitar). */
+.tiquete-pista {
+  margin: 0;
+  padding: var(--e2) var(--e4);
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .grilla-aviso {
