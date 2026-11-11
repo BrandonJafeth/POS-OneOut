@@ -106,6 +106,19 @@ pub fn texto(v: &str, max: usize, campo: &str, obligatorio: bool) -> Res<String>
     Ok(t.to_string())
 }
 
+/// Error "Ya existe {que} «X»" si otra fila viva de `tabla` tiene el mismo nombre ("Adrián Pérez",
+/// "adrian  perez" y "ADRIÁN PÉREZ" son el mismo). Llamarla DENTRO de la transacción que inserta
+/// (BEGIN IMMEDIATE): así un doble clic no pasa la revisión dos veces antes de guardar.
+/// `tabla` es siempre un literal del código, nunca algo que llegue de la pantalla.
+pub async fn nombre_libre(c: &mut sqlx::SqliteConnection, tabla: &'static str, nombre: &str, excluir: &str, que: &str) -> Res<()> {
+    let buscado = normalizar(nombre);
+    let filas: Vec<(String, String)> = sqlx::query_as(&format!("SELECT id, nombre FROM {tabla} WHERE eliminado_en IS NULL")).fetch_all(&mut *c).await.map_err(e)?;
+    match filas.into_iter().find(|(id, n)| id != excluir && normalizar(n) == buscado) {
+        Some((_, n)) => Err(format!("Ya existe {que} «{n}». Use otro nombre o edite el que ya está.")),
+        None => Ok(()),
+    }
+}
+
 /// Subcarpeta "AAAA-MM": la ventana solo elige el mes, nunca una ruta.
 pub fn mes_valido(m: &str) -> Res<&str> {
     let b = m.as_bytes();

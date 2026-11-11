@@ -5,6 +5,7 @@ import { ahoraIso, limpiarNombre } from "../lib/texto";
 import { ulid } from "../lib/ulid";
 import { bitacora } from "./bitacora";
 import { bool, db } from "./conexion";
+import { exigirNombreLibre } from "./unicos";
 
 function aForma(f: Record<string, unknown>): FormaPago {
   return {
@@ -43,6 +44,7 @@ export async function guardarFormaPago(actor: Actor, f: Omit<FormaPago, "id"> & 
   exigir(actor);
   if (!f.nombre.trim()) throw new Error("Escriba el nombre");
   if (!/^[A-Z0-9]{1,6}$/i.test(f.codigo)) throw new Error("Código: 1 a 6 letras o números");
+  await exigirNombreLibre("formas_pago", f.nombre, f.id, "la forma de pago");
   const id = f.id ?? ulid();
   const ahora = ahoraIso();
   await db().lote([
@@ -58,6 +60,7 @@ export async function guardarFormaPago(actor: Actor, f: Omit<FormaPago, "id"> & 
 export async function guardarBanco(actor: Actor, b: Omit<Banco, "id"> & { id?: string }): Promise<string> {
   exigir(actor);
   if (!b.nombre.trim()) throw new Error("Escriba el nombre del banco");
+  await exigirNombreLibre("bancos", b.nombre, b.id, "el banco");
   const id = b.id ?? ulid();
   const ahora = ahoraIso();
   await db().lote([

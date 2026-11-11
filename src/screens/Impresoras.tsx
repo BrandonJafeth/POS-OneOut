@@ -28,6 +28,7 @@ import { useConfirmar } from "../ui/Confirmar";
 import EmptyState from "../ui/EmptyState";
 import Field from "../ui/Field";
 import { useToast } from "../ui/Toast";
+import { useEnvio } from "../ui/useEnvio";
 
 const NUEVA: DatosImpresora = { nombre: "", conexion: "windows", destino: "", anchoMm: 58, columnas: 32, codePage: 19, sinModoChino: true, barras: "B", cortador: false, gaveta: false, baudios: 9600 };
 const BAUDIOS = [2400, 4800, 9600, 19200, 38400, 57600, 115200];
@@ -201,24 +202,14 @@ export default function Impresoras() {
 
 function EditarImpresora(p: { datos: DatosImpresora; detectadas: Detectadas | null; otraConGaveta: string | null; onCerrar(): void; onGuardar(d: DatosImpresora): Promise<void> }) {
   const [d, setD] = useState<DatosImpresora>(p.datos);
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   const set = (patch: Partial<DatosImpresora>) => setD({ ...d, ...patch });
   const opciones = opcionesDestino(p.detectadas, d.conexion);
   // Si se edita y la impresora está desconectada, igual se muestra la guardada (no se pierde).
   const conGuardada = p.datos.id && p.datos.conexion === d.conexion && p.datos.destino && !opciones.some((o) => o.valor === p.datos.destino) ? [{ valor: p.datos.destino, texto: `${p.datos.destino} (no se encuentra ahora)` }, ...opciones] : opciones;
   return (
     <Modal titulo={d.id ? `Editar ${p.datos.nombre}` : "Agregar impresora"} onCerrar={p.onCerrar} ancho={560}>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setError("");
-          try {
-            await p.onGuardar(d);
-          } catch (err) {
-            setError(textoError(err));
-          }
-        }}
-      >
+      <form onSubmit={(e) => (e.preventDefault(), void enviar(() => p.onGuardar(d)))}>
         <Field label="Nombre" ayuda="Como la llaman en el negocio: «Tiquetes», «Etiquetas».">
           <input autoFocus value={d.nombre} maxLength={40} onChange={(e) => set({ nombre: e.target.value })} />
         </Field>
@@ -292,7 +283,7 @@ function EditarImpresora(p: { datos: DatosImpresora; detectadas: Detectadas | nu
         <div className="fila-botones">
           <Button onClick={p.onCerrar}>Cancelar</Button>
           <span className="separador" />
-          <Button type="submit" variante="primario" icono={Save} disabled={!d.nombre.trim() || !d.destino}>
+          <Button type="submit" variante="primario" icono={Save} disabled={!d.nombre.trim() || !d.destino || ocupado}>
             Guardar
           </Button>
         </div>

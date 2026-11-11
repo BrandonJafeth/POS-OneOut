@@ -105,6 +105,26 @@ fn validar(d: &Datos) -> Res<Limpios> {
     Ok(Limpios { nombre, telefono, tipo, cedula, correo, notas: opcional(d.notas.as_deref(), 500, "notas")? })
 }
 
+/// El mismo cliente dos veces: misma cédula, o mismo nombre con el mismo teléfono. Dos «María» con
+/// teléfonos distintos sí pueden existir. Los anonimizados no cuentan. Va dentro de la transacción.
+async fn exigir_no_repetido(c: &mut sqlx::SqliteConnection, l: &Limpios, excluir: &str) -> Res<()> {
+    let solo = |s: &str, f: fn(&char) -> bool| s.chars().filter(f).flat_map(char::to_uppercase).collect::<String>();
+    let ced = l.cedula.as_deref().map(|x| solo(x, char::is_ascii_alphanumeric)).filter(|x| !x.is_empty());
+    let tel = l.telefono.as_deref().map(|x| solo(x, char::is_ascii_digit)).filter(|x| !x.is_empty());
+    let nom = normalizar(&l.nombre);
+    let filas: Vec<(String, String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT nombre, nombre_busqueda, cedula, telefono FROM clientes WHERE anonimizado_en IS NULL AND id != ?").bind(excluir).fetch_all(&mut *c).await.map_err(e)?;
+    for (nombre, busqueda, cedula, telefono) in filas {
+        if ced.is_some() && cedula.as_deref().map(|x| solo(x, char::is_ascii_alphanumeric)) == ced {
+            return Err(format!("Esa cédula ya es de «{nombre}». Búsquelo en vez de registrarlo otra vez."));
+        }
+        if tel.is_some() && busqueda == nom && telefono.as_deref().map(|x| solo(x, char::is_ascii_digit)) == tel {
+            return Err(format!("«{nombre}» ya está registrado con ese teléfono. Búsquelo en vez de registrarlo otra vez."));
+        }
+    }
+    Ok(())
+}
+
 /// Alta (cajero o dueño). `consentimiento` es la casilla "El cliente fue informado y acepta".
 pub async fn crear(pool: &SqlitePool, a: &Actor, d: &Datos, consentimiento: bool, version_aviso: &str) -> Res<Basico> {
     a.exigir("clientes.basico", "registrar clientes")?;
@@ -125,6 +145,7 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, d: &Datos, consentimiento: bool
     if version != vigente {
         return Err("El aviso de privacidad cambió. Cierre esta ventana y vuelva a mostrárselo al cliente.".into());
     }
+    exigir_no_repetido(&mut tx, &l, "").await?;
     sqlx::query(
         "INSERT INTO clientes (id, nombre, nombre_busqueda, tipo_identificacion, cedula, telefono, correo, notas,
            consentimiento_datos, consentimiento_fecha, consentimiento_version, creado_en, actualizado_en)
@@ -241,6 +262,7 @@ pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, d: &Datos) -> Res<()
     if f.get::<Option<String>, _>("anonimizado_en").is_some() {
         return Err("El cliente está anonimizado".into());
     }
+    exigir_no_repetido(&mut tx, &l, id).await?;
     let mut campos = Vec::new();
     let pares: [(&str, &str, Option<&String>); 6] = [
         ("nombre", "nombre", Some(&l.nombre)),
@@ -393,11 +415,29 @@ mod tests {
         let con_notas = Datos { notas: Some("debe plata".into()), ..datos() };
         assert!(crear(p, &cajero, &con_notas, true, "1").await.unwrap_err().contains("dueño"));
         crear(p, &cajero, &datos(), true, "1").await.unwrap();
-        crear(p, &dueno, &Datos { nombre: "Otro".into(), ..con_notas }, true, "1").await.unwrap();
+        crear(p, &dueno, &Datos { nombre: "Otro".into(), cedula: Some("2-2222-2222".into()), ..con_notas }, true, "1").await.unwrap();
         // Aviso cambiado (versión 2): un consentimiento dado sobre el aviso viejo no sirve.
         sqlx::query("UPDATE negocio SET aviso_privacidad_version = '2' WHERE id = 1").execute(p).await.unwrap();
-        assert!(crear(p, &cajero, &datos(), true, "1").await.unwrap_err().contains("aviso"));
-        crear(p, &cajero, &datos(), true, "2").await.unwrap();
+        let ana = Datos { nombre: "Ana Mora".into(), telefono: "8777-0000".into(), cedula: None, correo: None, ..Default::default() };
+        assert!(crear(p, &cajero, &ana, true, "1").await.unwrap_err().contains("aviso"));
+        crear(p, &cajero, &ana, true, "2").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn el_mismo_cliente_no_se_registra_dos_veces() {
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let maria = crear(p, &cajero, &datos(), true, "1").await.unwrap();
+        // Misma cédula escrita distinto (sin guiones): es la misma persona.
+        let otra_forma = Datos { nombre: "M. Rojas".into(), telefono: "".into(), cedula: Some("111111111".into()), correo: None, ..Default::default() };
+        assert!(crear(p, &cajero, &otra_forma, true, "1").await.unwrap_err().contains("María Rojas"));
+        // Mismo nombre (sin tilde) y mismo teléfono (sin guion), sin cédula.
+        let sin_cedula = Datos { nombre: "maria  rojas".into(), telefono: "88881234".into(), cedula: None, correo: None, ..Default::default() };
+        assert!(crear(p, &cajero, &sin_cedula, true, "1").await.unwrap_err().contains("teléfono"));
+        // Otra María con otro teléfono sí: son dos personas.
+        crear(p, &cajero, &Datos { telefono: "8999-0000".into(), ..sin_cedula }, true, "1").await.unwrap();
+        // Corregir sus propios datos no choca consigo mismo.
+        editar(p, &dueno, &maria.id, &Datos { correo: None, ..datos() }).await.unwrap();
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@ import Mensaje, { textoError } from "../../components/Mensaje";
 import { ADVERTENCIA_NOTAS, crearCliente } from "../../db/clientes";
 import { obtenerNegocio } from "../../db/negocio";
 import type { ClienteBasico, Negocio } from "../../tipos";
+import { useEnvio } from "../../ui/useEnvio";
 
 export default function NuevoCliente(p: { onCreado(c: ClienteBasico): void; onCerrar(): void }) {
   const { actor, puede } = useSesion();
@@ -17,7 +18,7 @@ export default function NuevoCliente(p: { onCreado(c: ClienteBasico): void; onCe
   const [correo, setCorreo] = useState("");
   const [notas, setNotas] = useState("");
   const [acepta, setAcepta] = useState(false);
-  const [error, setError] = useState("");
+  const { ocupado, error, setError, enviar } = useEnvio();
 
   useEffect(() => {
     obtenerNegocio().then(setNegocio, (e) => setError(textoError(e)));
@@ -30,11 +31,7 @@ export default function NuevoCliente(p: { onCreado(c: ClienteBasico): void; onCe
     e.preventDefault();
     setError("");
     if (!acepta) return setError("Marque que el cliente fue informado y acepta. Sin eso no se guardan sus datos.");
-    try {
-      p.onCreado(await crearCliente(actor, { nombre, telefono, cedula, correo, notas }, true, negocio?.avisoPrivacidadVersion ?? "1"));
-    } catch (err) {
-      setError(textoError(err));
-    }
+    await enviar(async () => p.onCreado(await crearCliente(actor, { nombre, telefono, cedula, correo, notas }, true, negocio?.avisoPrivacidadVersion ?? "1")));
   }
 
   return (
@@ -80,7 +77,7 @@ export default function NuevoCliente(p: { onCreado(c: ClienteBasico): void; onCe
           sus datos
         </label>
         <Mensaje error={error} />
-        <button className="primary" disabled={!acepta}>
+        <button className="primary" disabled={!acepta || ocupado}>
           Guardar cliente
         </button>
       </form>

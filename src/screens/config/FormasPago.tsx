@@ -6,6 +6,7 @@ import { guardarBanco, guardarFormaPago, listarBancos, listarFormasPago } from "
 import type { Banco, FormaPago, TipoFormaPago } from "../../tipos";
 import Button from "../../ui/Button";
 import { useToast } from "../../ui/Toast";
+import { useEnvio } from "../../ui/useEnvio";
 
 const TIPOS: TipoFormaPago[] = ["efectivo", "tarjeta", "sinpe", "transferencia", "otro"];
 const NUEVA: Omit<FormaPago, "id"> = { codigo: "", nombre: "", tipo: "otro", requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, orden: 99, activo: true };
@@ -15,6 +16,7 @@ export function FormasPago() {
   const [lista, setLista] = useState<(Omit<FormaPago, "id"> & { id?: string })[]>([]);
   const [error, setError] = useState("");
   const toast = useToast();
+  const { ocupado, enviar } = useEnvio(); // doble clic en "Guardar" de una fila nueva = dos formas iguales
   const cargar = () => listarFormasPago({ incluirInactivas: true }).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
 
@@ -71,17 +73,21 @@ export function FormasPago() {
                 <Button
                   variante="primario"
                   icono={Save}
-                  onClick={async () => {
-                    setError("");
-                    try {
-                      await guardarFormaPago(actor, f);
-                      await cargar();
-                      toast.ok(`"${f.nombre}" guardada.`);
-                    } catch (e) {
-                      setError(textoError(e));
-                      await cargar(); // la fila vuelve a mostrar lo que quedó guardado, no lo rechazado
-                    }
-                  }}
+                  disabled={ocupado}
+                  onClick={() =>
+                    enviar(async () => {
+                      setError("");
+                      try {
+                        await guardarFormaPago(actor, f);
+                        await cargar();
+                        toast.ok(`"${f.nombre}" guardada.`);
+                      } catch (e) {
+                        setError(textoError(e));
+                        // Una fila ya guardada vuelve a lo guardado; una nueva rechazada se queda para corregirla.
+                        if (f.id) await cargar();
+                      }
+                    })
+                  }
                 >
                   Guardar
                 </Button>
@@ -105,6 +111,7 @@ export function Bancos() {
   const [lista, setLista] = useState<(Omit<Banco, "id"> & { id?: string })[]>([]);
   const [error, setError] = useState("");
   const toast = useToast();
+  const { ocupado, enviar } = useEnvio();
   const cargar = () => listarBancos({ incluirInactivos: true }).then(setLista, (e) => setError(textoError(e)));
   useEffect(() => void cargar(), []);
   const set = (i: number, patch: Partial<Banco>) => setLista(lista.map((b, j) => (j === i ? { ...b, ...patch } : b)));
@@ -144,16 +151,19 @@ export function Bancos() {
                 <Button
                   variante="primario"
                   icono={Save}
-                  onClick={async () => {
-                    setError("");
-                    try {
-                      await guardarBanco(actor, b);
-                      await cargar();
-                      toast.ok(`"${b.nombre}" guardado.`);
-                    } catch (e) {
-                      setError(textoError(e));
-                    }
-                  }}
+                  disabled={ocupado}
+                  onClick={() =>
+                    enviar(async () => {
+                      setError("");
+                      try {
+                        await guardarBanco(actor, b);
+                        await cargar();
+                        toast.ok(`"${b.nombre}" guardado.`);
+                      } catch (e) {
+                        setError(textoError(e));
+                      }
+                    })
+                  }
                 >
                   Guardar
                 </Button>

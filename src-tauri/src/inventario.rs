@@ -1036,6 +1036,7 @@ pub async fn proveedor_guardar(pool: &SqlitePool, a: &Actor, p: &Proveedor) -> R
     let notas = texto(&p.notas, 300, "notas", false)?;
     let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    crate::util::nombre_libre(&mut tx, "proveedores", &nombre, &p.id, "el proveedor").await?;
     let id = if p.id.is_empty() {
         let id = ulid();
         sqlx::query("INSERT INTO proveedores (id, nombre, telefono, notas, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?)").bind(&id).bind(&nombre).bind(&telefono).bind(&notas).bind(&ahora).bind(&ahora).execute(&mut *tx).await.map_err(e)?;
@@ -1337,7 +1338,13 @@ mod tests {
         conteo_descartar(p, &dueno, &id).await.unwrap();
         assert!(conteo_descartar(p, &dueno, &id).await.is_err());
         let prov = proveedor_guardar(p, &dueno, &Proveedor { id: String::new(), nombre: "Juan Pérez".into(), telefono: "8888-8888".into(), notas: "vecino".into() }).await.unwrap();
+        // El mismo proveedor otra vez (doble clic o escrito distinto): rechazado. Editarlo a sí mismo, no.
+        let otra_vez = Proveedor { id: String::new(), nombre: "juan  perez".into(), telefono: String::new(), notas: String::new() };
+        assert!(proveedor_guardar(p, &dueno, &otra_vez).await.unwrap_err().contains("Juan Pérez"));
+        proveedor_guardar(p, &dueno, &Proveedor { id: prov.clone(), ..otra_vez.clone() }).await.unwrap();
         proveedor_eliminar(p, &dueno, &prov).await.unwrap();
+        // Eliminado ya no cuenta: se puede volver a crear.
+        proveedor_guardar(p, &dueno, &otra_vez).await.unwrap();
         assert!(proveedor_eliminar(p, &dueno, &prov).await.is_err());
         let (tel, notas): (String, String) = sqlx::query_as("SELECT telefono, notas FROM proveedores WHERE id = ?").bind(&prov).fetch_one(p).await.unwrap();
         assert_eq!((tel.as_str(), notas.as_str()), ("", ""));

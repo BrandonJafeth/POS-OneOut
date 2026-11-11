@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/db/conexion";
 import { crearDepartamento, editarDepartamento, listarDepartamentos } from "../src/db/departamentos";
+import { guardarBanco, guardarFormaPago } from "../src/db/formasPago";
 import {
   asociarCodigo,
   buscarProductos,
@@ -131,6 +132,19 @@ describe("departamentos", () => {
     await editarDepartamento(DUENO, OFICINA, { nombre: "Oficina y escuela" });
     expect((await listarDepartamentos()).find((d) => d.id === OFICINA)?.nombre).toBe("Oficina y escuela");
     await expect(editarDepartamento(DUENO, OFICINA, { nombre: "librería" })).rejects.toThrow("Ya existe");
+  });
+});
+
+describe("nombres repetidos en configuración", () => {
+  it("no deja dos formas de pago ni dos bancos con el mismo nombre", async () => {
+    const TECNICO: Actor = { id: "T", rol: "tecnico" };
+    baseDePrueba({ rol: "tecnico", usuarioId: TECNICO.id });
+    const nueva = { codigo: "VALE", nombre: "Vale", tipo: "otro" as const, requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, orden: 9, activo: true };
+    const vale = await guardarFormaPago(TECNICO, nueva);
+    await expect(guardarFormaPago(TECNICO, { ...nueva, codigo: "VAL2", nombre: " VÁLE " })).rejects.toThrow("Ya existe la forma de pago «Vale»");
+    await guardarFormaPago(TECNICO, { ...nueva, id: vale, orden: 3 }); // guardarse a sí misma, sí
+    await guardarBanco(TECNICO, { nombre: "Coope Ande", abreviatura: "CA", orden: 1, activo: true });
+    await expect(guardarBanco(TECNICO, { nombre: "coope  ande", abreviatura: "", orden: 2, activo: true })).rejects.toThrow("Ya existe el banco");
   });
 });
 

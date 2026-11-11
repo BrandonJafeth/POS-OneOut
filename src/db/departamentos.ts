@@ -1,6 +1,7 @@
 import type { Actor, Departamento } from "../tipos";
 import { puede, SinPermiso } from "../lib/permisos";
-import { ahoraIso, limpiarNombre, normalizar } from "../lib/texto";
+import { ahoraIso, limpiarNombre } from "../lib/texto";
+import { exigirNombreLibre } from "./unicos";
 import { ulid } from "../lib/ulid";
 import { bitacora } from "./bitacora";
 import { bool, db } from "./conexion";
@@ -33,8 +34,8 @@ async function validar(datos: { codigo: string; nombre: string }, excluirId?: st
   for (const d of todos) {
     if (d.id === excluirId) continue;
     if (d.codigo.toLowerCase() === datos.codigo.toLowerCase()) throw new Error(`El código ${datos.codigo} ya es de "${d.nombre}"`);
-    if (normalizar(d.nombre) === normalizar(datos.nombre)) throw new Error(`Ya existe el departamento "${d.nombre}"`);
   }
+  await exigirNombreLibre("departamentos", datos.nombre, excluirId, "el departamento");
 }
 
 export async function crearDepartamento(actor: Actor, datos: { codigo: string; nombre: string }): Promise<string> {

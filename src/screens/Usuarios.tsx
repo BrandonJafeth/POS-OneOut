@@ -9,6 +9,7 @@ import { ROL_NOMBRE, type Rol, type Usuario } from "../tipos";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import { useConfirmar } from "../ui/Confirmar";
+import { useEnvio as useEnvioGeneral } from "../ui/useEnvio";
 
 type Dialogo = { tipo: "nuevo" } | { tipo: "pin"; usuario: Usuario } | { tipo: "nombre"; usuario: Usuario } | null;
 
@@ -132,21 +133,10 @@ export default function Usuarios() {
   );
 }
 
+/** El envío general (un clic a la vez: doble Enter no crea dos usuarios) y, si salió bien, cierra. */
 function useEnvio(onCerrar: () => void) {
-  const [error, setError] = useState("");
-  const [ocupado, setOcupado] = useState(false);
-  async function enviar(f: () => Promise<void>) {
-    setOcupado(true);
-    setError("");
-    try {
-      await f();
-      onCerrar();
-    } catch (e) {
-      setError(textoError(e));
-      setOcupado(false);
-    }
-  }
-  return { error, ocupado, enviar };
+  const { error, ocupado, enviar } = useEnvioGeneral();
+  return { error, ocupado, enviar: async (f: () => Promise<void>) => void ((await enviar(f)) && onCerrar()) };
 }
 
 function NuevoUsuario(p: { roles: Rol[]; onCerrar(): void; onGuardar(d: { nombre: string; rol: Rol; pin: string }): Promise<void> }) {

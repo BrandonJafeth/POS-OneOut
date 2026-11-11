@@ -30,6 +30,7 @@ import { useConfirmar } from "../../ui/Confirmar";
 import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
 import { useToast } from "../../ui/Toast";
+import { useEnvio } from "../../ui/useEnvio";
 
 interface Props {
   /** null = producto nuevo. */
@@ -63,6 +64,8 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   const [error, setError] = useState("");
   // Aviso mientras escribe: el nombre no puede repetirse (sin contar mayúsculas, tildes ni espacios).
   const [repetido, setRepetido] = useState<NombreRepetido | null>(null);
+  // Un doble clic en "Crear producto" no crea dos (guardar maneja sus propios errores).
+  const { ocupado, enviar } = useEnvio();
   const toast = useToast();
 
   async function cargar(pid: string) {
@@ -225,7 +228,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
           )}
           <span className="separador" />
           <Button onClick={onCerrar}>{sucio ? "Cancelar" : "Cerrar"}</Button>
-          <Button type="submit" form="form-producto" variante="primario" icono={Save} disabled={!sucio || !!repetido}>
+          <Button type="submit" form="form-producto" variante="primario" icono={Save} disabled={!sucio || !!repetido || ocupado}>
             {id ? "Guardar cambios" : "Crear producto"}
           </Button>
         </>
@@ -235,7 +238,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
         id="form-producto"
         onSubmit={(e) => {
           e.preventDefault();
-          void guardar();
+          void enviar(() => guardar());
         }}
       >
         <label className="campo">
@@ -351,7 +354,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             <Button
               variante="primario"
               icono={ArrowRightLeft}
-              onClick={() => (id ? agregarCodigo(conflicto.error.codigo, conflicto.tipo, true) : guardar(true))}
+              onClick={() => (id ? agregarCodigo(conflicto.error.codigo, conflicto.tipo, true) : enviar(() => guardar(true)))}
             >
               Moverlo a este producto
             </Button>

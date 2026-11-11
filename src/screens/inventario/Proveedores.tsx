@@ -8,6 +8,7 @@ import Button from "../../ui/Button";
 import { useConfirmar } from "../../ui/Confirmar";
 import EmptyState from "../../ui/EmptyState";
 import Field from "../../ui/Field";
+import { useEnvio } from "../../ui/useEnvio";
 
 const VACIO: Proveedor = { id: "", nombre: "", telefono: "", notas: "" };
 
@@ -84,20 +85,10 @@ export default function Proveedores() {
 
 function Editor(p: { inicial: Proveedor; onCerrar(): void; onGuardar(p: Proveedor): Promise<void> }) {
   const [v, setV] = useState(p.inicial);
-  const [error, setError] = useState("");
+  const { ocupado, error, enviar } = useEnvio();
   return (
     <Modal titulo={p.inicial.id ? "Editar proveedor" : "Nuevo proveedor"} onCerrar={p.onCerrar} ancho={460}>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setError("");
-          try {
-            await p.onGuardar(v);
-          } catch (err) {
-            setError(textoError(err));
-          }
-        }}
-      >
+      <form onSubmit={(e) => (e.preventDefault(), void enviar(() => p.onGuardar(v)))}>
         <Field label="Nombre">
           <input autoFocus maxLength={100} value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} />
         </Field>
@@ -108,7 +99,7 @@ function Editor(p: { inicial: Proveedor; onCerrar(): void; onGuardar(p: Proveedo
           <input maxLength={300} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} />
         </Field>
         <Mensaje error={error} />
-        <Button type="submit" variante="primario" icono={Save} disabled={!v.nombre.trim()}>
+        <Button type="submit" variante="primario" icono={Save} disabled={!v.nombre.trim() || ocupado}>
           Guardar
         </Button>
       </form>

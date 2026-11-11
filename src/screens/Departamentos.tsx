@@ -6,6 +6,7 @@ import { colorDepartamento, crearDepartamento, editarDepartamento, listarDeparta
 import type { Departamento } from "../tipos";
 import { colorDe, esColor, PALETA_DEPARTAMENTOS, textoSobre } from "../ui/departamentos";
 import { useToast } from "../ui/Toast";
+import { useEnvio } from "../ui/useEnvio";
 
 /** Color de la píldora: los 12 de la paleta o uno propio. El texto (blanco o negro) se elige solo. */
 function ColorDepto(p: { d: Departamento; posicion: number; onCambio(c: string | null): void }) {
@@ -100,6 +101,9 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
       setError(textoError(e));
     }
   }
+  // Crear va con candado: un doble clic no crea dos. (Colores no: el selector manda muchos cambios
+  // seguidos y con candado se perdería el último.)
+  const envio = useEnvio();
 
   return (
     <div className="screen">
@@ -168,10 +172,12 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
             className="row"
             onSubmit={(e) => {
               e.preventDefault();
-              void hacer(async () => {
-                await crearDepartamento(actor, nuevo);
-                setNuevo({ codigo: "", nombre: "" });
-              }, "Departamento creado.");
+              void envio.enviar(() =>
+                hacer(async () => {
+                  await crearDepartamento(actor, nuevo);
+                  setNuevo({ codigo: "", nombre: "" });
+                }, "Departamento creado."),
+              );
             }}
           >
             <label className="campo">
@@ -182,7 +188,9 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
               Nombre
               <input value={nuevo.nombre} onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })} />
             </label>
-            <button className="primary">Crear departamento</button>
+            <button className="primary" disabled={envio.ocupado}>
+              Crear departamento
+            </button>
           </form>
         </section>
       )}

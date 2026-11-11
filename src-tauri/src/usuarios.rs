@@ -5,7 +5,7 @@ use crate::config;
 use crate::permisos::{administrables, sin_permiso, Rol};
 use crate::pin;
 use crate::sesion::Actor;
-use crate::util::{ahora_iso, e, normalizar, texto, ulid, Res};
+use crate::util::{ahora_iso, e, texto, ulid, Res};
 use serde::Serialize;
 use serde_json::json;
 use sqlx::{Row, SqlitePool};
@@ -84,14 +84,9 @@ pub async fn tecnico_id(pool: &SqlitePool) -> Res<Option<String>> {
     sqlx::query_scalar("SELECT id FROM usuarios WHERE rol = 'tecnico' AND eliminado_en IS NULL LIMIT 1").fetch_optional(pool).await.map_err(e)
 }
 
-async fn validar_nombre(pool: &SqlitePool, nombre: &str, excluir: Option<&str>) -> Res<String> {
-    let n = texto(nombre, 60, "el nombre", true)?;
-    for u in listar(pool, true, false).await? {
-        if Some(u.id.as_str()) != excluir && normalizar(&u.nombre) == normalizar(&n) {
-            return Err("Ya existe un usuario con ese nombre".into());
-        }
-    }
-    Ok(n)
+/// Nombre limpio; que no se repita lo revisa nombre_libre dentro de la transacción.
+fn validar_nombre(nombre: &str) -> Res<String> {
+    texto(nombre, 60, "el nombre", true)
 }
 
 /// Primer arranque: el técnico se crea a sí mismo (solo si no existe).
@@ -114,11 +109,12 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str
     if !administrables(a.rol).contains(&rol) {
         return Err(sin_permiso("crear ese tipo de usuario"));
     }
-    let n = validar_nombre(pool, nombre, None).await?;
+    let n = validar_nombre(nombre)?;
     validar_pin(pool, rol, p).await?;
     let id = ulid();
     let hash = pin::hash(p)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    crate::util::nombre_libre(&mut tx, "usuarios", &n, "", "el usuario").await?;
     // Lo creó otra persona: debe cambiar el PIN la primera vez que entre.
     sqlx::query("INSERT INTO usuarios (id, nombre, rol, pin_hash, debe_cambiar_pin) VALUES (?, ?, ?, ?, 1)")
         .bind(&id)
@@ -159,11 +155,12 @@ pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, nombre: Option<&str>
         return Err("No puede desactivarse a sí mismo".into());
     }
     let n = match nombre {
-        Some(x) => validar_nombre(pool, x, Some(id)).await?,
+        Some(x) => validar_nombre(x)?,
         None => u.nombre.clone(),
     };
     let act = activo.unwrap_or(u.activo);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    crate::util::nombre_libre(&mut tx, "usuarios", &n, id, "el usuario").await?;
     if !act {
         no_quedar_sin_dueno(&mut tx, &u).await?;
     }
