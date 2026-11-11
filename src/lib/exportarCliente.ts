@@ -87,8 +87,10 @@ export function pdfCliente(e: ExportacionCliente, n: Pick<Negocio, "nombreComerc
   });
 }
 
-/** Descarga (WebView2 lo guarda en Descargas). */
-/** Rust lo guarda en Descargas (sin pisar otro) y devuelve la ruta real, para decírsela al usuario. */
-export async function descargar(nombre: string, bytes: Uint8Array): Promise<string> {
-  return String(await invocar("guardar_descarga", { nombre, datos: Array.from(bytes) }));
+export type Carpeta = "Cierres de caja" | "Inventario" | "Clientes";
+
+/** Rust lo guarda (sin pisar otro) y devuelve la ruta real, para decírsela al usuario. Con `carpeta`
+ *  va a Documentos\Punto de venta\<carpeta>\AAAA-MM (`mes` o el actual); sin ella, a Descargas. */
+export async function descargar(nombre: string, bytes: Uint8Array, carpeta?: Carpeta, mes?: string): Promise<string> {
+  return String(await invocar("guardar_descarga", { nombre, datos: Array.from(bytes), carpeta, mes }));
 }

@@ -664,12 +664,22 @@ async fn respaldo_restaurar(st: St<'_>, pin: String, archivo: Vec<u8>, contrasen
     respaldo::restaurar(st.bd()?, &a, &pin, &archivo, &contrasena, st.clave.as_ref()).await
 }
 
-/// PDF del cierre, CSV, datos del cliente: Rust lo guarda en Descargas y devuelve la ruta real.
+/// PDF del cierre, CSV, datos del cliente: Rust lo guarda (Documentos o Descargas) y devuelve la ruta real.
 /// Con un enlace "blob:" la app no podía saber si el archivo quedó guardado.
 #[tauri::command]
-async fn guardar_descarga(app: tauri::AppHandle, st: St<'_>, nombre: String, datos: Vec<u8>) -> Res<String> {
+async fn guardar_descarga(app: tauri::AppHandle, st: St<'_>, nombre: String, datos: Vec<u8>, carpeta: Option<String>, mes: Option<String>) -> Res<String> {
     st.actor().await?;
-    let dir = app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?;
+    let dir = match carpeta {
+        // Documentos\Punto de venta\<carpeta>\AAAA-MM (mes del documento o el actual). Windows puede vaciar Descargas solo.
+        Some(c) => {
+            let mes = match &mes {
+                Some(m) => util::mes_valido(m)?.to_string(),
+                None => util::dia_local()[..7].to_string(),
+            };
+            app.path().document_dir().map_err(|err| format!("No se encontró la carpeta Documentos: {err}"))?.join("Punto de venta").join(util::carpeta_valida(&c)?).join(mes)
+        }
+        None => app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?,
+    };
     util::guardar_en(&dir, &nombre, &datos)
 }
 

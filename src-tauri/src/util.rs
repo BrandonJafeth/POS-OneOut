@@ -106,6 +106,18 @@ pub fn texto(v: &str, max: usize, campo: &str, obligatorio: bool) -> Res<String>
     Ok(t.to_string())
 }
 
+/// Subcarpeta "AAAA-MM": la ventana solo elige el mes, nunca una ruta.
+pub fn mes_valido(m: &str) -> Res<&str> {
+    let b = m.as_bytes();
+    let ok = b.len() == 7 && b[4] == b'-' && b.iter().enumerate().all(|(i, c)| i == 4 || c.is_ascii_digit());
+    if ok { Ok(m) } else { Err(format!("{TECNICO}Mes no válido: {m}")) }
+}
+
+/// Carpetas fijas de documentos exportados: la ventana elige una de la lista, nunca una ruta.
+pub fn carpeta_valida(c: &str) -> Res<&str> {
+    if matches!(c, "Cierres de caja" | "Inventario" | "Clientes") { Ok(c) } else { Err(format!("{TECNICO}Carpeta no válida: {c}")) }
+}
+
 /// Guarda en `dir` un archivo que armó la app (PDF del cierre, CSV) sin pisar uno existente
 /// ("x (1).pdf"). Solo un nombre simple .pdf/.csv: la ventana no elige carpetas ni extensiones.
 pub fn guardar_en(dir: &std::path::Path, nombre: &str, datos: &[u8]) -> Res<String> {
@@ -163,6 +175,12 @@ mod tests {
             assert!(guardar_en(&dir, malo, b"x").is_err(), "{malo}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mes_valido("2026-11").unwrap(), "2026-11");
+        for malo in ["2026-1", "..\\..\\x", "2026/11", "abcd-ef", "2026-11-01"] {
+            assert!(mes_valido(malo).is_err(), "{malo}");
+        }
+        assert!(carpeta_valida("Inventario").is_ok());
+        assert!(carpeta_valida("..\\Windows").is_err());
     }
 
     #[test]

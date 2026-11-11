@@ -16,7 +16,7 @@ function Exportar(p: { nombre: string; titulo: string; subtitulo: string; cabece
   const toast = useToast();
   const hacer = async (f: () => Promise<string>) => {
     try {
-      toast.ok(`Guardado en ${await f()}`);
+      toast.guardado("Archivo guardado.", await f());
     } catch (e) {
       p.onError(textoError(e));
     }

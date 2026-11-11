@@ -264,7 +264,7 @@ function KardexDialogo(p: { fila: FilaInventario; onCerrar(): void }) {
           disabled={!filas.length}
           onClick={async () => {
             try {
-              toast.ok(`Guardado en ${await exportarCsv(`kardex-${desde}-${hasta}`, [CABECERA_KARDEX, ...filas.map(filaKardex)])}`);
+              toast.guardado("Archivo guardado.", await exportarCsv(`kardex-${desde}-${hasta}`, [CABECERA_KARDEX, ...filas.map(filaKardex)]));
             } catch (e) {
               setError(textoError(e));
             }
@@ -276,7 +276,7 @@ function KardexDialogo(p: { fila: FilaInventario; onCerrar(): void }) {
           disabled={!filas.length}
           onClick={async () => {
             try {
-              toast.ok(`Guardado en ${await exportarPdf(`kardex-${desde}-${hasta}`, `Kardex: ${p.fila.nombre}`, `Del ${desde} al ${hasta}${p.fila.codigos ? ` · ${p.fila.codigos}` : ""}`, pdfMovimientos(filas, false))}`);
+              toast.guardado("Archivo guardado.", await exportarPdf(`kardex-${desde}-${hasta}`, `Kardex: ${p.fila.nombre}`, `Del ${desde} al ${hasta}${p.fila.codigos ? ` · ${p.fila.codigos}` : ""}`, pdfMovimientos(filas, false)));
             } catch (e) {
               setError(textoError(e));
             }

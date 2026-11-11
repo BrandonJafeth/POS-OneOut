@@ -7,6 +7,7 @@
 //   toast.mostrar({ tono: "info", titulo: "Venta 2 descartada", accion: { texto: "Deshacer", onClick } });
 import { X } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { copiar } from "../lib/copiar";
 import { ICONO_TONO, type Tono } from "./Badge";
 
 export interface AvisoToast {
@@ -24,17 +25,20 @@ interface Api {
   info(titulo: string, texto?: ReactNode): void;
   /** Para acciones cuyo botón puede quedar lejos del mensaje en pantalla (imprimir, descargar). */
   error(titulo: string, texto?: ReactNode): void;
+  /** Archivo exportado: muestra la ruta con botón "Copiar ruta". */
+  guardado(titulo: string, ruta: string): void;
   cerrar(): void;
 }
 
-const Ctx = createContext<Api>({ mostrar: () => {}, ok: () => {}, info: () => {}, error: () => {}, cerrar: () => {} });
+const Ctx = createContext<Api>({ mostrar: () => {}, ok: () => {}, info: () => {}, error: () => {}, guardado: () => {}, cerrar: () => {} });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [actual, setActual] = useState<(AvisoToast & { id: number }) | null>(null);
   const id = useRef(0);
   const cerrar = useCallback(() => setActual(null), []);
   // Un aviso con acción ("Deshacer") no lo tapa uno simple: perderlo sería perder lo que deshace.
-  const mostrar = useCallback((a: AvisoToast) => setActual((v) => (v?.accion && !a.accion ? v : { ...a, id: ++id.current })), []);
+  // "Copiar ruta" (tono ok) no cuenta: la ruta no se pierde, y taparía errores de lo que siga.
+  const mostrar = useCallback((a: AvisoToast) => setActual((v) => (v?.accion && v.tono !== "ok" && !a.accion ? v : { ...a, id: ++id.current })), []);
   const api = useMemo<Api>(
     () => ({
       mostrar,
@@ -42,6 +46,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       ok: (titulo, texto) => mostrar({ tono: "ok", titulo, texto }),
       info: (titulo, texto) => mostrar({ tono: "info", titulo, texto }),
       error: (titulo, texto) => mostrar({ tono: "error", titulo, texto }),
+      guardado: (titulo, ruta) => mostrar({ tono: "ok", titulo, texto: ruta, accion: { texto: "Copiar ruta", onClick: () => void copiar(ruta) } }),
     }),
     [mostrar, cerrar],
   );

@@ -233,7 +233,7 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `list_printers / print_raw (diagnóstico)` | — | — | ✔ |
 | `sistema_preparacion / diagnostico_exportar` | — | — | ✔ |
 | `sistema_estado`, `sesion_*`, `sistema_crear_tecnico` (solo si no hay técnico), `sistema_restaurar` (solo si la base NO abre), `diagnostico_anotar`, `app_reiniciar` | sin sesión | sin sesión | sin sesión |
-| `bd_leer` (solo catálogo y configuración pública), `guardar_descarga` (.pdf/.csv/.txt ya armados) | ✔ | ✔ | ✔ |
+| `bd_leer` (solo catálogo y configuración pública), `guardar_descarga` (.pdf/.csv/.txt ya armados; carpeta solo de una lista fija + mes `AAAA-MM`, validados en Rust) | ✔ | ✔ | ✔ |
 
 Notas: cajero y técnico no administran al dueño (con un usuario real responden «No tiene permiso»). El técnico NO consulta ventas (llevan el nombre del cliente): corregido en esta auditoría. `imprimir` cambia de permiso según el documento.
 

@@ -51,13 +51,13 @@ export async function imprimirEtiquetasEntrada(c: Comprobante): Promise<{ impres
 }
 
 export async function exportarCsv(nombre: string, filas: (string | number)[][]): Promise<string> {
-  return descargar(`${nombre}.csv`, csvSeguro(filas.map((f) => f.map(String))));
+  return descargar(`${nombre}.csv`, csvSeguro(filas.map((f) => f.map(String))), "Inventario");
 }
 
 /** PDF de un reporte con el encabezado del negocio (nombre y logo). */
 export async function exportarPdf(nombre: string, titulo: string, subtitulo: string, bloques: Bloque[]): Promise<string> {
   const n = await obtenerNegocio();
-  return descargar(`${nombre}.pdf`, crearDocumento({ negocio: n.nombreComercial || "Punto de venta", titulo, subtitulo, logo: n.logo, bloques }));
+  return descargar(`${nombre}.pdf`, crearDocumento({ negocio: n.nombreComercial || "Punto de venta", titulo, subtitulo, logo: n.logo, bloques }), "Inventario");
 }
 
 export const filaKardex = (f: FilaKardex): (string | number)[] => [

@@ -509,7 +509,7 @@ function BotonPdf(p: { d: Detalle; denominaciones: number[] }) {
           const n = await obtenerNegocio();
           const bytes = pdfCierre(n, p.d, { copia: p.d.turno.reimpresiones > 0, denominaciones: p.denominaciones });
           const nombre = `cierre-${p.d.turno.dia}-${p.d.turno.id.slice(-6)}.pdf`;
-          toast.ok("PDF guardado.", await descargar(nombre, bytes));
+          toast.guardado("PDF guardado.", await descargar(nombre, bytes, "Cierres de caja", p.d.turno.dia.slice(0, 7)));
         } catch (e) {
           toast.error("No se pudo crear el PDF", textoError(e));
         }
