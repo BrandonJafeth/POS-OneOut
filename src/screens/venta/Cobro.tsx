@@ -115,7 +115,11 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
     setTimeout(() => nuevaFila.current?.focus(), 0);
   }
 
-  const listo = r.ok && !sinMonto.length;
+  // Vuelto enorme (casi siempre un cero de más): no se confirma con Enter/F12 sin antes decir
+  // "sí, recibí eso". Si cambia el monto, hay que volver a confirmarlo.
+  const [vueltoVisto, setVueltoVisto] = useState(0);
+  const vueltoPorRevisar = r.vuelto > VUELTO_GRANDE && vueltoVisto !== r.vuelto;
+  const listo = r.ok && !sinMonto.length && !vueltoPorRevisar;
 
   async function confirmar() {
     if (!listo || ocupado) return;
@@ -279,6 +283,11 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
         {r.vuelto > VUELTO_GRANDE && (
           <Alert tono="aviso" titulo={`Vuelto de ${monto(r.vuelto)}`}>
             Revise que de verdad recibió {monto(r.pagado)}: un cero de más da un vuelto que sale de la gaveta.
+            {vueltoPorRevisar && (
+              <div style={{ marginTop: 8 }}>
+                <Button onClick={() => setVueltoVisto(r.vuelto)}>Sí, recibí {monto(r.pagado)}</Button>
+              </div>
+            )}
           </Alert>
         )}
         {repetidas.length > 0 && (

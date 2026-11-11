@@ -70,6 +70,8 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
   );
 }
 
+const ENTRADA_GRANDE = 100_000;
+
 export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salida"; onCerrar(): void; onListo(id: string): void }) {
   const motivos = p.estado.motivos[p.tipo] ?? [];
   const [categoria, setCategoria] = useState(motivos[0] ?? "");
@@ -80,6 +82,10 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
   const { ocupado, error, setError, enviar: unaVez } = useEnvio();
   const valor = leerMontoEntero(texto);
   const grande = p.tipo === "salida" && valor !== null && valor > p.estado.salidaMaxSinPin;
+  // Entrada enorme = casi siempre un cero de más: inflaría lo esperado y al cerrar la cajera
+  // "debería" plata que nunca entró. Se confirma con un segundo Registrar.
+  const [revisado, setRevisado] = useState<number | null>(null);
+  const entradaGrande = p.tipo === "entrada" && valor !== null && valor >= ENTRADA_GRANDE;
 
   const enviar = async (pin?: string) => {
     if (valor === null || valor <= 0) return setError("Escriba el monto en colones.");
@@ -94,6 +100,7 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
           e.preventDefault();
           setError("");
           if (grande) return setPidePin(true);
+          if (entradaGrande && revisado !== valor) return setRevisado(valor);
           void unaVez(() => enviar());
         }}
       >
@@ -111,6 +118,9 @@ export function MovimientoCaja(p: { estado: EstadoCaja; tipo: "entrada" | "salid
           <input value={nota} maxLength={200} onChange={(e) => setNota(e.target.value)} />
         </Field>
         {grande && <Alert tono="aviso">Pasa de {monto(p.estado.salidaMaxSinPin)}: pide el PIN del dueño.</Alert>}
+        {entradaGrande && revisado === valor && (
+          <Alert tono="aviso">¿De verdad entran {monto(valor)}? Revise los ceros. Si está bien, presione Registrar otra vez.</Alert>
+        )}
         {error && <Alert tono="error">{error}</Alert>}
         <Button type="submit" variante="primario" icono={p.tipo === "salida" ? ArrowUpFromLine : ArrowDownToLine} atajo="Enter" disabled={!categoria || !texto || ocupado}>
           Registrar {valor ? monto(valor) : ""}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSesion } from "../../app/sesion";
 import Modal from "../../components/Modal";
 import { leerMontoEntero } from "../../lib/texto";
 import { ulid } from "../../lib/ulid";
@@ -13,6 +14,7 @@ import Field from "../../ui/Field";
 const MONTO_GRANDE = 50_000;
 
 export default function PrecioLibre(p: { departamentos: Departamento[]; onAgregar(l: LineaEspera): void; onCerrar(): void }) {
+  const { config } = useSesion();
   const [monto, setMonto] = useState("");
   const [depto, setDepto] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState("");
@@ -39,7 +41,7 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
             cantidad: 1,
             precioUnitario: m,
             descuento: 0,
-            tasaIva: 13,
+            tasaIva: config.producto_tasa_iva_defecto, // la del negocio, no un 13 fijo
             exento: false,
           });
         }}
