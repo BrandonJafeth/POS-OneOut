@@ -10,7 +10,7 @@ import { referenciaUsada } from "../../db/ventas";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import { useEscaner } from "../../lib/useEscaner";
-import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
+import { calcularPagos, soloTelefono, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
 import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
@@ -24,6 +24,14 @@ const ICONO_FORMA: Record<TipoFormaPago, LucideIcon> = {
   transferencia: Landmark,
   otro: Wallet,
 };
+
+/** Errores de "falta este dato": ya se avisan en su campo, no en rojo antes de escribir. */
+const FALTA_DATO = /: (escriba|elija) /;
+
+function faltaTel(t?: string | null): string | undefined {
+  const n = (t ?? "").length;
+  return n === 0 ? "Obligatorio: 8 números." : n < 8 ? `Faltan ${8 - n} números.` : undefined;
+}
 
 /** Más vuelto que el billete más grande casi siempre es un cero de más en lo recibido. */
 const VUELTO_GRANDE = 50_000;
@@ -42,6 +50,8 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: conMiles(String(totalDe(efectivo))) }] : []);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
+  // Los datos que faltan (banco, referencia, teléfono) se marcan en su campo; en rojo solo si intentó confirmar.
+  const [intento, setIntento] = useState(false);
   const primerMonto = useRef<HTMLInputElement>(null);
   useEffect(() => {
     primerMonto.current?.focus();
@@ -122,7 +132,8 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   const listo = r.ok && !sinMonto.length && !vueltoPorRevisar;
 
   async function confirmar() {
-    if (!listo || ocupado) return;
+    if (ocupado) return;
+    if (!listo) return setIntento(true);
     setOcupado(true);
     setError("");
     try {
@@ -138,12 +149,13 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   const filaEfectivo = filas.find((f) => forma(f.formaPagoId)?.daVuelto);
   const faltaSinEfectivo = p.total - pagos.filter((x) => !forma(x.formaPagoId)?.daVuelto).reduce((s, x) => s + x.monto, 0);
 
+  const erroresVisibles = intento ? r.errores : r.errores.filter((m) => !FALTA_DATO.test(m));
   const extras = (f: Fila) => {
     const fp = forma(f.formaPagoId);
     return (
       <>
         {fp?.requiereBanco && (
-          <Field label="Banco">
+          <Field label="Banco" ayuda={!f.bancoId ? "Obligatorio." : undefined}>
             <select value={f.bancoId ?? ""} onChange={(e) => set(f.clave, { bancoId: e.target.value || null })}>
               <option value="">Elija…</option>
               {p.bancos.map((b) => (
@@ -155,13 +167,13 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
           </Field>
         )}
         {fp?.tipo === "sinpe" && (
-          <Field label="Teléfono de quien paga">
-            <input className="mono" inputMode="numeric" placeholder="86682498" value={f.telefono ?? ""} onChange={(e) => set(f.clave, { telefono: e.target.value.replace(/\D/g, "").slice(0, 8) })} />
+          <Field label="Teléfono de quien paga" ayuda={faltaTel(f.telefono)}>
+            <input className="mono" inputMode="numeric" autoComplete="off" placeholder="1111 1111" value={f.telefono ?? ""} onChange={(e) => set(f.clave, { telefono: soloTelefono(e.target.value) })} />
           </Field>
         )}
         {fp?.requiereReferencia && (
-          <Field label="Referencia">
-            <input value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
+          <Field label="Referencia" ayuda={!(f.referencia ?? "").trim() ? "Obligatoria." : undefined}>
+            <input autoComplete="off" value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
           </Field>
         )}
         {fp?.pideUltimos4 && (
@@ -305,7 +317,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
             {sinMonto.map((f) => forma(f.formaPagoId)?.nombre).join(" y ")} sin monto: escríbalo o quite {sinMonto.length > 1 ? "esas filas" : "la fila"} con la papelera.
           </Alert>
         )}
-        {r.errores.length > 0 && <Mensaje error={r.errores.join(". ") + "."} />}
+        {erroresVisibles.length > 0 && <Mensaje error={erroresVisibles.join(". ") + "."} />}
         <Mensaje error={error} />
         <div className="row">
           <Button icono={Plus} variante="fantasma" onClick={dividir}>

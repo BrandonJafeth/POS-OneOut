@@ -388,6 +388,7 @@ export function reporteCorte(n: Negocio, k: Corte, s: TicketSettings): Doc {
 export function comprobanteMovimiento(n: Negocio, m: Movimiento, s: TicketSettings): Doc {
   const c = columnas(s);
   const l: LineaDoc[] = [{ t: sep2(c) }, { t: m.tipo === "salida" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO", b: true, centro: true }];
+  if (nombreSiHayLogo(n)) l.push({ t: lr("Negocio:", cortar(n.nombreComercial, c - 9), c) });
   l.push({ t: lr("Fecha:", fechaHora(new Date(m.fecha)), c) }, { t: lr("Usuario:", cortar(m.usuario, c - 9), c) }, { t: lr("Motivo:", cortar(m.categoria, c - 8), c) });
   if (m.motivo) wrap("Nota: " + m.motivo, c).forEach((x) => l.push({ t: x }));
   l.push({ t: lr("MONTO", monto(m.monto), c), b: true });

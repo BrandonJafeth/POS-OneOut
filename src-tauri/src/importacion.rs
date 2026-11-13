@@ -359,9 +359,10 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
     if it.codigo.is_none() {
         return Ok(None);
     }
-    // Al actualizar, el código interno se agrega solo si el producto todavía no tiene uno.
+    // Al actualizar, se agrega solo si todavía no tiene uno numérico (los viejos de letras, "05por",
+    // no se pueden imprimir: reciben el numérico y conservan el viejo).
     if it.accion == "actualizar" {
-        let tiene: Option<i64> = sqlx::query_scalar("SELECT 1 FROM codigos WHERE producto_id = ? AND tipo = 'interno'")
+        let tiene: Option<i64> = sqlx::query_scalar("SELECT 1 FROM codigos c WHERE c.producto_id = ? AND c.tipo = 'interno' AND length(c.codigo) = 13 AND c.codigo GLOB '200[0-9]*'")
             .bind(&producto_id)
             .fetch_optional(&mut *c)
             .await
@@ -616,6 +617,13 @@ mod tests {
         let r = aplicar(&bd.pool, &dueno, PIN_DUENO, &pedido("todo", otra)).await.unwrap();
         assert_eq!((r.creados, r.actualizados), (0, 3));
         assert!(r.codigos.is_empty(), "ya tenían código interno");
+        // Uno con el código viejo de letras sí recibe el numérico (y conserva el viejo).
+        let viejo: String = sqlx::query_scalar("SELECT id FROM productos WHERE web_id = 'id-9'").fetch_one(&bd.pool).await.unwrap();
+        sqlx::query("UPDATE codigos SET codigo = '01pro9' WHERE producto_id = ? AND tipo = 'interno'").bind(&viejo).execute(&bd.pool).await.unwrap();
+        let act = Item { accion: "actualizar".into(), producto_id: Some(viejo.clone()), ..items[9].clone() };
+        let r = aplicar(&bd.pool, &dueno, PIN_DUENO, &pedido("todo", vec![act])).await.unwrap();
+        assert_eq!(r.codigos.len(), 1);
+        assert_eq!(contar(&bd.pool, &format!("SELECT COUNT(*) FROM codigos WHERE producto_id = '{viejo}'")).await, 2);
         assert_eq!(contar(&bd.pool, "SELECT COUNT(*) FROM productos").await, 719);
         let (dep, fav, precio): (String, bool, i64) =
             sqlx::query_as("SELECT departamento_id, favorito, precio FROM productos WHERE id = ?").bind(&id).fetch_one(&bd.pool).await.unwrap();

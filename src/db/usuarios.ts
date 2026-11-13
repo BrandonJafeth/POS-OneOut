@@ -19,6 +19,7 @@ export interface EstadoSistema {
   nombreNegocio: string;
   tema: unknown;
   colorAcento: unknown;
+  colorFondo: unknown;
   /** Carpeta de datos (base, clave protegida y respaldos). */
   carpeta: string;
   version: string;

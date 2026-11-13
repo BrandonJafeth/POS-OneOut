@@ -103,7 +103,7 @@ export default function App() {
     const s = await estadoSistema();
     // Al arrancar no hay sesión: se muestra el detalle para que el administrador sepa qué pasó.
     if (s.error) return setFase({ f: "error", mensaje: `${s.error.replace(MARCA_TECNICA, "")} Si no sabe cómo resolverlo, contacte al administrador.`, carpeta: s.carpeta, version: s.version });
-    aplicarTema(s.tema === "oscuro" ? "oscuro" : "claro", typeof s.colorAcento === "string" ? s.colorAcento : "");
+    aplicarTema(s.tema === "oscuro" ? "oscuro" : "claro", typeof s.colorAcento === "string" ? s.colorAcento : "", s.colorFondo);
     setNombreNegocio(s.nombreNegocio);
     setFase(s.necesitaTecnico ? { f: "primer" } : { f: "login" });
   }, []);

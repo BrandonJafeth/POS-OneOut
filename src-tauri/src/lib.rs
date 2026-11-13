@@ -88,6 +88,7 @@ struct EstadoSistema {
     nombre_negocio: String,
     tema: Value,
     color_acento: Value,
+    color_fondo: Value,
     carpeta: String,
     /// Versión del programa y última migración que conoce (pantalla «Acerca de»).
     version: &'static str,
@@ -104,6 +105,7 @@ async fn sistema_estado(st: St<'_>) -> Res<EstadoSistema> {
             nombre_negocio: String::new(),
             tema: Value::Null,
             color_acento: Value::Null,
+            color_fondo: Value::Null,
             carpeta: st.dir.to_string_lossy().to_string(),
             version: env!("CARGO_PKG_VERSION"),
             migracion: bd::ultima_migracion(),
@@ -117,6 +119,7 @@ async fn sistema_estado(st: St<'_>) -> Res<EstadoSistema> {
                 nombre_negocio: nombre.unwrap_or_default(),
                 tema: config::valor(&b.pool, "tema").await.unwrap_or(Value::Null),
                 color_acento: config::valor(&b.pool, "color_acento").await.unwrap_or(Value::Null),
+                color_fondo: config::valor(&b.pool, "color_fondo").await.unwrap_or(Value::Null),
                 carpeta: b.dir.as_ref().map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
                 version: env!("CARGO_PKG_VERSION"),
                 migracion: bd::ultima_migracion(),

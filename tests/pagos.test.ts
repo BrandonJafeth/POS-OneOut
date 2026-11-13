@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcularPagos } from "../src/lib/venta/pagos";
+import { calcularPagos, soloTelefono } from "../src/lib/venta/pagos";
 import type { FormaPago } from "../src/tipos";
 
 const forma = (x: Partial<FormaPago>) => ({ activo: true, requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, ...x }) as FormaPago;
@@ -24,5 +24,21 @@ describe("calcularPagos", () => {
     expect(calcularPagos(500, [pago("TJ", 500, "1234")], formas).ok).toBe(true);
     expect(calcularPagos(500, [pago("TJ", 500, "12")], formas).ok).toBe(false);
     expect(calcularPagos(500, [pago("EF", 500, "1234")], formas).ok).toBe(false);
+  });
+});
+
+describe("SINPE Móvil: teléfono de quien paga", () => {
+  const sp = forma({ id: "SP", nombre: "SINPE Móvil", tipo: "sinpe", requiereReferencia: true });
+  const fs = [...formas, sp];
+  const sinpe = (telefono?: string) => ({ ...pago("SP", 500), referencia: "123", telefono });
+  it("8 números obligatorios; en otra forma no se acepta", () => {
+    expect(calcularPagos(500, [sinpe("86682498")], fs).ok).toBe(true);
+    for (const t of [undefined, "8668249", "8668249a"]) expect(calcularPagos(500, [sinpe(t)], fs).errores.join()).toMatch(/teléfono/);
+    expect(calcularPagos(500, [{ ...pago("TJ", 500), telefono: "86682498" }], fs).errores.join()).toMatch(/no lleva teléfono/);
+  });
+  it("pegado con guiones, espacios o +506 queda en 8 dígitos", () => {
+    expect(soloTelefono("8668-2498")).toBe("86682498");
+    expect(soloTelefono("+506 8668 2498")).toBe("86682498");
+    expect(soloTelefono("123456789")).toBe("12345678");
   });
 });

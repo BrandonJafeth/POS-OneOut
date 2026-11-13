@@ -25,7 +25,7 @@ export async function leerArchivo(archivo: File): Promise<TablaLeida> {
 export async function productosParaImportar(): Promise<ProductoExistente[]> {
   const filas = await db().select(
     `SELECT p.id, p.web_id, p.web_slug, p.nombre, p.precio, p.activo, p.departamento_id, p.favorito, p.categorias_origen, p.eliminado_en,
-            EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.tipo = 'interno') AS tiene_interno
+            EXISTS (SELECT 1 FROM codigos c WHERE c.producto_id = p.id AND c.tipo = 'interno' AND length(c.codigo) = 13 AND c.codigo GLOB '200[0-9]*') AS tiene_interno
      FROM productos p`,
   );
   return filas.map((f) => ({

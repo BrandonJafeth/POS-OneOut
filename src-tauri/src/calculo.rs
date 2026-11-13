@@ -203,6 +203,9 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
         let tel = p.telefono.as_deref().unwrap_or("");
         if f.pide_telefono && !(tel.len() == 8 && tel.chars().all(|c| c.is_ascii_digit())) {
             errores.push(format!("{}: escriba el teléfono de quien paga (8 números)", f.nombre));
+        } else if !f.pide_telefono && !tel.is_empty() {
+            // Teléfono solo en SINPE: en otra forma sería un dato personal guardado sin motivo.
+            errores.push(format!("{}: esta forma de pago no lleva teléfono", f.nombre));
         }
         if !f.da_vuelto {
             sin_vuelto += p.monto;

@@ -2285,7 +2285,8 @@ mark {
    Pago dividido: columnas fijas (forma | monto | datos | quitar) para que las filas coincidan. */
 .cobro-campos {
   display: flex;
-  align-items: flex-end;
+  /* Por arriba: la ayuda bajo un campo ("Escriba otro número…") no desalinea las etiquetas vecinas. */
+  align-items: flex-start;
   gap: var(--e3);
 }
 
@@ -2307,6 +2308,7 @@ mark {
 
 .cobro-extras {
   display: flex;
+  align-items: flex-start;
   flex: 1.6 1 0;
   gap: var(--e3);
   min-width: 0;
