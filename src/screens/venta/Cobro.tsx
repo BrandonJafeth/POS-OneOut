@@ -30,7 +30,7 @@ const FALTA_DATO = /: (escriba|elija) /;
 
 function faltaTel(t?: string | null): string | undefined {
   const n = (t ?? "").length;
-  return n === 0 ? "Obligatorio: 8 números." : n < 8 ? `Faltan ${8 - n} números.` : undefined;
+  return n === 0 ? "Obligatorio: 8 números." : n === 7 ? "Falta 1 número." : n < 8 ? `Faltan ${8 - n} números.` : undefined;
 }
 
 /** Más vuelto que el billete más grande casi siempre es un cero de más en lo recibido. */

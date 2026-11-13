@@ -105,6 +105,7 @@ export interface CambioPago {
   bancoId?: string | null;
   referencia?: string | null;
   ultimos4?: string | null;
+  telefono?: string | null;
 }
 
 /**
@@ -114,7 +115,7 @@ export interface CambioPago {
 export async function corregirPago(_actor: Actor, pagoId: string, cambio: CambioPago, motivo: string, pinDueno?: string): Promise<void> {
   await invocar("venta_corregir_pago", {
     pagoId,
-    cambio: { formaPagoId: cambio.formaPagoId, bancoId: cambio.bancoId ?? null, referencia: cambio.referencia ?? null, ultimos4: cambio.ultimos4 ?? null },
+    cambio: { formaPagoId: cambio.formaPagoId, bancoId: cambio.bancoId ?? null, referencia: cambio.referencia ?? null, ultimos4: cambio.ultimos4 ?? null, telefono: cambio.telefono ?? null },
     motivo,
     pinDueno: pinDueno ?? null,
   });

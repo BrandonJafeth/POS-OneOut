@@ -83,5 +83,5 @@ export function sugerenciasEfectivo(falta: number, denominaciones: number[]): nu
 /** Solo los 8 dígitos; un número pegado con código de país ("+506 8668 2498") pierde el 506. */
 export function soloTelefono(t: string): string {
   const d = t.replace(/\D/g, "");
-  return (d.length > 8 && d.startsWith("506") ? d.slice(3) : d).slice(0, 8);
+  return (d.length === 11 && d.startsWith("506") ? d.slice(3) : d).slice(0, 8);
 }

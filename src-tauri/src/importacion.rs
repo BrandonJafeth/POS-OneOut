@@ -255,8 +255,24 @@ pub(crate) fn ean_interno(n: i64) -> String {
     format!("{base}{}", (10 - suma % 10) % 10)
 }
 
-async fn codigo_libre(c: &mut SqliteConnection, ahora: &str) -> Res<String> {
+/// El código que mostró la vista previa, si es un interno válido y sigue libre (así lo guardado es
+/// exactamente lo que vio el dueño); si no, el siguiente del contador.
+async fn codigo_libre(c: &mut SqliteConnection, pedido: &str, ahora: &str) -> Res<String> {
     sqlx::query("INSERT OR IGNORE INTO config (clave, valor) VALUES ('codigo_interno_siguiente', '1')").execute(&mut *c).await.map_err(e)?;
+    let n: i64 = pedido.get(3..12).and_then(|x| x.parse().ok()).unwrap_or(0);
+    if pedido.len() == 13 && pedido.starts_with("200") && n >= 1 && ean_interno(n) == pedido {
+        let usado: Option<i64> = sqlx::query_scalar("SELECT 1 FROM codigos WHERE codigo = ?").bind(pedido).fetch_optional(&mut *c).await.map_err(e)?;
+        if usado.is_none() {
+            // El contador queda después del mayor usado, para que "Generar código interno" no lo repita.
+            sqlx::query("UPDATE config SET valor = MAX(CAST(valor AS INTEGER), ?), actualizado_en = ? WHERE clave = 'codigo_interno_siguiente'")
+                .bind(n + 1)
+                .bind(ahora)
+                .execute(&mut *c)
+                .await
+                .map_err(e)?;
+            return Ok(pedido.to_string());
+        }
+    }
     for _ in 0..10_000 {
         let n: i64 = sqlx::query_scalar("UPDATE config SET valor = CAST(valor AS INTEGER) + 1, actualizado_en = ? WHERE clave = 'codigo_interno_siguiente' RETURNING CAST(valor AS INTEGER) - 1")
             .bind(ahora)
@@ -355,10 +371,7 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
         .map_err(e)?;
         id
     };
-    // `codigo` solo indica que se pidió código interno; el número lo da el contador.
-    if it.codigo.is_none() {
-        return Ok(None);
-    }
+    let Some(pedido) = &it.codigo else { return Ok(None) };
     // Al actualizar, se agrega solo si todavía no tiene uno numérico (los viejos de letras, "05por",
     // no se pueden imprimir: reciben el numérico y conservan el viejo).
     if it.accion == "actualizar" {
@@ -371,7 +384,7 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
             return Ok(None);
         }
     }
-    let codigo = codigo_libre(c, ahora).await?;
+    let codigo = codigo_libre(c, pedido, ahora).await?;
     sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo, creado_en) VALUES (?, ?, 'interno', ?)")
         .bind(&codigo)
         .bind(&producto_id)
@@ -638,6 +651,20 @@ mod tests {
         aplicar(&bd.pool, &dueno, PIN_DUENO, &p).await.unwrap();
         let dep: String = sqlx::query_scalar("SELECT departamento_id FROM productos WHERE id = ?").bind(&id).fetch_one(&bd.pool).await.unwrap();
         assert_eq!(dep, D01);
+    }
+
+    #[tokio::test]
+    async fn guarda_el_codigo_que_mostro_la_vista_previa() {
+        let (bd, _, dueno, _) = base_con_usuarios().await;
+        // La vista previa numera en el orden del archivo; Rust recibe primero los nuevos: se respeta lo mostrado.
+        let items = vec![Item { codigo: Some(ean_interno(3)), ..item(2, "a", "Uno", 100) }, Item { codigo: Some(ean_interno(1)), ..item(3, "b", "Dos", 100) }];
+        let r = aplicar(&bd.pool, &dueno, PIN_DUENO, &pedido("todo", items)).await.unwrap();
+        assert_eq!(r.codigos.iter().map(|x| x.codigo.clone()).collect::<Vec<_>>(), vec![ean_interno(3), ean_interno(1)]);
+        // El contador queda después del mayor: el siguiente no choca.
+        assert_eq!(config::entero(&bd.pool, "codigo_interno_siguiente", 0).await, 4);
+        // Uno ya usado o con verificador malo: toma el siguiente libre del contador.
+        let r = aplicar(&bd.pool, &dueno, PIN_DUENO, &pedido("todo", vec![Item { codigo: Some(ean_interno(3)), ..item(4, "c", "Tres", 1) }, Item { codigo: Some("2000000000010".into()), ..item(5, "d", "Cuatro", 1) }])).await.unwrap();
+        assert_eq!(r.codigos.iter().map(|x| x.codigo.clone()).collect::<Vec<_>>(), vec![ean_interno(4), ean_interno(5)]);
     }
 
     #[tokio::test]

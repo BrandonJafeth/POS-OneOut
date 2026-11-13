@@ -104,7 +104,7 @@ async fn el_efectivo_esperado_nunca_queda_negativo() {
     assert_eq!(esperado(p, &dueno).await, 0);
     // …y después se anula la venta (devolver ¢5.000 que ya no están) o se pasa a tarjeta.
     let pago_id: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
-    let a_tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None };
+    let a_tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None, telefono: None };
     assert!(ventas::corregir_pago(p, &dueno, CAJA_1, &pago_id, &a_tarjeta, "era tarjeta", Some(PIN)).await.unwrap_err().contains("ya no queda ese efectivo"));
     assert!(ventas::anular(p, &dueno, CAJA_1, &v.venta_id, PIN, "cliente devolvió", 0).await.unwrap_err().contains("ya no queda ese efectivo"));
     assert_eq!(esperado(p, &dueno).await, 0);

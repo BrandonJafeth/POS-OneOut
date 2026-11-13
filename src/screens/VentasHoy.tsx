@@ -22,6 +22,7 @@ import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
 import CampoMonto from "../ui/CampoMonto";
 import Field from "../ui/Field";
+import { soloTelefono } from "../lib/venta/pagos";
 import FilaClic from "../ui/FilaClic";
 import Paginacion from "../ui/Paginacion";
 import PedirFactura from "./venta/PedirFactura";
@@ -370,6 +371,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
   const [banco, setBanco] = useState(p.pago.bancoId ?? "");
   const [referencia, setReferencia] = useState(p.pago.referencia ?? "");
   const [ultimos4, setUltimos4] = useState(p.pago.ultimos4 ?? "");
+  const [telefono, setTelefono] = useState(p.pago.telefono ?? "");
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
   const { ocupado, error, enviar } = useEnvio();
@@ -383,7 +385,9 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
     forma === p.pago.formaPagoId &&
     (nueva?.requiereBanco ? banco || null : null) === (p.pago.bancoId ?? null) &&
     referencia.trim() === (p.pago.referencia ?? "") &&
-    (nueva?.pideUltimos4 ? ultimos4 : "") === (p.pago.ultimos4 ?? "");
+    (nueva?.pideUltimos4 ? ultimos4 : "") === (p.pago.ultimos4 ?? "") &&
+    (nueva?.tipo === "sinpe" ? telefono : "") === (p.pago.telefono ?? "");
+  const faltaTelefono = nueva?.tipo === "sinpe" && telefono.length !== 8;
 
   return (
     <Modal titulo={`Corregir pago de ${monto(p.pago.monto)}`} onCerrar={p.onCerrar} ancho={480}>
@@ -391,7 +395,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         onSubmit={(e) => {
           e.preventDefault();
           void enviar(async () => {
-            await corregirPago(actor, p.pago.id, { formaPagoId: forma, bancoId: banco || null, referencia, ultimos4 }, motivo, pin || undefined);
+            await corregirPago(actor, p.pago.id, { formaPagoId: forma, bancoId: banco || null, referencia, ultimos4, telefono: nueva?.tipo === "sinpe" ? telefono : null }, motivo, pin || undefined);
             await p.onListo();
           });
         }}
@@ -424,6 +428,11 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
             </select>
           </label>
         )}
+        {nueva?.tipo === "sinpe" && (
+          <Field label="Teléfono de quien pagó" ayuda={faltaTelefono ? "Obligatorio: 8 números." : undefined}>
+            <input className="mono" inputMode="numeric" autoComplete="off" placeholder="1111 1111" value={telefono} onChange={(e) => setTelefono(soloTelefono(e.target.value))} />
+          </Field>
+        )}
         {nueva?.requiereReferencia && (
           <label className="campo">
             Referencia
@@ -446,7 +455,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         </label>
         {sinCambios && <Alert tono="info">Esa ya es la forma de pago registrada. Elija la forma correcta (o cambie el banco o la referencia).</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || motivo.trim().length < 5 || ocupado}>
+        <Button type="submit" variante="primario" icono={Save} disabled={sinCambios || faltaTelefono || motivo.trim().length < 5 || ocupado}>
           Guardar corrección
         </Button>
       </form>

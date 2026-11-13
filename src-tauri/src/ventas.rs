@@ -736,6 +736,9 @@ pub struct CambioPago {
     pub banco_id: Option<String>,
     pub referencia: Option<String>,
     pub ultimos4: Option<String>,
+    /// SINPE Móvil: teléfono de quien pagó (8 dígitos).
+    #[serde(default)]
+    pub telefono: Option<String>,
 }
 
 const SIN_EFECTIVO: &str = "En la caja ya no queda ese efectivo (salió en retiros o salidas). Registre primero una entrada de efectivo por lo que falta y vuelva a intentarlo.";
@@ -816,15 +819,22 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
     let n_banco = if nueva.requiere_banco { cambio.banco_id.clone().filter(|s| !s.is_empty()) } else { None };
     let n_ref = (!referencia.is_empty()).then_some(referencia);
     let n_u4 = if nueva.pide_ultimos4 { cambio.ultimos4.clone().filter(|s| !s.is_empty()) } else { None };
+    // Igual que al cobrar: SINPE pide el teléfono; otra forma no lo guarda (no queda el del pago anterior).
+    let tel = cambio.telefono.as_deref().unwrap_or("");
+    if nueva.pide_telefono && !(tel.len() == 8 && tel.chars().all(|c| c.is_ascii_digit())) {
+        return Err(format!("{}: escriba el teléfono de quien paga (8 números)", nueva.nombre));
+    }
+    let n_tel = nueva.pide_telefono.then(|| tel.to_string());
     let (a_forma, a_banco, a_ref, a_u4): (String, Option<String>, Option<String>, Option<String>) = (p.get("forma_pago_id"), p.get("banco_id"), p.get("referencia"), p.get("ultimos4"));
-    if nueva.id == a_forma && n_banco == a_banco && n_ref == a_ref && n_u4 == a_u4 {
+    let a_tel: Option<String> = p.get("telefono");
+    if nueva.id == a_forma && n_banco == a_banco && n_ref == a_ref && n_u4 == a_u4 && n_tel == a_tel {
         return Err("No cambió nada: ese pago ya está registrado con esa forma de pago (y el mismo banco, referencia y últimos 4). Elija otra forma o cambie algún dato.".into());
     }
     let monto: i64 = p.get("monto");
     let venta_id: String = p.get("venta_id");
     let ahora = ahora_iso();
-    let antes = json!({"formaPagoId": a_forma, "forma": p.get::<String, _>("forma"), "banco": a_banco, "referencia": a_ref, "ultimos4": a_u4});
-    let despues = json!({"formaPagoId": nueva.id, "forma": nueva.nombre, "banco": n_banco, "referencia": n_ref, "ultimos4": n_u4});
+    let antes = json!({"formaPagoId": a_forma, "forma": p.get::<String, _>("forma"), "banco": a_banco, "referencia": a_ref, "ultimos4": a_u4, "telefono": a_tel});
+    let despues = json!({"formaPagoId": nueva.id, "forma": nueva.nombre, "banco": n_banco, "referencia": n_ref, "ultimos4": n_u4, "telefono": n_tel});
 
     if let Some(t) = &turno_venta {
         let estaba_efectivo = p.get::<i64, _>("da_vuelto") == 1;
@@ -892,12 +902,13 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
             (true, false) => (Some(nuevo_monto), Some(0)),
             _ => (None, None),
         };
-        sqlx::query("UPDATE venta_pagos SET monto = ?, forma_pago_id = ?, banco_id = ?, referencia = ?, ultimos4 = ?, recibido = ?, vuelto = ?, actualizado_en = ? WHERE id = ?")
+        sqlx::query("UPDATE venta_pagos SET monto = ?, forma_pago_id = ?, banco_id = ?, referencia = ?, ultimos4 = ?, telefono = ?, recibido = ?, vuelto = ?, actualizado_en = ? WHERE id = ?")
             .bind(nuevo_monto)
             .bind(&nueva.id)
             .bind(&n_banco)
             .bind(&n_ref)
             .bind(&n_u4)
+            .bind(&n_tel)
             .bind(recibido)
             .bind(vuelto)
             .bind(&ahora)
@@ -1245,7 +1256,7 @@ mod tests {
         // y la venta y el pago cambian juntos (el Z sigue cuadrando).
         let antes = detalle(p, &dueno, &turno).await.unwrap().resumen.efectivo_esperado;
         let pago_tj: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&tj_id).fetch_one(p).await.unwrap();
-        let a_ef = CambioPago { forma_pago_id: EF.into(), banco_id: None, referencia: None, ultimos4: None };
+        let a_ef = CambioPago { forma_pago_id: EF.into(), banco_id: None, referencia: None, ultimos4: None, telefono: None };
         corregir_pago(p, &dueno, CAJA_1, &pago_tj, &a_ef, "Pagó en efectivo", Some("246813")).await.unwrap();
         let venta: (i64, i64) = sqlx::query_as("SELECT total, redondeo FROM ventas WHERE id = ?").bind(&tj_id).fetch_one(p).await.unwrap();
         let corregido: (i64, Option<i64>) = sqlx::query_as("SELECT monto, recibido FROM venta_pagos WHERE id = ?").bind(&pago_tj).fetch_one(p).await.unwrap();
@@ -1384,13 +1395,23 @@ mod tests {
         abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
         let v = vender(p, &cajero, &est(&pid, &dep, 5000, 1, 0), &[pago(TJ, 5000)]).await;
         let pago_id: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
-        let sinpe = CambioPago { forma_pago_id: SP.into(), banco_id: None, referencia: Some("12345".into()), ultimos4: None };
+        let sinpe = CambioPago { forma_pago_id: SP.into(), banco_id: None, referencia: Some("12345".into()), ultimos4: None, telefono: Some("86682498".into()) };
         // El cajero no cambia el pago ni anula, ni con el PIN del dueño.
         assert!(corregir_pago(p, &cajero, CAJA_1, &pago_id, &sinpe, "Era SINPE, no tarjeta", Some("246813")).await.unwrap_err().contains("permiso"));
         assert!(anular(p, &cajero, CAJA_1, &v.venta_id, "246813", "Se equivocó", 0).await.unwrap_err().contains("permiso"));
         // El dueño sí, con su PIN y motivo.
         assert!(corregir_pago(p, &dueno, CAJA_1, &pago_id, &sinpe, "Era SINPE, no tarjeta", None).await.is_err());
+        // A SINPE sin teléfono no se deja.
+        let sin_tel = CambioPago { telefono: None, ..sinpe.clone() };
+        assert!(corregir_pago(p, &dueno, CAJA_1, &pago_id, &sin_tel, "Era SINPE, no tarjeta", Some("246813")).await.unwrap_err().contains("teléfono"));
         corregir_pago(p, &dueno, CAJA_1, &pago_id, &sinpe, "Era SINPE, no tarjeta", Some("246813")).await.unwrap();
+        let tel: Option<String> = sqlx::query_scalar("SELECT telefono FROM venta_pagos WHERE id = ?").bind(&pago_id).fetch_one(p).await.unwrap();
+        assert_eq!(tel.as_deref(), Some("86682498"));
+        // De vuelta a tarjeta: el teléfono no se queda pegado al pago.
+        let tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None, telefono: Some("86682498".into()) };
+        corregir_pago(p, &dueno, CAJA_1, &pago_id, &tarjeta, "Al final fue tarjeta", Some("246813")).await.unwrap();
+        let tel: Option<String> = sqlx::query_scalar("SELECT telefono FROM venta_pagos WHERE id = ?").bind(&pago_id).fetch_one(p).await.unwrap();
+        assert_eq!(tel, None);
         assert!(anular(p, &dueno, CAJA_1, &v.venta_id, "000000", "Se equivocó", 0).await.is_err());
         anular(p, &dueno, CAJA_1, &v.venta_id, "246813", "Se equivocó de producto", 0).await.unwrap();
         // Anulada, no borrada; con quién y en qué turno.
@@ -1410,7 +1431,7 @@ mod tests {
         let t1 = abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
         let v = vender(p, &cajero, &est(&pid, &dep, 5000, 1, 0), &[pago(TJ, 5000)]).await;
         let pago_id: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
-        let sinpe = CambioPago { forma_pago_id: SP.into(), banco_id: None, referencia: Some("12345".into()), ultimos4: None };
+        let sinpe = CambioPago { forma_pago_id: SP.into(), banco_id: None, referencia: Some("12345".into()), ultimos4: None, telefono: Some("86682498".into()) };
         corregir_pago(p, &dueno, CAJA_1, &pago_id, &sinpe, "Era SINPE, no tarjeta", Some("246813")).await.unwrap();
         cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 10)]), "").await.unwrap();
 
@@ -1418,7 +1439,7 @@ mod tests {
         assert!(sqlx::query("UPDATE venta_pagos SET monto = 1 WHERE id = ?").bind(&pago_id).execute(p).await.unwrap_err().to_string().contains("turno cerrado"));
         assert!(sqlx::query("UPDATE ventas SET total = 1 WHERE id = ?").bind(&v.venta_id).execute(p).await.is_err());
 
-        let tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None };
+        let tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None, telefono: None };
         // Dueño sin caja abierta hoy: no hay dónde registrar el ajuste.
         assert!(corregir_pago(p, &dueno, CAJA_1, &pago_id, &tarjeta, "Era tarjeta al final", Some("246813")).await.unwrap_err().contains("primero ábrala"));
         let t2 = abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
