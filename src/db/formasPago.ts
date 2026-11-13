@@ -13,8 +13,9 @@ function aForma(f: Record<string, unknown>): FormaPago {
     codigo: String(f.codigo),
     nombre: String(f.nombre),
     tipo: f.tipo as TipoFormaPago,
-    requiereBanco: bool(f.requiere_banco),
-    requiereReferencia: bool(f.requiere_referencia),
+    // SINPE siempre lleva banco y referencia (igual que ventas::formas en Rust).
+    requiereBanco: bool(f.requiere_banco) || f.tipo === "sinpe",
+    requiereReferencia: bool(f.requiere_referencia) || f.tipo === "sinpe",
     daVuelto: bool(f.da_vuelto),
     pideUltimos4: bool(f.pide_ultimos4),
     orden: Number(f.orden),

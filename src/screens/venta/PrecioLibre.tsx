@@ -8,6 +8,7 @@ import Button from "../../ui/Button";
 import Alert from "../../ui/Alert";
 import CampoMonto from "../../ui/CampoMonto";
 import Field from "../../ui/Field";
+import { seleccionarAlTocar } from "../../ui/seleccionarAlTocar";
 
 /** Venta simple (precio libre): monto + departamento con un toque, descripción opcional. */
 /** Una venta simple desde aquí suele ser un cero de más; se confirma con un segundo Agregar. */
@@ -59,7 +60,7 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
             <CampoMonto grande autoFocus valor={monto} onCambio={setMonto} />
           </Field>
           <Field label="Cantidad" error={errores.cantidad}>
-            <input className="small" inputMode="numeric" value={cantidad} onFocus={(e) => e.target.select()} onChange={(e) => setCantidad(e.target.value.replace(/\D/g, "").slice(0, 4))} />
+            <input className="small" inputMode="numeric" value={cantidad} {...seleccionarAlTocar} onChange={(e) => setCantidad(e.target.value.replace(/\D/g, "").slice(0, 4))} />
           </Field>
         </div>
         {Number(cantidad) > 1 && leerMontoEntero(monto) ? <p className="muted">Total: ¢{conMiles(String(leerMontoEntero(monto)! * Number(cantidad)))}</p> : null}

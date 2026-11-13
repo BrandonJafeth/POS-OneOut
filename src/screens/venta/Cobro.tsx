@@ -10,7 +10,7 @@ import { referenciaUsada } from "../../db/ventas";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
 import { monto } from "../../lib/tickets";
 import { useEscaner } from "../../lib/useEscaner";
-import { calcularPagos, soloTelefono, sugerenciasEfectivo } from "../../lib/venta/pagos";
+import { calcularPagos, sugerenciasEfectivo } from "../../lib/venta/pagos";
 import type { Banco, FormaPago, PagoEntrada, TipoFormaPago } from "../../tipos";
 import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
@@ -25,13 +25,11 @@ const ICONO_FORMA: Record<TipoFormaPago, LucideIcon> = {
   otro: Wallet,
 };
 
+/** Atajos de forma de pago, por tipo (no por posición): siguen valiendo si el técnico cambia el orden. */
+export const TECLA_FORMA: Partial<Record<TipoFormaPago, string>> = { efectivo: "F1", tarjeta: "F2", sinpe: "F3", transferencia: "F4" };
+
 /** Errores de "falta este dato": ya se avisan en su campo, no en rojo antes de escribir. */
 const FALTA_DATO = /: (escriba|elija) /;
-
-function faltaTel(t?: string | null): string | undefined {
-  const n = (t ?? "").length;
-  return n === 0 ? "Obligatorio: 8 números." : n === 7 ? "Falta 1 número." : n < 8 ? `Faltan ${8 - n} números.` : undefined;
-}
 
 /** Más vuelto que el billete más grande casi siempre es un cero de más en lo recibido. */
 const VUELTO_GRANDE = 50_000;
@@ -50,13 +48,35 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   const [filas, setFilas] = useState<Fila[]>(efectivo ? [{ clave: 0, formaPagoId: efectivo.id, texto: conMiles(String(totalDe(efectivo))) }] : []);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
-  // Los datos que faltan (banco, referencia, teléfono) se marcan en su campo; en rojo solo si intentó confirmar.
+  // Los datos que faltan (nombre de quien paga, banco, referencia) se marcan en su campo; en rojo solo si intentó confirmar.
   const [intento, setIntento] = useState(false);
   const primerMonto = useRef<HTMLInputElement>(null);
+  const extrasRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
+    // Sin efectivo el monto ya es el total exacto: el cursor va directo al primer dato que falta
+    // (nombre de quien paga, banco, referencia); con efectivo, a lo recibido.
+    const falta = [...(extrasRef.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select") ?? [])].find((x) => !x.value);
+    if (falta && !forma(filas[0]?.formaPagoId ?? "")?.daVuelto) return falta.focus();
     primerMonto.current?.focus();
     primerMonto.current?.select();
   }, [filas[0]?.formaPagoId]);
+
+  /** Forma única (sin dividir): el monto pasa al total de esa forma. */
+  const elegirForma = (f: FormaPago) => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(totalDe(f))) }]);
+  // F1–F4: forma de pago por tipo. En cualquier campo del cobro; con el pago dividido no aplica.
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const tipo = (Object.keys(TECLA_FORMA) as TipoFormaPago[]).find((t) => TECLA_FORMA[t] === e.key);
+      // Solo con el foco en el cobro: otra ventana encima (PIN del dueño) no cambia la forma de abajo.
+      if (!tipo || !formRef.current?.contains(document.activeElement)) return;
+      e.preventDefault(); // F1 de WebView2 abre la ayuda; F3 la búsqueda
+      const f = p.formas.find((x) => x.tipo === tipo);
+      if (f && filas.length === 1 && !ocupado) elegirForma(f);
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  });
 
   const forma = (id: string) => p.formas.find((f) => f.id === id)!;
   const mixto = filas.length > 1;
@@ -154,6 +174,11 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
     const fp = forma(f.formaPagoId);
     return (
       <>
+        {fp?.tipo === "sinpe" && (
+          <Field label="Nombre de quien paga" ayuda={!(f.pagador ?? "").trim() ? "Obligatorio." : undefined}>
+            <input autoComplete="off" maxLength={60} value={f.pagador ?? ""} onChange={(e) => set(f.clave, { pagador: e.target.value })} />
+          </Field>
+        )}
         {fp?.requiereBanco && (
           <Field label="Banco" ayuda={!f.bancoId ? "Obligatorio." : undefined}>
             <select value={f.bancoId ?? ""} onChange={(e) => set(f.clave, { bancoId: e.target.value || null })}>
@@ -166,13 +191,8 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
             </select>
           </Field>
         )}
-        {fp?.tipo === "sinpe" && (
-          <Field label="Teléfono de quien paga" ayuda={faltaTel(f.telefono)}>
-            <input className="mono" inputMode="numeric" autoComplete="off" placeholder="1111 1111" value={f.telefono ?? ""} onChange={(e) => set(f.clave, { telefono: soloTelefono(e.target.value) })} />
-          </Field>
-        )}
         {fp?.requiereReferencia && (
-          <Field label="Referencia" ayuda={!(f.referencia ?? "").trim() ? "Obligatoria." : undefined}>
+          <Field label="N.º de referencia" ayuda={!(f.referencia ?? "").trim() ? "Obligatorio." : undefined}>
             <input autoComplete="off" value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
           </Field>
         )}
@@ -188,6 +208,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   return (
     <Modal titulo="Cobrar" onCerrar={p.onCerrar} ancho={680}>
       <form
+        ref={formRef}
         onSubmit={(e) => {
           e.preventDefault();
           void confirmar();
@@ -209,6 +230,8 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
             <div className="formas" role="radiogroup" aria-label="Forma de pago">
               {p.formas.map((f) => {
                 const Icono = ICONO_FORMA[f.tipo];
+                // Solo la primera de cada tipo lleva atajo (dos "SINPE" no comparten F3).
+                const tecla = p.formas.find((x) => x.tipo === f.tipo) === f ? TECLA_FORMA[f.tipo] : undefined;
                 return (
                   <button
                     type="button"
@@ -217,9 +240,12 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
                     aria-checked={filas[0].formaPagoId === f.id}
                     aria-pressed={filas[0].formaPagoId === f.id}
                     className="forma"
-                    onClick={() => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(totalDe(f))) }])}
+                    aria-keyshortcuts={tecla}
+                    title={tecla ? `Atajo: ${tecla}` : undefined}
+                    onClick={() => elegirForma(f)}
                   >
                     <Icono size={20} aria-hidden /> {f.nombre}
+                    {tecla && <kbd>{tecla}</kbd>}
                   </button>
                 );
               })}
@@ -237,7 +263,9 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
               >
                 <CampoMonto ref={primerMonto} valor={filas[0].texto} onCambio={(texto) => set(filas[0].clave, { texto })} />
               </Field>
-              <div className="cobro-extras">{extras(filas[0])}</div>
+              <div className="cobro-extras" ref={extrasRef}>
+                {extras(filas[0])}
+              </div>
             </div>
           </>
         )}
@@ -250,7 +278,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
                 <Field label="Forma">
                   <span className="cobro-forma">
                     <Icono size={20} aria-hidden />
-                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, bancoId: null, referencia: null, ultimos4: null, telefono: null })}>
+                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, bancoId: null, referencia: null, ultimos4: null, pagador: null })}>
                       {p.formas.map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.nombre}

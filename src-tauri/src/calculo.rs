@@ -140,9 +140,9 @@ pub struct PagoEntrada {
     pub banco_id: Option<String>,
     pub referencia: Option<String>,
     pub ultimos4: Option<String>,
-    /// Teléfono de quien paga (SINPE Móvil): 8 dígitos.
+    /// Nombre de quien paga (SINPE Móvil), para ubicar el pago en el banco.
     #[serde(default)]
-    pub telefono: Option<String>,
+    pub pagador: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -153,8 +153,8 @@ pub struct Forma {
     pub requiere_referencia: bool,
     pub da_vuelto: bool,
     pub pide_ultimos4: bool,
-    /// SINPE Móvil: el teléfono de quien paga es obligatorio.
-    pub pide_telefono: bool,
+    /// SINPE Móvil: el nombre de quien paga es obligatorio.
+    pub pide_pagador: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +174,19 @@ pub struct ResultadoPagos {
 }
 
 /// Pago mixto: la suma cubre el total; solo el efectivo da vuelto (y sale del efectivo).
+/// Nombre de quien paga: obligatorio en SINPE (2 a 60 letras, sin caracteres de control); en otra
+/// forma no se guarda (sería un dato personal sin motivo). Devuelve el nombre limpio o None.
+pub fn validar_pagador(pide: bool, v: Option<&str>) -> Result<Option<String>, String> {
+    let n = v.unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+    match (pide, n.is_empty()) {
+        (true, true) => Err("escriba el nombre de quien paga".into()),
+        (false, true) => Ok(None),
+        (false, false) => Err("esta forma de pago no lleva nombre de quien paga".into()),
+        (true, false) if n.chars().count() < 2 || n.chars().count() > 60 || n.chars().any(char::is_control) => Err("el nombre de quien paga debe tener de 2 a 60 letras".into()),
+        (true, false) => Ok(Some(n)),
+    }
+}
+
 pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> ResultadoPagos {
     let mut errores = Vec::new();
     let forma = |id: &str| formas.iter().find(|f| f.id == id);
@@ -200,12 +213,8 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
                 errores.push(format!("{}: los últimos 4 dígitos son 4 números", f.nombre));
             }
         }
-        let tel = p.telefono.as_deref().unwrap_or("");
-        if f.pide_telefono && !(tel.len() == 8 && tel.chars().all(|c| c.is_ascii_digit())) {
-            errores.push(format!("{}: escriba el teléfono de quien paga (8 números)", f.nombre));
-        } else if !f.pide_telefono && !tel.is_empty() {
-            // Teléfono solo en SINPE: en otra forma sería un dato personal guardado sin motivo.
-            errores.push(format!("{}: esta forma de pago no lleva teléfono", f.nombre));
+        if let Err(m) = validar_pagador(f.pide_pagador, p.pagador.as_deref()) {
+            errores.push(format!("{}: {m}", f.nombre));
         }
         if !f.da_vuelto {
             sin_vuelto += p.monto;
@@ -253,12 +262,12 @@ mod tests {
     }
     fn formas() -> Vec<Forma> {
         vec![
-            Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false, pide_telefono: false },
-            Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: true, pide_telefono: false },
+            Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false, pide_pagador: false },
+            Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: true, pide_pagador: false },
         ]
     }
     fn p(f: &str, m: i64) -> PagoEntrada {
-        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, telefono: None }
+        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, pagador: None }
     }
 
     #[test]

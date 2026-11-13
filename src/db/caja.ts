@@ -105,7 +105,7 @@ export interface PagoElectronico {
   ultimos4: string | null;
   banco: string | null;
   referencia: string | null;
-  telefono: string | null;
+  pagador: string | null;
 }
 
 export interface FormaMonto {

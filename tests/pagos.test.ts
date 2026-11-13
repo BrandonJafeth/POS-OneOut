@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcularPagos, soloTelefono } from "../src/lib/venta/pagos";
+import { calcularPagos } from "../src/lib/venta/pagos";
 import type { FormaPago } from "../src/tipos";
 
 const forma = (x: Partial<FormaPago>) => ({ activo: true, requiereBanco: false, requiereReferencia: false, daVuelto: false, pideUltimos4: false, ...x }) as FormaPago;
@@ -27,18 +27,16 @@ describe("calcularPagos", () => {
   });
 });
 
-describe("SINPE Móvil: teléfono de quien paga", () => {
-  const sp = forma({ id: "SP", nombre: "SINPE Móvil", tipo: "sinpe", requiereReferencia: true });
+describe("SINPE Móvil: nombre de quien paga, banco y referencia", () => {
+  const sp = forma({ id: "SP", nombre: "SINPE Móvil", tipo: "sinpe", requiereBanco: true, requiereReferencia: true });
   const fs = [...formas, sp];
-  const sinpe = (telefono?: string) => ({ ...pago("SP", 500), referencia: "123", telefono });
-  it("8 números obligatorios; en otra forma no se acepta", () => {
-    expect(calcularPagos(500, [sinpe("86682498")], fs).ok).toBe(true);
-    for (const t of [undefined, "8668249", "8668249a"]) expect(calcularPagos(500, [sinpe(t)], fs).errores.join()).toMatch(/teléfono/);
-    expect(calcularPagos(500, [{ ...pago("TJ", 500), telefono: "86682498" }], fs).errores.join()).toMatch(/no lleva teléfono/);
-  });
-  it("pegado con guiones, espacios o +506 queda en 8 dígitos", () => {
-    expect(soloTelefono("8668-2498")).toBe("86682498");
-    expect(soloTelefono("+506 8668 2498")).toBe("86682498");
-    expect(soloTelefono("123456789")).toBe("12345678");
+  const sinpe = (x: { pagador?: string; bancoId?: string | null; referencia?: string | null } = {}) => ({ ...pago("SP", 500), bancoId: "BN", referencia: "123", pagador: "Ana Mora", ...x });
+  it("los tres obligatorios; el nombre no va en otra forma", () => {
+    expect(calcularPagos(500, [sinpe()], fs).ok).toBe(true);
+    expect(calcularPagos(500, [sinpe({ pagador: "  " })], fs).errores.join()).toMatch(/nombre de quien paga/);
+    expect(calcularPagos(500, [sinpe({ pagador: "A" })], fs).errores.join()).toMatch(/2 a 60/);
+    expect(calcularPagos(500, [sinpe({ bancoId: null })], fs).errores.join()).toMatch(/banco/);
+    expect(calcularPagos(500, [sinpe({ referencia: "" })], fs).errores.join()).toMatch(/referencia/);
+    expect(calcularPagos(500, [{ ...pago("TJ", 500), pagador: "Ana" }], fs).errores.join()).toMatch(/no lleva nombre/);
   });
 });

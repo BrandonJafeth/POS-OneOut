@@ -1113,7 +1113,7 @@ mod tests {
     }
 
     fn efectivo(e: &Estado) -> Vec<PagoEntrada> {
-        vec![PagoEntrada { forma_pago_id: EF.into(), monto: e.lineas.iter().map(|l| l.cantidad * 1000).sum(), banco_id: None, referencia: None, ultimos4: None, telefono: None }]
+        vec![PagoEntrada { forma_pago_id: EF.into(), monto: e.lineas.iter().map(|l| l.cantidad * 1000).sum(), banco_id: None, referencia: None, ultimos4: None, pagador: None }]
     }
 
     async fn hay(p: &SqlitePool, pid: &str) -> i64 {

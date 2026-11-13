@@ -41,6 +41,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (14, "descuento_producto", include_str!("../../src/db/migraciones/0014_descuento_producto.sql")),
     (15, "descuento_catalogo_venta", include_str!("../../src/db/migraciones/0015_descuento_catalogo_venta.sql")),
     (16, "telefono_sinpe", include_str!("../../src/db/migraciones/0016_telefono_sinpe.sql")),
+    (17, "pagador_sinpe", include_str!("../../src/db/migraciones/0017_pagador_sinpe.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
@@ -504,7 +505,7 @@ mod tests {
             "SELECT datos FROM ventas_espera",
             "SELECT * FROM caja_turnos",
             "SELECT ultimos4 FROM venta_pagos",
-            "SELECT telefono FROM venta_pagos",
+            "SELECT pagador FROM venta_pagos",
             "SELECT * FROM cuentas",
             "SELECT * FROM abonos",
             "SELECT * FROM impresoras",

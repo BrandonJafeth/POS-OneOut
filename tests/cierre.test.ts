@@ -50,8 +50,8 @@ function detalle(): Detalle {
       ],
       ajustes: [],
       pagosElectronicos: [
-        { fecha: "2026-11-03T16:05:00Z", ventaNumero: "67979", forma: "SINPE Móvil", tipo: "sinpe", monto: 8400, ultimos4: null, banco: "BCR", referencia: "69898", telefono: null },
-        { fecha: "2026-11-03T20:05:00Z", ventaNumero: "67981", forma: "SINPE Móvil", tipo: "sinpe", monto: 1000, ultimos4: null, banco: null, referencia: "777", telefono: null },
+        { fecha: "2026-11-03T16:05:00Z", ventaNumero: "67979", forma: "SINPE Móvil", tipo: "sinpe", monto: 8400, ultimos4: null, banco: "BCR", referencia: "69898", pagador: null },
+        { fecha: "2026-11-03T20:05:00Z", ventaNumero: "67981", forma: "SINPE Móvil", tipo: "sinpe", monto: 1000, ultimos4: null, banco: null, referencia: "777", pagador: null },
       ],
       porUsuario: [
         { usuario: "Juarez", ventas: 2, total: 8600 },

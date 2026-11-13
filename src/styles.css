@@ -2285,6 +2285,7 @@ mark {
    Pago dividido: columnas fijas (forma | monto | datos | quitar) para que las filas coincidan. */
 .cobro-campos {
   display: flex;
+  flex-wrap: wrap;
   /* Por arriba: la ayuda bajo un campo ("Escriba otro número…") no desalinea las etiquetas vecinas. */
   align-items: flex-start;
   gap: var(--e3);
@@ -2308,6 +2309,7 @@ mark {
 
 .cobro-extras {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   flex: 1.6 1 0;
   gap: var(--e3);
@@ -2315,6 +2317,15 @@ mark {
 }
 
 /* Alineado por arriba: la ayuda bajo un monto vacío ("Escriba el monto.") no baja el resto de la fila. */
+/* SINPE (nombre, banco y referencia): los datos van en su propia fila, a lo ancho, para que se lean. */
+.cobro-campos > .cobro-extras:has(> :nth-child(3)) {
+  flex-basis: 100%;
+}
+
+.cobro-extras > .campo {
+  min-width: 140px;
+}
+
 .fila-pago.cobro-campos {
   display: grid;
   grid-template-columns: 1.35fr 1fr 1.5fr 48px;

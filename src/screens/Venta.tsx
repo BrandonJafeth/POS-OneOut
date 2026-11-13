@@ -38,6 +38,7 @@ import { FAVORITOS, useCatalogo } from "./venta/useCatalogo";
 import { useEsperas } from "./venta/useEsperas";
 import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { fondoPildora, textoSobre } from "../ui/departamentos";
+import { seleccionarAlTocar } from "../ui/seleccionarAlTocar";
 
 type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | null;
 
@@ -69,6 +70,10 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
     lista: [
       { teclas: ["F12"], texto: "Abrir el cobro" },
       { teclas: ["F12"], texto: "Dentro del cobro: confirmar (F12 dos veces = efectivo exacto)" },
+      { teclas: ["F1"], texto: "Dentro del cobro: efectivo" },
+      { teclas: ["F2"], texto: "Dentro del cobro: tarjeta" },
+      { teclas: ["F3"], texto: "Dentro del cobro: SINPE Móvil" },
+      { teclas: ["F4"], texto: "Dentro del cobro: transferencia" },
       { teclas: ["Enter"], texto: "Al terminar: siguiente venta" },
       { teclas: ["Esc"], texto: "Cerrar cualquier ventana" },
     ],
@@ -191,15 +196,20 @@ export default function Venta() {
   }
 
   // ── Lector: en cualquier parte de la pantalla (salvo con un diálogo abierto).
+  // Con el aviso "Venta cobrada" abierto, escanear el producto del siguiente cliente lo cierra y
+  // agrega el producto (antes se perdía la lectura). No si hubo error de impresión o gaveta (que se
+  // vea), ni si la pestaña que quedó activa es otra venta en espera con productos (sería de otro cliente).
+  const soloCobrada = !!cobrada && !cobrada.errorImpresion && !cobrada.errorGaveta && dialogo === null && pendiente === null && !confirmando && !estado.lineas.length;
   useEscaner(
     async (c) => {
       try {
+        if (cobrada) cerrarCobrada();
         if (!(await porCodigo(c))) setAviso(`El código ${c} no está registrado. Use Venta simple o asócielo en Productos.`);
       } catch (e) {
         setError(textoError(e));
       }
     },
-    { activo: !modal && !!activa, debounceMs: config.escaner_debounce_ms },
+    { activo: (!modal || soloCobrada) && !!activa, debounceMs: config.escaner_debounce_ms },
   );
 
   async function enterBuscador() {
@@ -877,7 +887,7 @@ function CampoPorcentaje({ valor, onCambio, ...rest }: { valor: string; onCambio
         inputMode="decimal"
         autoComplete="off"
         value={valor}
-        onFocus={(e) => e.target.select()}
+        {...seleccionarAlTocar}
         onChange={(e) => onCambio(e.target.value.replace(/[^\d.,]/g, ""))}
         {...rest}
       />
@@ -895,6 +905,8 @@ function CampoNumero(p: { valor: string; etiqueta: string; onListo(v: string): v
       aria-label={p.etiqueta}
       inputMode="numeric"
       value={v}
+      // Seleccionado al tocarlo: escribir "8" reemplaza el 1 (no queda "18").
+      {...seleccionarAlTocar}
       onChange={(e) => setV(e.target.value.replace(/\D/g, ""))}
       onBlur={() => v !== p.valor && p.onListo(v)}
       onKeyDown={(e) => {

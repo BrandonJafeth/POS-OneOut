@@ -232,7 +232,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     for (const g of grupos) {
       l.push({ t: lr(`${cortar(g.forma, cols - 14)} (${g.pagos.length})`, monto(g.total), cols), b: true });
       for (const x of g.pagos) {
-        const dato = x.ultimos4 ? `****${x.ultimos4}` : [x.banco, x.referencia && `ref ${x.referencia}`, x.telefono && `tel ${x.telefono}`].filter(Boolean).join(" ");
+        const dato = x.ultimos4 ? `****${x.ultimos4}` : [x.banco, x.referencia && `ref ${x.referencia}`, x.pagador].filter(Boolean).join(" ");
         const izq = `${hora(x.fecha)} ${x.ventaNumero}`;
         const cabe = cols - monto(x.monto).length - 1 - izq.length - 1;
         // Si la referencia no cabe en la misma línea, va completa en la siguiente (no se corta).

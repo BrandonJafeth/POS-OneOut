@@ -29,7 +29,7 @@ fn est(lineas: Vec<Linea>) -> Estado {
 }
 
 fn pago(f: &str, m: i64) -> PagoEntrada {
-    PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, telefono: None }
+    PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, pagador: None }
 }
 
 async fn cobrar(p: &SqlitePool, a: &Actor, e: &Estado, pagos: &[PagoEntrada]) -> Result<ventas::ResultadoCobro, String> {
@@ -104,7 +104,7 @@ async fn el_efectivo_esperado_nunca_queda_negativo() {
     assert_eq!(esperado(p, &dueno).await, 0);
     // …y después se anula la venta (devolver ¢5.000 que ya no están) o se pasa a tarjeta.
     let pago_id: String = sqlx::query_scalar("SELECT id FROM venta_pagos WHERE venta_id = ?").bind(&v.venta_id).fetch_one(p).await.unwrap();
-    let a_tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None, telefono: None };
+    let a_tarjeta = CambioPago { forma_pago_id: TJ.into(), banco_id: None, referencia: None, ultimos4: None, pagador: None };
     assert!(ventas::corregir_pago(p, &dueno, CAJA_1, &pago_id, &a_tarjeta, "era tarjeta", Some(PIN)).await.unwrap_err().contains("ya no queda ese efectivo"));
     assert!(ventas::anular(p, &dueno, CAJA_1, &v.venta_id, PIN, "cliente devolvió", 0).await.unwrap_err().contains("ya no queda ese efectivo"));
     assert_eq!(esperado(p, &dueno).await, 0);
@@ -152,7 +152,7 @@ async fn comprobante_sinpe_repetido_avisa_y_queda_en_bitacora() {
     let p = &bd.pool;
     let pid = prod(p, 1000).await;
     caja::abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
-    let sinpe = |r: &str| [PagoEntrada { referencia: Some(r.into()), telefono: Some("86682498".into()), ..pago(SP, 1000) }];
+    let sinpe = |r: &str| [PagoEntrada { banco_id: Some("0000000000000000000000BN02".into()), referencia: Some(r.into()), pagador: Some("Ana Mora".into()), ..pago(SP, 1000) }];
     let uno = || est(vec![linea(Some(&pid), 1000, 1, 0)]);
     assert_eq!(ventas::referencia_usada(p, &cajero, SP, "88123456").await.unwrap(), None);
     let v = cobrar(p, &cajero, &uno(), &sinpe("88123456")).await.unwrap();
@@ -167,13 +167,22 @@ async fn comprobante_sinpe_repetido_avisa_y_queda_en_bitacora() {
     cobrar(p, &cajero, &uno(), &sinpe("88123456")).await.unwrap();
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora WHERE accion = 'venta.referencia_repetida'").fetch_one(p).await.unwrap();
     assert_eq!(n, 1);
-    // SINPE sin teléfono, o con uno que no es de 8 números: no se cobra. El bueno queda guardado.
-    for tel in [None, Some("8668249"), Some("8668249a")] {
-        let r = cobrar(p, &cajero, &uno(), &[PagoEntrada { referencia: Some("55555".into()), telefono: tel.map(Into::into), ..pago(SP, 1000) }]).await;
-        assert!(r.unwrap_err().contains("teléfono"), "{tel:?}");
+    // SINPE sin nombre de quien paga, sin banco o sin referencia: no se cobra. El nombre queda limpio.
+    let bien = PagoEntrada { banco_id: Some("0000000000000000000000BN02".into()), referencia: Some("55555".into()), pagador: Some("Ana Mora".into()), ..pago(SP, 1000) };
+    for (malo, falta) in [
+        (PagoEntrada { pagador: None, ..bien.clone() }, "nombre"),
+        (PagoEntrada { pagador: Some(" A ".into()), ..bien.clone() }, "nombre"),
+        (PagoEntrada { banco_id: None, ..bien.clone() }, "banco"),
+        (PagoEntrada { referencia: None, ..bien.clone() }, "referencia"),
+    ] {
+        let r = cobrar(p, &cajero, &uno(), &[malo]).await;
+        assert!(r.unwrap_err().contains(falta), "{falta}");
     }
-    let tel: String = sqlx::query_scalar("SELECT telefono FROM venta_pagos WHERE referencia = '88123456' LIMIT 1").fetch_one(p).await.unwrap();
-    assert_eq!(tel, "86682498");
+    cobrar(p, &cajero, &uno(), &[PagoEntrada { pagador: Some("  Ana   Mora ".into()), ..bien.clone() }]).await.unwrap();
+    let pagador: String = sqlx::query_scalar("SELECT pagador FROM venta_pagos WHERE referencia = '55555'").fetch_one(p).await.unwrap();
+    assert_eq!(pagador, "Ana Mora");
+    // En otra forma de pago no se guarda un nombre.
+    assert!(cobrar(p, &cajero, &uno(), &[PagoEntrada { pagador: Some("Ana".into()), ..pago(TJ, 1000) }]).await.unwrap_err().contains("no lleva"));
 }
 
 #[tokio::test]

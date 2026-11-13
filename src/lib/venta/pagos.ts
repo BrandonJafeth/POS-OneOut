@@ -34,9 +34,11 @@ export function calcularPagos(total: number, pagos: PagoEntrada[], formas: Forma
     if (!Number.isSafeInteger(p.monto) || p.monto <= 0) errores.push(`${f.nombre}: monto inválido`);
     if (f.requiereBanco && !p.bancoId) errores.push(`${f.nombre}: elija el banco`);
     if (f.requiereReferencia && !p.referencia?.trim()) errores.push(`${f.nombre}: escriba la referencia`);
-    // Igual que calculo.rs: SINPE Móvil pide el teléfono de quien paga (8 números).
-    if (f.tipo === "sinpe" && !/^\d{8}$/.test(p.telefono ?? "")) errores.push(`${f.nombre}: escriba el teléfono de quien paga (8 números)`);
-    else if (f.tipo !== "sinpe" && p.telefono) errores.push(`${f.nombre}: esta forma de pago no lleva teléfono`);
+    // Igual que calculo::validar_pagador: SINPE Móvil pide el nombre de quien paga; otra forma no lo lleva.
+    const pagador = (p.pagador ?? "").trim().replace(/\s+/g, " ");
+    if (f.tipo === "sinpe" && !pagador) errores.push(`${f.nombre}: escriba el nombre de quien paga`);
+    else if (f.tipo === "sinpe" && ([...pagador].length < 2 || [...pagador].length > 60)) errores.push(`${f.nombre}: el nombre de quien paga debe tener de 2 a 60 letras`);
+    else if (f.tipo !== "sinpe" && pagador) errores.push(`${f.nombre}: esta forma de pago no lleva nombre de quien paga`);
     // Igual que calculo.rs: últimos 4 en una forma que no los pide también se rechaza.
     if (p.ultimos4 && !(f.pideUltimos4 && /^\d{4}$/.test(p.ultimos4))) errores.push(`${f.nombre}: los últimos 4 dígitos son 4 números`);
     if (!f.daVuelto) sinVuelto += p.monto;
@@ -78,10 +80,4 @@ export function sugerenciasEfectivo(falta: number, denominaciones: number[]): nu
     if (m > falta && m <= falta + d) out.add(m);
   }
   return [...out].sort((a, b) => a - b).slice(0, 6);
-}
-
-/** Solo los 8 dígitos; un número pegado con código de país ("+506 8668 2498") pierde el 506. */
-export function soloTelefono(t: string): string {
-  const d = t.replace(/\D/g, "");
-  return (d.length === 11 && d.startsWith("506") ? d.slice(3) : d).slice(0, 8);
 }

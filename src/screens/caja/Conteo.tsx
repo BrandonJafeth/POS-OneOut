@@ -7,6 +7,7 @@ import { totalConteo, type ConteoEntrada } from "../../db/caja";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
 import CampoMonto from "../../ui/CampoMonto";
 import { monto } from "../../lib/tickets";
+import { seleccionarAlTocar } from "../../ui/seleccionarAlTocar";
 
 export default function ConteoDinero(p: { denominaciones: number[]; valor: ConteoEntrada; onCambio(c: ConteoEntrada): void; etiquetaTotal?: string }) {
   const porTotal = p.valor.total !== null;
@@ -33,7 +34,7 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
             aria-label={`Cantidad de ${monto(d)}`}
             value={String(n)}
             onChange={(e) => poner(d, Number(e.target.value.replace(/\D/g, "")))}
-            onFocus={(e) => e.target.select()}
+            {...seleccionarAlTocar}
           />
           <button type="button" aria-label={`Una más de ${monto(d)}`} onClick={() => poner(d, n + 1)}>
             <Plus size={16} aria-hidden />

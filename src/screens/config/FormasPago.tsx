@@ -21,9 +21,20 @@ export function FormasPago() {
   useEffect(() => void cargar(), []);
 
   const set = (i: number, patch: Partial<FormaPago>) => setLista(lista.map((f, j) => (j === i ? { ...f, ...patch } : f)));
-  const casilla = (i: number, k: "requiereBanco" | "requiereReferencia" | "daVuelto" | "pideUltimos4" | "activo") => (
-    <input type="checkbox" aria-label={k} checked={lista[i][k]} onChange={(e) => set(i, { [k]: e.target.checked })} />
-  );
+  const casilla = (i: number, k: "requiereBanco" | "requiereReferencia" | "daVuelto" | "pideUltimos4" | "activo") => {
+    // SINPE siempre pide banco y referencia (también el nombre de quien paga): no se pueden quitar.
+    const fija = lista[i].tipo === "sinpe" && (k === "requiereBanco" || k === "requiereReferencia");
+    return (
+      <input
+        type="checkbox"
+        aria-label={k}
+        checked={fija || lista[i][k]}
+        disabled={fija}
+        title={fija ? "SINPE siempre pide banco, referencia y nombre de quien paga" : undefined}
+        onChange={(e) => set(i, { [k]: e.target.checked })}
+      />
+    );
+  };
 
   return (
     <section className="card">

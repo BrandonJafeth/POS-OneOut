@@ -25,8 +25,8 @@ const PIN: &str = "246813";
 
 fn formas() -> Vec<Forma> {
     vec![
-        Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false, pide_telefono: false },
-        Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: false, pide_telefono: false },
+        Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false, pide_pagador: false },
+        Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: false, pide_pagador: false },
     ]
 }
 
@@ -35,7 +35,7 @@ fn linea(precio: i64, cantidad: i64, descuento: i64) -> Linea {
 }
 
 fn pago(f: &str, m: i64) -> PagoEntrada {
-    PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, telefono: None }
+    PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, pagador: None }
 }
 
 #[test]
@@ -147,7 +147,7 @@ async fn efectivo_esperado_contra_un_modelo_independiente() {
             if x.forma_pago_id == SP {
                 x.banco_id = Some("0000000000000000000000BN02".into());
                 x.referencia = Some(format!("ref{i}"));
-                x.telefono = Some("86682498".into());
+                x.pagador = Some("Ana Mora".into());
             }
             if x.forma_pago_id == TJ {
                 x.ultimos4 = Some("1234".into());
