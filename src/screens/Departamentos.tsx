@@ -5,6 +5,7 @@ import { guardarConfig } from "../db/config";
 import { colorDepartamento, crearDepartamento, editarDepartamento, listarDepartamentos, moverDepartamento } from "../db/departamentos";
 import type { Departamento } from "../tipos";
 import { colorDe, esColor, PALETA_DEPARTAMENTOS, textoSobre } from "../ui/departamentos";
+import { TEMAS, temaConFondo } from "../ui/tema";
 import { useToast } from "../ui/Toast";
 import { useEnvio } from "../ui/useEnvio";
 
@@ -73,6 +74,27 @@ function ModoColores(p: { modo: string; onCambio(m: string): Promise<void> }) {
   );
 }
 
+/** Fondo de la app en tema claro: para que las tarjetas blancas resalten. Se aclara solo si no se lee bien. */
+function ColorFondo(p: { valor: string; onCambio(c: string): Promise<void> }) {
+  const [color, setColor] = useState(p.valor || TEMAS.claro.bg);
+  return (
+    <section className="card">
+      <h2>Color de fondo</h2>
+      <p className="muted">Solo en el tema claro. Las tarjetas de productos y los cuadros quedan blancos encima. Si el color es muy oscuro, la app lo aclara para que todo se lea.</p>
+      <div className="depto-color">
+        <span className="depto-muestra" style={{ background: temaConFondo(TEMAS.claro, color).bg, color: TEMAS.claro.text }}>
+          <span style={{ background: TEMAS.claro.card, padding: "2px 8px", borderRadius: 4 }}>Tarjeta</span>
+        </span>
+        <input type="color" aria-label="Color de fondo" value={color} onChange={(e) => setColor(e.target.value)} />
+        <button className="primary" disabled={color === (p.valor || TEMAS.claro.bg)} onClick={() => void p.onCambio(color.toLowerCase())}>
+          Guardar fondo
+        </button>
+        {p.valor && <button onClick={() => (setColor(TEMAS.claro.bg), void p.onCambio(""))}>Usar el gris de siempre</button>}
+      </div>
+    </section>
+  );
+}
+
 /** Lista editable. El dueño cambia nombre, orden, color y activo; el técnico además crea y cambia códigos. */
 export default function Departamentos({ embebido = false }: { embebido?: boolean }) {
   const { actor, puede, config, recargarConfig } = useSesion();
@@ -113,6 +135,7 @@ export default function Departamentos({ embebido = false }: { embebido?: boolean
         modo={config.departamentos_color}
         onCambio={(m) => hacer(async () => (await guardarConfig(actor, "departamentos_color", m), await recargarConfig()), "Colores guardados.")}
       />
+      <ColorFondo valor={config.color_fondo} onCambio={(c) => hacer(async () => (await guardarConfig(actor, "color_fondo", c), await recargarConfig()), "Fondo guardado.")} />
       <section className="card">
         <table className="tbl tbl-grande">
           <thead>

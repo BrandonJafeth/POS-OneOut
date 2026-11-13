@@ -11,7 +11,6 @@ import type { Corte, DepartamentoDesglose, Detalle, Movimiento, Resumen } from "
 import { agruparPorForma } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
-import { escribirEncabezado } from "../impresion";
 import { diaLocal } from "../texto";
 import { columnas, cortar, fechaHora, lr, monto, montoConSigno, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
@@ -83,14 +82,20 @@ export function exigirCuadre(r: Resumen): void {
 
 // ─── Piezas ───
 
+/** Título de sección en UNA línea ("-- EFECTIVO -------"): el separador aparte gastaba papel. */
 function titulo(l: LineaDoc[], texto: string, cols: number) {
-  l.push({ t: sep(cols) }, { t: texto, b: true });
+  l.push({ t: `-- ${texto} `.padEnd(cols, "-"), b: true });
 }
 
 function filaDetalle(f: DepartamentoDesglose["filas"][number], cols: number): LineaDoc[] {
   if (cols >= 60) {
     const w = cols - 3 - 6 - 10 - 11 - 11;
     return [{ t: `${f.codigo.padEnd(3)}${cortar(f.producto, w).padEnd(w)}${String(f.cantidad).padStart(6)}${monto(f.precio).padStart(10)}${monto(f.monto).padStart(11)}${monto(f.efectivo).padStart(11)}` }];
+  }
+  // 80 mm: una línea por producto (el precio sale de monto / cantidad).
+  if (cols >= 40) {
+    const w = cols - 3 - 5 - 10 - 10;
+    return [{ t: `${f.codigo.padEnd(3)}${cortar(f.producto, w).padEnd(w)}${String(f.cantidad).padStart(5)}${monto(f.monto).padStart(10)}${monto(f.efectivo).padStart(10)}` }];
   }
   const cant = `x${f.cantidad}`;
   return [{ t: lr(`${f.codigo} ${cortar(f.producto, cols - cant.length - 4)}`, cant, cols) }, { t: lr(`   ${monto(f.precio)}`, `${monto(f.monto)} ef ${monto(f.efectivo)}`, cols) }];
@@ -101,11 +106,16 @@ function encabezadoDetalle(cols: number): LineaDoc[] {
     const w = cols - 3 - 6 - 10 - 11 - 11;
     return [{ t: `${"".padEnd(3)}${"Producto".padEnd(w)}${"Cant".padStart(6)}${"Precio".padStart(10)}${"Monto".padStart(11)}${"Efectivo".padStart(11)}`, b: true }];
   }
+  if (cols >= 40) {
+    const w = cols - 3 - 5 - 10 - 10;
+    return [{ t: `${"".padEnd(3)}${"Producto".padEnd(w)}${"Cant".padStart(5)}${"Monto".padStart(10)}${"Efect.".padStart(10)}`, b: true }];
+  }
   return [{ t: lr("Tipo Producto", "Cant", cols) }, { t: lr("   Precio", "Monto ef Efectivo", cols) }];
 }
 
 function lineasDepto(x: DepartamentoDesglose, cols: number, conFormas: boolean): LineaDoc[] {
-  const l: LineaDoc[] = [{ t: cortar(x.nombre, cols), b: true }];
+  const l: LineaDoc[] = [];
+  titulo(l, cortar(x.nombre, cols - 4), cols);
   for (const f of x.filas) l.push(...filaDetalle(f, cols));
   l.push({ t: lr(`Subtotal (${x.cantidad})`, monto(x.monto), cols), b: true }, { t: lr("  en efectivo", monto(x.efectivo), cols) });
   if (conFormas) for (const f of x.porForma) l.push({ t: lr(`  ${cortar(f.forma, cols - 14)}`, monto(f.monto), cols) });
@@ -222,7 +232,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     for (const g of grupos) {
       l.push({ t: lr(`${cortar(g.forma, cols - 14)} (${g.pagos.length})`, monto(g.total), cols), b: true });
       for (const x of g.pagos) {
-        const dato = x.ultimos4 ? `****${x.ultimos4}` : [x.banco, x.referencia && `ref ${x.referencia}`].filter(Boolean).join(" ");
+        const dato = x.ultimos4 ? `****${x.ultimos4}` : [x.banco, x.referencia && `ref ${x.referencia}`, x.telefono && `tel ${x.telefono}`].filter(Boolean).join(" ");
         const izq = `${hora(x.fecha)} ${x.ventaNumero}`;
         const cabe = cols - monto(x.monto).length - 1 - izq.length - 1;
         // Si la referencia no cabe en la misma línea, va completa en la siguiente (no se corta).
@@ -232,8 +242,8 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     }
   }
 
-  titulo(l, "MOVIMIENTOS DE EFECTIVO", cols);
-  if (!r.movimientos.length) l.push({ t: "  Sin entradas ni salidas" });
+  // Sin movimientos no va la sección: EFECTIVO ya dice entradas +0 y salidas -0.
+  if (r.movimientos.length) titulo(l, "MOVIMIENTOS DE EFECTIVO", cols);
   for (const m of r.movimientos) {
     l.push({ t: lr(`${m.tipo === "salida" ? "-" : "+"} ${cortar(m.categoria, cols - 14)}`, monto(m.monto), cols) });
     l.push({ t: `  ${hora(m.fecha)} ${cortar([m.usuario, m.motivo].filter(Boolean).join(" · "), cols - 8)}` });
@@ -266,8 +276,10 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   else {
     const lista = (o.denominaciones?.length ? o.denominaciones : DENOMINACIONES).slice().sort((a, b) => b - a);
     for (const [nombre, filtro] of [["BILLETES", (x: number) => x >= 1000], ["MONEDAS", (x: number) => x < 1000]] as const) {
-      l.push({ t: nombre });
-      for (const x of lista.filter(filtro)) {
+      // Solo lo que se contó: 12 renglones de "0 ¢0" eran papel perdido.
+      const contadas = lista.filter(filtro).filter((x) => Number(c?.[String(x)] ?? 0) > 0);
+      if (contadas.length) l.push({ t: nombre });
+      for (const x of contadas) {
         const cant = Number(c?.[String(x)] ?? 0);
         l.push({ t: lr(`  ${den(x).padEnd(7)} ${String(cant).padStart(4)}`, monto(cant * x), cols) });
       }
@@ -281,11 +293,12 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     l.push({ t: sep2(cols), salto: true }, { t: "DETALLE DE VENTAS", b: true, centro: true });
     wrap(LEYENDA_CODIGOS, cols).forEach((x) => l.push({ t: x }));
     l.push(...encabezadoDetalle(cols));
-    for (const x of r.desglose.departamentos) l.push({ t: sep(cols) }, ...lineasDepto(x, cols, false));
+    for (const x of r.desglose.departamentos) l.push(...lineasDepto(x, cols, false));
     l.push({ t: sep2(cols) }, { t: lr(`TOTAL GENERAL (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true }, { t: lr("  en efectivo", monto(r.desglose.efectivo), cols) });
   }
 
-  l.push({ t: sep2(cols) }, { t: "" }, { t: `Cajero: ${cortar(t.usuarioCierre ?? "", cols - 8)}` }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) }, { t: "" }, { t: `Supervisor: ${cortar(r.supervisor, cols - 12)}`.trimEnd() }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
+  // Firmas: nombre arriba y raya abajo, con un solo renglón libre para firmar.
+  l.push({ t: sep2(cols) }, { t: `Cajero: ${cortar(t.usuarioCierre ?? "", cols - 8)}` }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) }, { t: `Supervisor: ${cortar(r.supervisor, cols - 12)}`.trimEnd() }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });
   return l;
 }
 
@@ -299,18 +312,22 @@ export function lineasDepartamento(n: Negocio, d: Detalle, x: DepartamentoDesglo
   wrap(LEYENDA_CODIGOS, cols).forEach((y) => l.push({ t: y }));
   l.push(...encabezadoDetalle(cols));
   for (const f of x.filas) l.push(...filaDetalle(f, cols));
-  l.push({ t: sep(cols) }, { t: "POR FORMA DE PAGO", b: true });
+  titulo(l, "POR FORMA DE PAGO", cols);
   for (const f of x.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.forma, cols - 16)}`, monto(f.monto), cols) });
   l.push({ t: lr(`TOTAL ${cortar(x.nombre, cols - 22)} (${x.cantidad})`, monto(x.monto), cols), b: true });
   l.push({ t: lr("  en efectivo", monto(x.efectivo), cols) }, { t: sep2(cols) });
   return l;
 }
 
-/** Líneas → bytes ESC/POS, con el encabezado del negocio (logo) arriba. */
+/**
+ * Líneas → bytes ESC/POS. Son reportes internos: sin logo ni dirección/cédula/teléfono (eso es
+ * para el cliente y gastaba papel en cada comprobante). Solo el nombre, si el cuerpo no lo trae ya.
+ */
 export function aEscPos(n: Negocio, cuerpo: LineaDoc[], s: TicketSettings): Doc {
   const cols = columnas(s);
   const p = new EscPos(s.codePage, { sinModoChino: s.sinModoChino });
-  escribirEncabezado(p, n, cols);
+  const nombre = n.nombreComercial.trim();
+  if (nombre && !nombreSiHayLogo(n)) p.align("center").bold(true).line(cortar(nombre, cols)).bold(false).align("left");
   for (const x of cuerpo) {
     if (x.centro) p.align("center");
     if (x.b) p.bold(true);

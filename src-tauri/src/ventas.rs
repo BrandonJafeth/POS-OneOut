@@ -211,7 +211,7 @@ fn gastar_autorizacion(token: &str) {
 // ─────────── Cobro ───────────
 
 pub async fn formas(c: &mut SqliteConnection) -> Res<Vec<Forma>> {
-    let filas = sqlx::query("SELECT id, nombre, requiere_banco, requiere_referencia, da_vuelto, pide_ultimos4 FROM formas_pago WHERE activo = 1 AND eliminado_en IS NULL").fetch_all(c).await.map_err(e)?;
+    let filas = sqlx::query("SELECT id, nombre, tipo, requiere_banco, requiere_referencia, da_vuelto, pide_ultimos4 FROM formas_pago WHERE activo = 1 AND eliminado_en IS NULL").fetch_all(c).await.map_err(e)?;
     Ok(filas
         .iter()
         .map(|f| Forma {
@@ -221,6 +221,7 @@ pub async fn formas(c: &mut SqliteConnection) -> Res<Vec<Forma>> {
             requiere_referencia: f.get::<i64, _>("requiere_referencia") == 1,
             da_vuelto: f.get::<i64, _>("da_vuelto") == 1,
             pide_ultimos4: f.get::<i64, _>("pide_ultimos4") == 1,
+            pide_telefono: f.get::<String, _>("tipo") == "sinpe",
         })
         .collect())
 }
@@ -471,8 +472,8 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     }
     for ap in &rp.aplicados {
         sqlx::query(
-            "INSERT INTO venta_pagos (id, venta_id, forma_pago_id, banco_id, monto, recibido, vuelto, referencia, ultimos4, creado_en, actualizado_en, usuario_id, turno_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO venta_pagos (id, venta_id, forma_pago_id, banco_id, monto, recibido, vuelto, referencia, ultimos4, telefono, creado_en, actualizado_en, usuario_id, turno_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(ulid())
         .bind(&venta_id)
@@ -483,6 +484,7 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .bind(ap.vuelto)
         .bind(ap.pago.referencia.as_deref().map(str::trim).filter(|s| !s.is_empty()))
         .bind(ap.pago.ultimos4.as_deref().filter(|s| !s.is_empty()))
+        .bind(ap.pago.telefono.as_deref().filter(|s| !s.is_empty()))
         .bind(&fecha)
         .bind(&fecha)
         .bind(&a.id)
@@ -618,6 +620,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
             "banco": p.get::<Option<String>, _>("banco"),
             "referencia": p.get::<Option<String>, _>("referencia"),
             "ultimos4": p.get::<Option<String>, _>("ultimos4"),
+            "telefono": p.get::<Option<String>, _>("telefono"),
         })).collect::<Vec<_>>(),
     })))
 }
@@ -1144,7 +1147,7 @@ mod tests {
     }
 
     fn pago(f: &str, m: i64) -> PagoEntrada {
-        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None }
+        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, telefono: None }
     }
     const EF: &str = "0000000000000000000000FP01";
     const TJ: &str = "0000000000000000000000FP02";
@@ -1443,11 +1446,11 @@ mod tests {
         let color = producto_en(p, "IMPRESIONES A COLOR", FOTOCOPIAS, 200).await;
         let t = abrir(p, &cajero, CAJA_1, &conteo(&[(10000, 1)])).await.unwrap();
         // 42 impresiones por SINPE; 1 en efectivo; venta mixta con descuento al total y redondeo.
-        vender(p, &cajero, &Estado { lineas: vec![linea(&color, "IMPRESIONES A COLOR", FOTOCOPIAS, 200, 42, 0)], ..Default::default() }, &[PagoEntrada { referencia: Some("69898".into()), ..pago(SP, 8400) }]).await;
+        vender(p, &cajero, &Estado { lineas: vec![linea(&color, "IMPRESIONES A COLOR", FOTOCOPIAS, 200, 42, 0)], ..Default::default() }, &[PagoEntrada { referencia: Some("69898".into()), telefono: Some("86682498".into()), ..pago(SP, 8400) }]).await;
         vender(p, &cajero, &Estado { lineas: vec![linea(&color, "IMPRESIONES A COLOR", FOTOCOPIAS, 200, 1, 0)], ..Default::default() }, &[pago(EF, 1000)]).await;
         let mixta = Estado { lineas: vec![linea(&cuaderno, "Cuaderno", LIBRERIA, 1500, 1, 0), linea(&color, "IMPRESIONES A COLOR", FOTOCOPIAS, 200, 3, 0)], descuento_total: 103, ..Default::default() };
         // 2100 − 103 = 1997 → redondeo a 1995.
-        let v = vender(p, &cajero, &mixta, &[PagoEntrada { banco_id: Some(BCR.into()), referencia: Some("777".into()), ..pago(SP, 1000) }, pago(EF, 2000)]).await;
+        let v = vender(p, &cajero, &mixta, &[PagoEntrada { banco_id: Some(BCR.into()), referencia: Some("777".into()), telefono: Some("86682498".into()), ..pago(SP, 1000) }, pago(EF, 2000)]).await;
         assert_eq!(v.vuelto, 1005);
         let entrada = crate::caja::NuevoMovimiento { tipo: "entrada".into(), monto: 3000, categoria: "Ingreso de cambio".into(), nota: String::new() };
         crate::caja::movimiento(p, &cajero, CAJA_1, &entrada, None).await.unwrap();

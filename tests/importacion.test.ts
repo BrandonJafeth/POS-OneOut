@@ -5,7 +5,8 @@ import { codigosExistentes, favoritosActuales, productosParaImportar, resumenCat
 import { buscarProductos, crearProducto } from "../src/db/productos";
 import { celdaSegura, detectarSeparador, leerCsv } from "../src/lib/csv";
 import { cambiosDePrecio, categoriasSinMapear, crearPlan, leerPrecio, type Contexto, type Opciones, type ProductoExistente } from "../src/lib/importar/plan";
-import { codigoBase, codigoLibre, contienePalabra, pluralesSinRegla, porCategorias, porPalabras, REGLAS_DEFECTO, reglasValidas, sugerenciaNombre } from "../src/lib/importar/reglas";
+import { contienePalabra, pluralesSinRegla, porCategorias, porPalabras, REGLAS_DEFECTO, reglasValidas, sugerenciaNombre } from "../src/lib/importar/reglas";
+import { isValidEan13 } from "../src/lib/ean13";
 import { leerCsvWeb } from "../src/lib/importar/web";
 import { puede } from "../src/lib/permisos";
 import type { Actor } from "../src/tipos";
@@ -134,14 +135,6 @@ describe("reglas", () => {
     expect(porPalabras("Marcador permanente", REGLAS_DEFECTO.palabras)).toEqual({ indice: 3, palabra: "marcador" });
   });
 
-  it("código interno: departamento + 3 letras, con número si choca", () => {
-    expect(codigoBase("07", "Tóner HP")).toBe("07ton");
-    expect(codigoBase("01", "12 Crayones")).toBe("01cra");
-    expect(codigoBase("12", "A4")).toBe("12a4x");
-    const usados = new Set(["05por"]);
-    expect([codigoLibre("05por", usados), codigoLibre("05por", usados), codigoLibre("01cua", usados)]).toEqual(["05por2", "05por3", "01cua"]);
-  });
-
   it("sugiere solo mayúsculas evidentes", () => {
     expect(sugerenciaNombre('TIjera 8" - Merletto')).toBe('Tijera 8" - Merletto');
     expect(sugerenciaNombre("Papel DTF A4 USB")).toBeNull();
@@ -174,7 +167,9 @@ describe("plan de importación", () => {
     expect(plan.nuevos.find((i) => !i.activo)?.webId).toBe("id-7");
     const codigos = plan.nuevos.map((i) => i.codigo);
     expect(new Set(codigos).size).toBe(719);
-    expect(codigos.every((c) => /^\d{2}[a-z0-9]{3}\d*$/.test(c!))).toBe(true);
+    // EAN-13 internos (imprimibles), del contador del POS: 2000000000015, …
+    expect(codigos.every((c) => isValidEan13(c!) && c!.startsWith("200"))).toBe(true);
+    expect(codigos[0]).toBe("2000000000015");
     expect(plan.favoritos).toEqual({ destacados: 281, marcados: 40, cupo: 40 });
     // Varias categorías ("Bazar | Escolar") → Librería por prioridad.
     expect(plan.nuevos.filter((i) => i.categorias.length > 1).every((i) => i.departamentoId === D("01"))).toBe(true);
@@ -299,7 +294,7 @@ describe("plan de importación", () => {
       op({ codigosInternos: true }),
     );
     expect(plan.actualizar).toMatchObject([
-      { productoId: "p1", webId: "NUEVO-ID", codigo: "01lap" },
+      { productoId: "p1", webId: "NUEVO-ID", codigo: "2000000000015" },
       // "Cartulina" se creó a mano: se une con la de la web (no se duplica ni da error).
       { productoId: "p3", webId: "w8", nombre: "cartulina" },
     ]);

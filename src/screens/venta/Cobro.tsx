@@ -154,6 +154,11 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
             </select>
           </Field>
         )}
+        {fp?.tipo === "sinpe" && (
+          <Field label="Teléfono de quien paga">
+            <input className="mono" inputMode="numeric" placeholder="86682498" value={f.telefono ?? ""} onChange={(e) => set(f.clave, { telefono: e.target.value.replace(/\D/g, "").slice(0, 8) })} />
+          </Field>
+        )}
         {fp?.requiereReferencia && (
           <Field label="Referencia">
             <input value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
@@ -233,7 +238,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
                 <Field label="Forma">
                   <span className="cobro-forma">
                     <Icono size={20} aria-hidden />
-                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, bancoId: null, referencia: null, ultimos4: null })}>
+                    <select value={f.formaPagoId} onChange={(e) => set(f.clave, { formaPagoId: e.target.value, bancoId: null, referencia: null, ultimos4: null, telefono: null })}>
                       {p.formas.map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.nombre}

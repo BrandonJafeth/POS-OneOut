@@ -50,8 +50,8 @@ function detalle(): Detalle {
       ],
       ajustes: [],
       pagosElectronicos: [
-        { fecha: "2026-11-03T16:05:00Z", ventaNumero: "67979", forma: "SINPE Móvil", tipo: "sinpe", monto: 8400, ultimos4: null, banco: "BCR", referencia: "69898" },
-        { fecha: "2026-11-03T20:05:00Z", ventaNumero: "67981", forma: "SINPE Móvil", tipo: "sinpe", monto: 1000, ultimos4: null, banco: null, referencia: "777" },
+        { fecha: "2026-11-03T16:05:00Z", ventaNumero: "67979", forma: "SINPE Móvil", tipo: "sinpe", monto: 8400, ultimos4: null, banco: "BCR", referencia: "69898", telefono: null },
+        { fecha: "2026-11-03T20:05:00Z", ventaNumero: "67981", forma: "SINPE Móvil", tipo: "sinpe", monto: 1000, ultimos4: null, banco: null, referencia: "777", telefono: null },
       ],
       porUsuario: [
         { usuario: "Juarez", ventas: 2, total: 8600 },
@@ -141,8 +141,9 @@ describe("reporte Z", () => {
     expect(t).toMatch(/67979[\s\S]{0,40}BCR ref 69898/);
     expect(t).toMatch(/67981 ref 777 +¢1\.000/);
     expect(t.replace(/\n/g, " ")).toContain("Orden del dueño: Poner fondo");
-    // El conteo lista todas las denominaciones, también las que fueron 0.
-    expect(t).toMatch(/50 mil +0 +¢0/);
+    // El conteo lista solo lo contado (las que fueron 0 gastaban papel).
+    expect(t).not.toMatch(/50 mil +0 +¢0/);
+    expect(t).toMatch(/10 mil +1 +¢10\.000/);
     expect(t).toMatch(/5 +1 +¢5/);
     // Firma el dueño como supervisor.
     expect(l).toContain("Supervisor: Isaias");
@@ -160,7 +161,16 @@ describe("reporte Z", () => {
     // Sin la casilla, no va el detalle completo.
     expect(t).not.toContain("DETALLE DE VENTAS");
     expect(l.every((x) => x.length <= 32)).toBe(true);
+    // Reporte interno: sin dirección ni cédula del negocio; títulos en una sola línea.
+    expect(l.filter((x) => /^-{32}$/.test(x))).toEqual([]);
+    expect(l).toContain("-- EFECTIVO ".padEnd(32, "-"));
     validarEscPos(doc.bytes);
+  });
+
+  it("en 80 mm el detalle va en una línea por producto", async () => {
+    const d = lineasTexto(documentosCierre(await obtenerNegocio(), detalle(), { ...DEFAULT_SETTINGS, columnas: 48 }, { ...SIN, detalleCompleto: true })[0].bytes);
+    expect(d.some((x) => x.startsWith("De IMPRESIONES A COLOR") && x.includes("42") && x.endsWith("¢0"))).toBe(true);
+    expect(d.every((x) => x.length <= 48)).toBe(true);
   });
 
   it("las casillas imprimen solo lo elegido; la reimpresión sale COPIA en cada papel", async () => {

@@ -231,6 +231,7 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
 // Las claves de configuración que más cambia el dueño, con su nombre en pantalla.
 const CONFIG: Record<string, string> = {
   departamentos_color: "colores de los departamentos",
+  color_fondo: "color de fondo",
   caja_turno_compartido: "turno compartido",
   caja_umbral_diferencia: "diferencia permitida al cerrar",
   caja_salida_max_sin_pin: "salida máxima sin PIN",

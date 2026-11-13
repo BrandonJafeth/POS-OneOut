@@ -38,6 +38,8 @@ export interface ConfigApp {
   mostrar_iva: boolean;
   /** Color propio del negocio ("#rrggbb"); vacío = grafito. Se ajusta solo para cumplir contraste. */
   color_acento: string;
+  /** Fondo de la app en tema claro ("#rrggbb"); vacío = gris base. Se aclara solo para cumplir contraste. */
+  color_fondo: string;
   /** ¢: desde esta diferencia el cierre de caja exige nota y queda para revisión del dueño. */
   caja_umbral_diferencia: number;
   /** ¢: salidas de efectivo mayores piden el PIN del dueño. */
@@ -93,6 +95,7 @@ export const CONFIG_DEFECTO: ConfigApp = {
   tema: "claro",
   mostrar_iva: false,
   color_acento: "",
+  color_fondo: "",
   caja_umbral_diferencia: 1000,
   caja_salida_max_sin_pin: 20000,
   caja_turno_compartido: true,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combinaciones, contraste, TEMAS, temaConAcento, type NombreTema } from "../src/ui/tema";
+import { combinaciones, contraste, TEMAS, temaConAcento, temaConFondo, type NombreTema } from "../src/ui/tema";
 
 describe("contraste WCAG 2.1 AA", () => {
   it("la fórmula da los valores conocidos", () => {
@@ -28,6 +28,17 @@ describe("contraste WCAG 2.1 AA", () => {
         expect(fallas).toEqual([]);
       });
     }
+  }
+
+  // Fondo propio del tema claro (con y sin color de negocio encima): sigue cumpliendo.
+  for (const fondo of ["#e8f0fe", "#ffd400", "#1a4fc4", "#000000", "#c8e6c9"]) {
+    it(`fondo ${fondo} en tema claro cumple`, () => {
+      for (const acento of ["", "#ff69b4"]) {
+        const t = temaConAcento(temaConFondo(TEMAS.claro, fondo), "claro", acento);
+        const fallas = combinaciones(t).filter(([a, b, min]) => contraste(a, b) < min);
+        expect(fallas).toEqual([]);
+      }
+    });
   }
 
   it("un valor inválido deja el grafito", () => {

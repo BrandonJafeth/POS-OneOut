@@ -133,7 +133,7 @@ export default function App() {
     // Con PIN pendiente de cambio Rust no deja leer nada: la configuración se carga después del cambio.
     if (!usuario.debeCambiarPin) {
       const c = await leerConfig();
-      aplicarTema(c.tema, c.color_acento);
+      aplicarTema(c.tema, c.color_acento, c.color_fondo);
       setConfig(c);
     }
     mostrarDetalleTecnico(usuario.rol === "tecnico");
@@ -142,7 +142,7 @@ export default function App() {
 
   const recargarConfig = useCallback(async () => {
     const c = await leerConfig();
-    aplicarTema(c.tema, c.color_acento);
+    aplicarTema(c.tema, c.color_acento, c.color_fondo);
     setConfig(c);
   }, []);
   // Cambio de usuario: se cierra la sesión en Rust (el turno de caja sigue abierto) y se vuelve a

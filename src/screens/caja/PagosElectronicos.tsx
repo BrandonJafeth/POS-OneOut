@@ -5,7 +5,7 @@ import { CreditCard } from "lucide-react";
 import { agruparPorForma, type PagoElectronico } from "../../db/caja";
 import { fechaHora, monto } from "../../lib/tickets";
 
-const detalle = (p: PagoElectronico) => [p.ultimos4 && `****${p.ultimos4}`, p.banco, p.referencia && `ref. ${p.referencia}`].filter(Boolean).join(" · ");
+const detalle = (p: PagoElectronico) => [p.ultimos4 && `****${p.ultimos4}`, p.banco, p.referencia && `ref. ${p.referencia}`, p.telefono && `tel. ${p.telefono}`].filter(Boolean).join(" · ");
 
 export default function PagosElectronicos(p: { pagos: PagoElectronico[]; abierto?: boolean }) {
   const grupos = agruparPorForma(p.pagos);

@@ -4,7 +4,8 @@
 // y se prueba fácil. Rust vuelve a validar todo al aplicar.
 import { normalizar } from "../texto";
 import type { ErrorFila, FuenteImportacion } from "./fuente";
-import { codigoBase, codigoLibre, porCategorias, porPalabras, sugerenciaNombre, type ReglasImportacion } from "./reglas";
+import { codigoInterno } from "../ean13";
+import { porCategorias, porPalabras, sugerenciaNombre, type ReglasImportacion } from "./reglas";
 
 export const MAX_NOMBRE = 120;
 const ESTADOS = new Set(["disponible", "agotado"]);
@@ -41,6 +42,8 @@ export interface Contexto {
   favoritosActuales: number;
   departamentos: DepartamentoPlan[];
   departamentoDefecto: string;
+  /** Siguiente número de código interno (config codigo_interno_siguiente); Rust toma el mismo contador. */
+  siguienteInterno?: number;
 }
 
 export type Respuesta = "mover" | "dejar";
@@ -330,12 +333,14 @@ export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones
   else for (const i of elegidos) i.favorito = true;
   plan.favoritos = { destacados: plan.validos.filter((i) => i.destacado).length, marcados: elegidos.size, cupo };
 
-  // Códigos internos (solo si se pidió), en el orden del archivo para que sean estables.
-  const usados = new Set(ctx.codigos.map((c) => c.toLowerCase()));
+  // Códigos internos EAN-13 "200…" (solo si se pidió), en el orden del archivo: los mismos que dará Rust.
+  const usados = new Set(ctx.codigos);
+  let n = ctx.siguienteInterno ?? 1;
   const tieneInterno = new Map(ctx.existentes.map((e) => [e.id, e.tieneInterno]));
   for (const i of op.codigosInternos ? plan.validos : []) {
     if (i.productoId && tieneInterno.get(i.productoId)) continue;
-    i.codigo = codigoLibre(codigoBase(deps.get(i.departamentoId)?.codigo ?? "", i.nombre), usados);
+    while (usados.has(codigoInterno(n))) n++;
+    i.codigo = codigoInterno(n++);
   }
 
   // Qué cambia en los que ya existen.

@@ -161,8 +161,21 @@ export function temaConAcento(base: Tema, nombre: NombreTema, hex: unknown): Tem
   return { ...base, accent: acento, "on-accent": sobre, "accent-bg": fondoSel, focus: acento };
 }
 
-export function aplicarTema(nombre: NombreTema, colorNegocio?: unknown): void {
-  const t = temaConAcento(TEMAS[nombre] ?? TEMAS.claro, nombre, colorNegocio);
+/**
+ * Fondo propio (solo tema claro), para que las tarjetas blancas resalten. Se aclara lo justo para
+ * que texto, texto secundario, bordes y acento se sigan leyendo sobre él. Inválido = fondo base.
+ */
+export function temaConFondo(base: Tema, hex: unknown): Tema {
+  if (!esColor(hex)) return base;
+  let bg = hex.toLowerCase();
+  const cumple = () => [base.text, base.muted, base.accent].every((c) => contraste(c, bg) >= 4.5) && [base.line, base.focus].every((c) => contraste(c, bg) >= 3);
+  for (let paso = 0; paso < 100 && !cumple(); paso++) bg = mezclar(bg, "#ffffff", 0.06);
+  return { ...base, bg };
+}
+
+export function aplicarTema(nombre: NombreTema, colorNegocio?: unknown, fondo?: unknown): void {
+  const base = TEMAS[nombre] ?? TEMAS.claro;
+  const t = temaConAcento(nombre === "claro" ? temaConFondo(base, fondo) : base, nombre, colorNegocio);
   const raiz = document.documentElement;
   for (const [k, v] of Object.entries(t)) raiz.style.setProperty(`--${k}`, v);
   raiz.dataset.tema = nombre;

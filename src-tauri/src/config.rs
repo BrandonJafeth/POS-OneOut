@@ -40,7 +40,7 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         "tema" => &[],                                            // cualquier usuario con sesión
         c if c.starts_with("importacion_") => &["productos.importar"],
         c if c.starts_with("caja_") => &["caja.admin", "config.tecnica"],
-        "departamentos_color" => &["departamentos", "config.tecnica"],
+        "departamentos_color" | "color_fondo" => &["departamentos", "config.tecnica"],
         // Inventario: solo el dueño (el técnico no tiene acceso a inventario).
         "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => &["inventario"],
         c if c.starts_with("inventario_") => &["inventario"],
@@ -90,6 +90,10 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
             Some("cada_uno" | "ninguno") => Ok(()),
             Some(c) if c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit()) => Ok(()),
             _ => Err("«departamentos_color»: \"cada_uno\", \"ninguno\" o un color como \"#2563eb\"".into()),
+        },
+        "color_fondo" => match v.as_str() {
+            Some(c) if c.is_empty() || (c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit())) => Ok(()),
+            _ => Err("«color_fondo»: vacío o un color como \"#e8f0fe\"".into()),
         },
         // Vacío, o la fecha que da el mensaje de «reloj atrasado» (se compara como texto con las fechas guardadas).
         "reloj_ignorar_hasta" => match v.as_str() {
@@ -168,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn valores_que_tocan_dinero_se_validan() {
-        let (bd, tec, dueno, _) = base_con_usuarios().await;
+        let (bd, tec, dueno, cajero) = base_con_usuarios().await;
         for (clave, malo) in [
             ("redondeo_total", json!(1000)),
             ("redondeo_total", json!("5")),
@@ -185,6 +189,11 @@ mod tests {
             guardar(&bd.pool, &dueno, "departamentos_color", &bueno).await.unwrap();
         }
         assert!(guardar(&bd.pool, &dueno, "departamentos_color", &json!("azul")).await.is_err());
+        // Fondo del tema claro: el dueño lo cambia; el cajero no; solo "#rrggbb" o vacío.
+        guardar(&bd.pool, &dueno, "color_fondo", &json!("#e8f0fe")).await.unwrap();
+        guardar(&bd.pool, &dueno, "color_fondo", &json!("")).await.unwrap();
+        assert!(guardar(&bd.pool, &dueno, "color_fondo", &json!("azul")).await.is_err());
+        assert!(guardar(&bd.pool, &cajero, "color_fondo", &json!("#e8f0fe")).await.unwrap_err().contains("permiso"));
         assert!(guardar(&bd.pool, &tec, "texto_no_factura", &json!("  ")).await.is_err());
         guardar(&bd.pool, &dueno, "caja_salida_max_sin_pin", &json!(30000)).await.unwrap();
         assert_eq!(entero(&bd.pool, "redondeo_total", 5).await, 10);

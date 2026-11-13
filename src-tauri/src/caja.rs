@@ -482,6 +482,7 @@ pub struct PagoElectronico {
     pub ultimos4: Option<String>,
     pub banco: Option<String>,
     pub referencia: Option<String>,
+    pub telefono: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -706,7 +707,7 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         })
         .collect();
     let pe = sqlx::query(
-        "SELECT v.fecha, v.numero, f.nombre AS forma, f.tipo, p.monto, p.ultimos4, COALESCE(NULLIF(b.abreviatura, ''), b.nombre) AS banco, p.referencia
+        "SELECT v.fecha, v.numero, f.nombre AS forma, f.tipo, p.monto, p.ultimos4, COALESCE(NULLIF(b.abreviatura, ''), b.nombre) AS banco, p.referencia, p.telefono
          FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id JOIN formas_pago f ON f.id = p.forma_pago_id
          LEFT JOIN bancos b ON b.id = p.banco_id
          WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL AND p.eliminado_en IS NULL AND f.da_vuelto = 0
@@ -727,6 +728,7 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
             ultimos4: p.get("ultimos4"),
             banco: p.get("banco"),
             referencia: p.get("referencia"),
+            telefono: p.get("telefono"),
         })
         .collect();
     let pu = sqlx::query(

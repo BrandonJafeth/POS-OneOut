@@ -272,6 +272,8 @@ export interface PagoEntrada {
   bancoId?: string | null;
   referencia?: string | null;
   ultimos4?: string | null;
+  /** SINPE Móvil: teléfono de quien paga (8 dígitos). */
+  telefono?: string | null;
 }
 
 export interface VentaPago {
@@ -286,6 +288,7 @@ export interface VentaPago {
   banco: string | null;
   referencia: string | null;
   ultimos4: string | null;
+  telefono?: string | null;
 }
 
 export interface VentaLinea {

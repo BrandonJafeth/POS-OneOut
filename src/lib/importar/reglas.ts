@@ -100,24 +100,6 @@ export function porPalabras(nombre: string, reglas: ReglaPalabras[]): { indice: 
 }
 
 /**
- * Código interno: código del departamento + 3 primeras letras del nombre ("05por").
- * Sin tildes, solo a-z; si el nombre tiene menos de 3 letras se completa con sus cifras o con x.
- */
-export function codigoBase(codigoDepartamento: string, nombre: string): string {
-  const n = normalizar(nombre);
-  const letras = (n.replace(/[^a-z]/g, "") + n.replace(/[^0-9]/g, "") + "xxx").slice(0, 3);
-  return (codigoDepartamento.toLowerCase().replace(/[^a-z0-9]/g, "") + letras).slice(0, 17);
-}
-
-/** Primer código libre: base, base2, base3… (igual que Rust, que vuelve a revisar al guardar). */
-export function codigoLibre(base: string, usados: Set<string>): string {
-  let c = base;
-  for (let n = 2; usados.has(c); n++) c = `${base}${n}`;
-  usados.add(c);
-  return c;
-}
-
-/**
  * Mayúsculas evidentemente erradas: dos mayúsculas y el resto minúsculas ("TIjera" → "Tijera").
  * No toca siglas ("DTF", "USB") ni nada más. Devuelve null si no hay nada que sugerir.
  */

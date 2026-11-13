@@ -247,15 +247,32 @@ fn validar(it: &Item, deps: &HashSet<String>, pisar: Pisar) -> Result<Item, Stri
     Ok(Item { nombre, categorias_origen: categorias, codigo, ..it.clone() })
 }
 
-async fn codigo_libre(c: &mut SqliteConnection, base: &str) -> Res<String> {
-    for n in 1..10_000 {
-        let cand = if n == 1 { base.to_string() } else { format!("{base}{n}") };
+/// Código interno EAN-13 "200" + 9 dígitos + verificador, del mismo contador que usa el POS
+/// (config codigo_interno_siguiente), para que la etiqueta se pueda imprimir y escanear.
+pub(crate) fn ean_interno(n: i64) -> String {
+    let base = format!("200{n:09}");
+    let suma: u32 = base.bytes().enumerate().map(|(i, b)| (b - b'0') as u32 * if i % 2 == 0 { 1 } else { 3 }).sum();
+    format!("{base}{}", (10 - suma % 10) % 10)
+}
+
+async fn codigo_libre(c: &mut SqliteConnection, ahora: &str) -> Res<String> {
+    sqlx::query("INSERT OR IGNORE INTO config (clave, valor) VALUES ('codigo_interno_siguiente', '1')").execute(&mut *c).await.map_err(e)?;
+    for _ in 0..10_000 {
+        let n: i64 = sqlx::query_scalar("UPDATE config SET valor = CAST(valor AS INTEGER) + 1, actualizado_en = ? WHERE clave = 'codigo_interno_siguiente' RETURNING CAST(valor AS INTEGER) - 1")
+            .bind(ahora)
+            .fetch_one(&mut *c)
+            .await
+            .map_err(e)?;
+        if !(1..=999_999_999).contains(&n) {
+            break;
+        }
+        let cand = ean_interno(n);
         let usado: Option<i64> = sqlx::query_scalar("SELECT 1 FROM codigos WHERE codigo = ?").bind(&cand).fetch_optional(&mut *c).await.map_err(e)?;
         if usado.is_none() {
             return Ok(cand);
         }
     }
-    Err(format!("No hay código libre para {base}"))
+    Err("No hay código interno libre".into())
 }
 
 struct Defectos {
@@ -338,7 +355,10 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
         .map_err(e)?;
         id
     };
-    let Some(base) = &it.codigo else { return Ok(None) };
+    // `codigo` solo indica que se pidió código interno; el número lo da el contador.
+    if it.codigo.is_none() {
+        return Ok(None);
+    }
     // Al actualizar, el código interno se agrega solo si el producto todavía no tiene uno.
     if it.accion == "actualizar" {
         let tiene: Option<i64> = sqlx::query_scalar("SELECT 1 FROM codigos WHERE producto_id = ? AND tipo = 'interno'")
@@ -350,7 +370,7 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
             return Ok(None);
         }
     }
-    let codigo = codigo_libre(c, base).await?;
+    let codigo = codigo_libre(c, ahora).await?;
     sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo, creado_en) VALUES (?, ?, 'interno', ?)")
         .bind(&codigo)
         .bind(&producto_id)
@@ -566,7 +586,7 @@ mod tests {
             .map(|f| Item {
                 activo: f.celdas[4] == "disponible",
                 favorito: f.celdas[6] == "true",
-                codigo: Some("01pro".into()), // todos chocan: se resuelven con número
+                codigo: Some("01pro".into()),
                 categorias_origen: f.celdas[9].clone(),
                 slug: f.celdas[1].clone(),
                 ..item(f.linea as i64, &f.celdas[0], &f.celdas[2], f.celdas[3].parse().unwrap())
@@ -577,7 +597,9 @@ mod tests {
         assert_eq!(contar(&bd.pool, "SELECT COUNT(*) FROM productos").await, 719);
         assert_eq!(contar(&bd.pool, "SELECT COUNT(*) FROM productos WHERE activo = 1").await, 718);
         assert_eq!(contar(&bd.pool, "SELECT COUNT(DISTINCT codigo) FROM codigos WHERE tipo = 'interno'").await, 719);
-        assert_eq!(r.codigos[1].codigo, "01pro2");
+        // Numéricos EAN-13 del contador del POS (imprimibles), no "01pro2".
+        assert_eq!((r.codigos[0].codigo.as_str(), r.codigos[1].codigo.as_str()), (ean_interno(1).as_str(), ean_interno(2).as_str()));
+        assert_eq!(ean_interno(1), "2000000000015");
         assert_eq!(contar(&bd.pool, "SELECT COUNT(*) FROM productos WHERE tasa_iva = 13").await, 719);
 
         // El dueño edita en el POS: cambia departamento, quita favorito y escanea un código de barras.

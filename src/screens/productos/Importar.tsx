@@ -7,7 +7,7 @@ import { ArrowLeft, ArrowRight, Check, Download, FileUp, RotateCcw, Save, Upload
 import { useEffect, useMemo, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Mensaje, { textoError } from "../../components/Mensaje";
-import { guardarConfig } from "../../db/config";
+import { guardarConfig, leerConfig } from "../../db/config";
 import { listarDepartamentos } from "../../db/departamentos";
 import {
   aplicarImportacion,
@@ -107,8 +107,8 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
       const t = await leerArchivo(f);
       const fu = fuenteDesdeTabla(t.cabecera, t.filas);
       if (!fu.filas.length) throw new Error("El archivo solo tiene el encabezado");
-      const [existentes, codigos, favoritos, departamentos] = await Promise.all([productosParaImportar(), codigosExistentes(), favoritosActuales(), listarDepartamentos({ incluirInactivos: true })]);
-      setCtx({ existentes, codigos, favoritosActuales: favoritos, departamentos, departamentoDefecto: config.departamento_defecto });
+      const [existentes, codigos, favoritos, departamentos, cfg] = await Promise.all([productosParaImportar(), codigosExistentes(), favoritosActuales(), listarDepartamentos({ incluirInactivos: true }), leerConfig()]);
+      setCtx({ existentes, codigos, favoritosActuales: favoritos, departamentos, departamentoDefecto: config.departamento_defecto, siguienteInterno: cfg.codigo_interno_siguiente });
       setFuente(fu);
       setArchivo({ nombre: f.name, separador: t.separador === ";" ? "punto y coma" : "coma", codificacion: t.codificacion });
       setRespuestas({});
@@ -455,7 +455,7 @@ export default function Importar({ onSalir }: { onSalir(filtro?: FiltroProductos
                 checked={config.importacion_codigos_internos}
                 onChange={(e) => guardarConfig(actor, "importacion_codigos_internos", e.target.checked).then(recargarConfig, (err) => setError(textoError(err)))}
               />
-              Generar un código interno a los productos que no tienen (por ejemplo «07toc»)
+              Generar un código de barras interno a los productos que no tienen (por ejemplo «2000000000015», se puede imprimir)
             </label>
             <p className="muted">
               {config.importacion_codigos_internos

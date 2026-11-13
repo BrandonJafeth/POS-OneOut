@@ -140,6 +140,9 @@ pub struct PagoEntrada {
     pub banco_id: Option<String>,
     pub referencia: Option<String>,
     pub ultimos4: Option<String>,
+    /// Teléfono de quien paga (SINPE Móvil): 8 dígitos.
+    #[serde(default)]
+    pub telefono: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +153,8 @@ pub struct Forma {
     pub requiere_referencia: bool,
     pub da_vuelto: bool,
     pub pide_ultimos4: bool,
+    /// SINPE Móvil: el teléfono de quien paga es obligatorio.
+    pub pide_telefono: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +199,10 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
             if !(f.pide_ultimos4 && u.len() == 4 && u.chars().all(|c| c.is_ascii_digit())) {
                 errores.push(format!("{}: los últimos 4 dígitos son 4 números", f.nombre));
             }
+        }
+        let tel = p.telefono.as_deref().unwrap_or("");
+        if f.pide_telefono && !(tel.len() == 8 && tel.chars().all(|c| c.is_ascii_digit())) {
+            errores.push(format!("{}: escriba el teléfono de quien paga (8 números)", f.nombre));
         }
         if !f.da_vuelto {
             sin_vuelto += p.monto;
@@ -241,12 +250,12 @@ mod tests {
     }
     fn formas() -> Vec<Forma> {
         vec![
-            Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false },
-            Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: true },
+            Forma { id: "EF".into(), nombre: "Efectivo".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: true, pide_ultimos4: false, pide_telefono: false },
+            Forma { id: "TJ".into(), nombre: "Tarjeta".into(), requiere_banco: false, requiere_referencia: false, da_vuelto: false, pide_ultimos4: true, pide_telefono: false },
         ]
     }
     fn p(f: &str, m: i64) -> PagoEntrada {
-        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None }
+        PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, telefono: None }
     }
 
     #[test]

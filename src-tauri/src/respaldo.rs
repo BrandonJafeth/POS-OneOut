@@ -725,7 +725,7 @@ pub mod tests {
                 e.cliente = serde_json::from_value(json!({"id": cli.id, "nombre": "Cliente Prueba"})).ok();
             }
             let esp = crate::ventas::crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
-            let pago = PagoEntrada { forma_pago_id: forma.into(), monto: cant * 1000, banco_id: None, referencia: None, ultimos4: None };
+            let pago = PagoEntrada { forma_pago_id: forma.into(), monto: cant * 1000, banco_id: None, referencia: None, ultimos4: None, telefono: None };
             crate::ventas::cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago]).await.unwrap();
         }
         cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 12)]), "").await.unwrap();
