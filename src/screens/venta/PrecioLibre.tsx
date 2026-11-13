@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Modal from "../../components/Modal";
 import { conMiles, leerMontoEntero } from "../../lib/texto";
@@ -22,6 +22,8 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
   const [errores, setErrores] = useState<{ monto?: string; cantidad?: string; depto?: string }>({});
   const [revisado, setRevisado] = useState(""); // monto grande que ya se avisó (segundo Agregar lo acepta)
   const d = p.departamentos.find((x) => x.id === depto);
+  // Un doble Enter no agrega la línea dos veces (el diálogo se cierra al agregar).
+  const agregada = useRef(false);
 
   return (
     <Modal titulo="Venta simple" onCerrar={p.onCerrar} ancho={560}>
@@ -36,6 +38,8 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
           if (!m || !d || !cantOk) return;
           const clave = `${monto}×${n}`;
           if (m * n >= MONTO_GRANDE && revisado !== clave) return setRevisado(clave);
+          if (agregada.current) return;
+          agregada.current = true;
           p.onAgregar({
             id: ulid(),
             productoId: null,
