@@ -299,6 +299,9 @@ describe("plan de importación", () => {
       { productoId: "p3", webId: "w8", nombre: "cartulina" },
     ]);
     expect(plan.actualizar[0].cambios).toEqual(["precio", "codigo", "slug", "categorias"]);
+    // Los códigos suben en el orden en que se mandan a guardar (nuevos y luego actualizados): Rust guarda esos mismos.
+    const enviados = [...plan.nuevos, ...plan.actualizar].flatMap((i) => (i.codigo ? [i.codigo] : []));
+    expect(enviados).toEqual([...enviados].sort());
     expect(plan.avisos.map((a) => a.mensaje)).toContain('Se une con "Cartulina", que ya estaba en el POS (creado a mano)');
     expect(plan.omitidos).toHaveLength(1);
     // "Regla" ya viene de OTRO producto de la web: ese sí es un homónimo.

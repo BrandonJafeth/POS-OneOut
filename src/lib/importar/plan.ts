@@ -333,11 +333,13 @@ export function crearPlan(fuente: FuenteImportacion, ctx: Contexto, op: Opciones
   else for (const i of elegidos) i.favorito = true;
   plan.favoritos = { destacados: plan.validos.filter((i) => i.destacado).length, marcados: elegidos.size, cupo };
 
-  // Códigos internos EAN-13 "200…" (solo si se pidió), en el orden del archivo: los mismos que dará Rust.
+  // Códigos internos EAN-13 "200…" (solo si se pidió), en el orden en que se mandan a guardar
+  // (nuevos y luego actualizados, ver aplicarImportacion): así suben siempre y Rust guarda estos mismos.
   const usados = new Set(ctx.codigos);
   let n = ctx.siguienteInterno ?? 1;
   const tieneInterno = new Map(ctx.existentes.map((e) => [e.id, e.tieneInterno]));
-  for (const i of op.codigosInternos ? plan.validos : []) {
+  const enOrden = [...plan.validos.filter((i) => i.accion === "crear"), ...plan.validos.filter((i) => i.accion !== "crear")];
+  for (const i of op.codigosInternos ? enOrden : []) {
     if (i.productoId && tieneInterno.get(i.productoId)) continue;
     while (usados.has(codigoInterno(n))) n++;
     i.codigo = codigoInterno(n++);

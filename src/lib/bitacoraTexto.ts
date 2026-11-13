@@ -200,6 +200,10 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
       return f("sistema", "Confirmó que copió los respaldos a la memoria USB.");
     case "respaldo.restaurar":
     case "respaldo.restaurado":
+      if (d.noSePudoLeerLaBaseAnterior)
+        return f("sistema", "Restauró un respaldo, pero no se pudo leer la base que reemplazó: los números de tiquete pueden repetir los ya entregados. Avise al técnico.", true);
+      if (Number(d.ventasQueNoEstanEnElRespaldo) > 0)
+        return f("sistema", `Restauró un respaldo: ${d.ventasQueNoEstanEnElRespaldo} venta(s) posteriores a esa copia no están. Los números de tiquete siguen sin repetirse.`, true);
       return f("sistema", "Restauró un respaldo: los datos volvieron a como estaban en esa copia.", true);
     case "respaldo.restaurar_fallido":
       return f("sistema", "Intentó restaurar un respaldo y no se pudo.", true);

@@ -26,6 +26,12 @@ describe("bitácora en palabras", () => {
     expect(describir(entrada("venta.anular", { total: 1 })).rutina).toBe(false);
   });
 
+  it("restaurar un respaldo avisa si los números de tiquete podrían repetirse", () => {
+    expect(describir(entrada("respaldo.restaurado", { noSePudoLeerLaBaseAnterior: "x" })).texto).toContain("pueden repetir");
+    expect(describir(entrada("respaldo.restaurado", { ventasQueNoEstanEnElRespaldo: 3 })).texto).toContain("3 venta(s)");
+    expect(describir(entrada("respaldo.restaurado", {})).texto).toContain("volvieron");
+  });
+
   it("una acción nueva o un detalle raro no rompe la pantalla", () => {
     expect(describir(entrada("algo.nuevo", null)).texto).toContain("algo.nuevo");
     expect(() => describir(entrada("caja.salida", "texto"))).not.toThrow();
