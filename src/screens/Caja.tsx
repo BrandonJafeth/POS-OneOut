@@ -194,7 +194,7 @@ export default function Caja() {
             </div>
             {caja.deOtroDia && <Alert tono="aviso">Esta caja quedó abierta desde el {turno.dia}. Ciérrela para poder vender hoy.</Alert>}
             {caja.noVentaUmbral > 0 && caja.noVentas >= caja.noVentaUmbral && (
-              <Alert tono="aviso">En este turno se abrió la gaveta sin venta {plural(caja.noVentas, "vez", "veces")}. Queda marcado en el cierre y, para el cajero, las siguientes piden el PIN del dueño.</Alert>
+              <Alert tono="aviso">En este turno se abrió la gaveta sin venta {plural(caja.noVentas, "vez", "veces")}. Queda marcado en el cierre. Pasado el límite de aperturas sin venta, el cajero necesita el PIN del dueño.</Alert>
             )}
             {detalle && !veTotales && (
               <Alert tono="info" titulo="Los totales se ven al cerrar">

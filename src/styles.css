@@ -2279,7 +2279,7 @@ mark {
 
 /* Diálogos con un solo botón de confirmar al final del formulario: va abajo a la derecha, como en
    los que tienen Cancelar | Confirmar (Cobrar, Cerrar caja). Confirmar siempre en el mismo lugar. */
-.modal-cuerpo form > .btn[type="submit"]:last-child:not(.btn-ancho) {
+.modal-cuerpo form:not(.row) > .btn[type="submit"]:last-child:not(.btn-ancho) {
   display: flex;
   width: fit-content;
   margin: var(--e4) 0 0 auto;

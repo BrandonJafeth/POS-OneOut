@@ -659,6 +659,7 @@ export default function Venta() {
                 // La última línea de ese producto (si se juntó con una existente, esa misma).
                 focoCantidad={focoCantidad && l.productoId === focoCantidad.productoId && !estado.lineas.slice(i + 1).some((x) => x.productoId === l.productoId) ? focoCantidad.n : undefined}
                 onSalirCantidad={alBuscador}
+                onFocoUsado={() => setFocoCantidad(null)}
               />
             ))}
           </ul>
@@ -823,6 +824,7 @@ function LineaTiquete(p: {
   /** Cambia cada vez que se toca el producto en la grilla: enfoca y selecciona la cantidad. */
   focoCantidad?: number;
   onSalirCantidad(): void;
+  onFocoUsado(): void;
 }) {
   const l = p.linea;
   // El error se muestra en la misma línea (antes salía arriba, en el catálogo, lejos de aquí).
@@ -870,7 +872,7 @@ function LineaTiquete(p: {
               <Minus size={16} aria-hidden />
             </button>
           )}
-          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} foco={p.focoCantidad} onSalir={p.onSalirCantidad} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : setError("La cantidad debe ser un número entero de 1 a 100.000."))} />
+          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} foco={p.focoCantidad} onFocoUsado={p.onFocoUsado} onSalir={p.onSalirCantidad} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : setError("La cantidad debe ser un número entero de 1 a 100.000."))} />
           <button aria-label={`Una más de ${l.descripcion}`} onClick={() => cantidad(l.cantidad + 1)}>
             <Plus size={16} aria-hidden />
           </button>
@@ -934,14 +936,17 @@ function CampoPorcentaje({ valor, onCambio, ...rest }: { valor: string; onCambio
 }
 
 /** Campo que aplica su valor al salir o con Enter (no en cada tecla). Enter o Esc devuelven al buscador. */
-function CampoNumero(p: { valor: string; etiqueta: string; foco?: number; onSalir?(): void; onListo(v: string): void }) {
+function CampoNumero(p: { valor: string; etiqueta: string; foco?: number; onFocoUsado?(): void; onSalir?(): void; onListo(v: string): void }) {
   const [v, setV] = useState(p.valor);
   const [enfocado, setEnfocado] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const descartar = useRef(false);
   useEffect(() => setV(p.valor), [p.valor]);
   useEffect(() => {
-    if (p.foco) (ref.current?.focus(), ref.current?.select());
+    if (!p.foco) return;
+    ref.current?.focus();
+    ref.current?.select();
+    p.onFocoUsado?.();
   }, [p.foco]);
   // Una lectura del lector con la cantidad enfocada no es una cantidad: se descarta lo escrito (el
   // producto lo agrega el lector de la venta). Después de los demás manejadores del Enter.

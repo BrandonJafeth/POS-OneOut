@@ -182,6 +182,8 @@ export function CerrarCaja(p: {
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [opciones, setOpciones] = useState<OpcionesCierre>(opcionesPorDefecto(p.estado));
+  // Aquí y no en la franja: "Volver a contar" la monta de nuevo y no debe olvidar que ya se abrió.
+  const [gavetaAbierta, setGavetaAbierta] = useState(false);
 
   const cerrar = async (conNota: string) => {
     setOcupado(true);
@@ -220,7 +222,7 @@ export function CerrarCaja(p: {
               : "Cuente todo el efectivo de la gaveta. Al cerrar verá si cuadra con lo esperado."}
           </p>
           {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {plural(p.esperasAbiertas, "venta", "ventas")} en espera sin cobrar. Se quedan para mañana.</Alert>}
-          <GavetaParaContar />
+          <GavetaParaContar abierta={gavetaAbierta} onAbierta={() => setGavetaAbierta(true)} />
           <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" />
           <CasillasZ valor={opciones} onCambio={setOpciones} />
           {error && <Alert tono="error">{error}</Alert>}
@@ -308,8 +310,7 @@ function ResumenConteo(p: { denominaciones: number[]; conteo: ConteoEntrada }) {
 }
 
 /** Paso de contar: abre la gaveta una vez (no cuenta como "sin venta" ni pide PIN). */
-function GavetaParaContar() {
-  const [abierta, setAbierta] = useState(false);
+function GavetaParaContar({ abierta, onAbierta }: { abierta: boolean; onAbierta(): void }) {
   const { ocupado, error, enviar } = useEnvio();
   // Primer paso del cierre, en una franja propia: qué hacer a la izquierda, el botón a la derecha.
   return (
@@ -318,7 +319,7 @@ function GavetaParaContar() {
         {abierta ? <CheckCircle2 size={22} aria-hidden /> : <Inbox size={22} aria-hidden />}
         <span>{abierta ? "Gaveta abierta. Cuente todo el efectivo." : "Abra la gaveta para contar el efectivo."}</span>
         {!abierta && (
-          <Button icono={Inbox} disabled={ocupado} onClick={() => void enviar(async () => (await gavetaCierre(), setAbierta(true)))}>
+          <Button icono={Inbox} disabled={ocupado} onClick={() => void enviar(async () => (await gavetaCierre(), onAbierta()))}>
             Abrir gaveta
           </Button>
         )}
