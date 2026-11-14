@@ -21,6 +21,21 @@ colors:
   err-bg: "#fdeceb"
   on-err: "#ffffff"
   mark: "#ffd54a"
+  paper-ink: "#000000"
+  paper-muted: "#555555"
+  paper-guide: "#888888"
+  depto-azul: "#2563eb"
+  depto-verde: "#15803d"
+  depto-naranja: "#ea580c"
+  depto-morado: "#7e22ce"
+  depto-rosado: "#f472b6"
+  depto-celeste: "#06b6d4"
+  depto-amarillo: "#facc15"
+  depto-cafe: "#92400e"
+  depto-vino: "#9f1239"
+  depto-lima: "#84cc16"
+  depto-azul-marino: "#1e3a8a"
+  depto-pizarra: "#475569"
   dark-bg: "#111214"
   dark-card: "#18191c"
   dark-card2: "#1f2024"
@@ -45,12 +60,30 @@ typography:
     fontWeight: 750
     letterSpacing: "-0.01em"
     fontFeature: "tnum"
+  amount-result:
+    fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
+    fontSize: "30px"
+    fontWeight: 750
+    fontFeature: "tnum"
   headline:
     fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
     fontSize: "22px"
     fontWeight: 650
     lineHeight: 1.25
     letterSpacing: "-0.01em"
+  figure:
+    fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
+    fontSize: "20px"
+    fontWeight: 700
+    fontFeature: "tnum"
+  title-modal:
+    fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
+    fontSize: "19px"
+    fontWeight: 650
+  emphasis:
+    fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
+    fontSize: "18px"
+    fontWeight: 550
   title:
     fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
     fontSize: "17px"
@@ -72,11 +105,17 @@ typography:
     fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 400
+  caption-sm:
+    fontFamily: "Public Sans Variable, Segoe UI, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
   mono:
     fontFamily: "Consolas, Cascadia Mono, Courier New, monospace"
     fontSize: "13px"
     fontWeight: 400
 rounded:
+  kbd: "4px"
+  segment: "6px"
   radio: "8px"
   radio-g: "12px"
   modal: "16px"
@@ -158,7 +197,7 @@ components:
   segment-selected:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"
-    rounded: "6px"
+    rounded: "{rounded.segment}"
     height: "36px"
   nav-item-active:
     backgroundColor: "{colors.accent-bg}"
@@ -234,14 +273,16 @@ Grises neutros sin tinte, casi blancos, con un único acento intercambiable: gra
 
 ### Hierarchy
 - **Monto héroe** (700, 40px): total en el diálogo de cobro.
-- **Monto de cobro** (750, 26px; 30px desde 1700 px, -0.01em): cifra dentro del botón Cobrar. El vuelto/faltante del resumen va a 30px.
+- **Monto resultado** (750, 30px, tabular): vuelto/faltante del cobro, total del conteo y el monto del botón Cobrar desde 1700 px.
+- **Monto de cobro** (750, 26px, -0.01em): cifra dentro del botón Cobrar y campos de monto grandes (Venta simple, conteo).
 - **Headline** (650, 22px, 1.25): título de pantalla.
-- **Title** (650, 17px; 19px en cabecera de modal): títulos de tarjeta y diálogo.
-- **Precio de tarjeta** (750, 20px, tabular): precio en la grilla.
+- **Title** (650, 17px): títulos de tarjeta. **Title modal** (650, 19px): cabecera de diálogo.
+- **Cifra** (700–750, 20px, tabular): precio en la grilla, cifras de la caja, muestra del botón Cobrar.
+- **Énfasis** (550, 18px): campo del buscador, montos en los campos del cobro y su resumen.
 - **Body** (400, 16px, 1.45): texto corrido y campos (16px fijo en inputs).
 - **Control** (550, 15px): botones. Nombre de producto en la tarjeta: 16px/650; nombre de línea del tiquete: 16px/700.
 - **Label** (600, 14px): etiquetas de campo, chips de filtro, totales.
-- **Caption** (400–600, 13px; 12px para el departamento en la tarjeta): subtítulos de línea, cabeceras de tabla, insignias.
+- **Caption** (400–600, 13px): subtítulos de línea, cabeceras de tabla, insignias. **Caption pequeño** (600, 12px): departamento en la tarjeta y contador del menú; nunca más chico.
 
 ### Named Rules
 **The Tabular Money Rule.** Toda cifra de dinero o cantidad lleva `font-variant-numeric: tabular-nums` y va alineada a la derecha. Formato: `¢` pegado, punto de miles, sin decimales (¢13.225).
@@ -270,7 +311,7 @@ Sistema plano con capas tonales (bg → card → card2) y bordes de 1 px. La som
 
 ## Shapes
 
-Esquinas suaves en dos pasos: 8 px para controles (botones, campos, alertas, segmentos) y 12 px para contenedores y tarjetas de la grilla, el buscador y el botón Cobrar. Los modales llevan 16 px. Las píldoras (999 px) son exclusivas de chips de filtro, insignias y contador. Las pestañas de espera tienen solo las esquinas superiores redondeadas y se funden con el tiquete. El único borde discontinuo es "Venta simple": una tarjeta que no es un producto.
+Esquinas suaves en dos pasos: 8 px para controles (6 px para el botón dentro de un control segmentado, que lleva 2 px de margen; 4 px solo para las teclas `kbd`) (botones, campos, alertas, segmentos) y 12 px para contenedores y tarjetas de la grilla, el buscador y el botón Cobrar. Los modales llevan 16 px. Las píldoras (999 px) son exclusivas de chips de filtro, insignias y contador. Las pestañas de espera tienen solo las esquinas superiores redondeadas y se funden con el tiquete. El único borde discontinuo es "Venta simple": una tarjeta que no es un producto.
 
 ## Components
 

@@ -1112,7 +1112,7 @@ details.fiscal summary {
 }
 
 .conteos strong {
-  font-size: 24px;
+  font-size: 22px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -1870,7 +1870,7 @@ details.fiscal summary {
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 2.6mm;
   line-height: 1.25;
-  color: #000;
+  color: #000000;
 }
 
 .paper .pline {
@@ -1910,9 +1910,9 @@ details.fiscal summary {
 }
 
 .paper .event {
-  color: #555;
+  color: #555555;
   font-size: 2.2mm;
-  border: 1px dashed #888;
+  border: 1px dashed #888888;
   text-align: center;
   margin: 1mm 0;
 }
@@ -2244,6 +2244,53 @@ mark {
   font-variant-numeric: tabular-nums;
 }
 
+/* Cierre: primer paso, abrir la gaveta. Texto a la izquierda, botón a la derecha. */
+.gaveta-contar {
+  display: flex;
+  align-items: center;
+  gap: var(--e3);
+  margin: var(--e3) 0 var(--e4);
+  padding: var(--e3) var(--e3) var(--e3) var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card2);
+}
+
+.gaveta-contar > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.gaveta-contar > span {
+  flex: 1;
+  font-weight: 600;
+}
+
+.gaveta-contar.lista {
+  min-height: calc(var(--alto-control) + 2 * var(--e3));
+  border-color: transparent;
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.gaveta-contar.lista > svg {
+  color: var(--ok);
+}
+
+/* Diálogos con un solo botón de confirmar al final del formulario: va abajo a la derecha, como en
+   los que tienen Cancelar | Confirmar (Cobrar, Cerrar caja). Confirmar siempre en el mismo lugar. */
+.modal-cuerpo form > .btn[type="submit"]:last-child:not(.btn-ancho) {
+  display: flex;
+  width: fit-content;
+  margin: var(--e4) 0 0 auto;
+}
+
+/* Filas de botones sueltas dentro de un diálogo: el mismo aire que párrafos y avisos (no pegadas). */
+.modal-cuerpo > .row,
+.modal-cuerpo > form > .row {
+  margin-block: var(--e2);
+}
+
 .conteo-total {
   display: flex;
   align-items: baseline;
@@ -2254,7 +2301,7 @@ mark {
 }
 
 .conteo-total strong {
-  font-size: 28px;
+  font-size: 30px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2816,7 +2863,7 @@ button.enlace {
 .monto-campo.grande input.precio {
   width: 220px;
   min-height: 56px;
-  font-size: 28px;
+  font-size: 26px;
   padding-left: calc(var(--e3) + 22px);
 }
 
@@ -3430,7 +3477,7 @@ td.linea-producto {
     right: 6px;
     min-width: 18px;
     padding: 0 4px;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 18px;
   }
 

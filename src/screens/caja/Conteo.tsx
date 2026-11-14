@@ -79,10 +79,13 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
         </div>
       )}
 
-      <div className="conteo-total" aria-live="polite">
-        <span>{p.etiquetaTotal ?? "Total contado"}</span>
-        <strong>{monto(totalConteo(p.valor))}</strong>
-      </div>
+      {/* Con el total escrito, el campo ya lo muestra: el resumen solo suma billete por billete. */}
+      {!porTotal && (
+        <div className="conteo-total" aria-live="polite">
+          <span>{p.etiquetaTotal ?? "Total contado"}</span>
+          <strong>{monto(totalConteo(p.valor))}</strong>
+        </div>
+      )}
     </div>
   );
 }

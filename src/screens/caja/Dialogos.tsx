@@ -1,6 +1,6 @@
 // Diálogos de caja: abrir (con conteo), entrada/salida de efectivo, cierre con arqueo (ciego para el
 // cajero) y casillas del Z, "no venta", orden del dueño para abrir la gaveta y corte parcial.
-import { ArrowDownToLine, ArrowUpFromLine, Banknote, Inbox, Lock, LockOpen, Scissors, ShieldCheck } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Banknote, CheckCircle2, Inbox, Lock, LockOpen, Scissors, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { textoError } from "../../components/Mensaje";
 import Modal from "../../components/Modal";
@@ -311,13 +311,20 @@ function ResumenConteo(p: { denominaciones: number[]; conteo: ConteoEntrada }) {
 function GavetaParaContar() {
   const [abierta, setAbierta] = useState(false);
   const { ocupado, error, enviar } = useEnvio();
+  // Primer paso del cierre, en una franja propia: qué hacer a la izquierda, el botón a la derecha.
   return (
-    <div className="row">
-      <Button icono={Inbox} disabled={ocupado || abierta} onClick={() => void enviar(async () => (await gavetaCierre(), setAbierta(true)))}>
-        {abierta ? "Gaveta abierta" : "Abrir la gaveta para contar"}
-      </Button>
+    <>
+      <div className={abierta ? "gaveta-contar lista" : "gaveta-contar"} aria-live="polite">
+        {abierta ? <CheckCircle2 size={22} aria-hidden /> : <Inbox size={22} aria-hidden />}
+        <span>{abierta ? "Gaveta abierta. Cuente todo el efectivo." : "Abra la gaveta para contar el efectivo."}</span>
+        {!abierta && (
+          <Button icono={Inbox} disabled={ocupado} onClick={() => void enviar(async () => (await gavetaCierre(), setAbierta(true)))}>
+            Abrir gaveta
+          </Button>
+        )}
+      </div>
       {error && <Alert tono="error">{error}</Alert>}
-    </div>
+    </>
   );
 }
 
