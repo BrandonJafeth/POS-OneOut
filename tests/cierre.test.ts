@@ -114,6 +114,13 @@ function detalle(): Detalle {
 const SIN: { copia: boolean; detalleCompleto: boolean; porDepartamento: boolean } = { copia: false, detalleCompleto: false, porDepartamento: false };
 
 describe("reporte Z", () => {
+  it("el nombre del departamento usa todo el espacio libre (no se corta si cabe)", async () => {
+    const d = detalle();
+    d.resumen.desglose.departamentos[0].nombre = "Trabajos manuales";
+    const l = lineasTexto(reporteZ(await obtenerNegocio(), d, DEFAULT_SETTINGS, SIN).bytes);
+    expect(l.some((x) => x.startsWith("Trabajos manuales ("))).toBe(true);
+  });
+
   it("conteo con el total escrito: la etiqueta y el monto caben en 32 columnas", async () => {
     const d = detalle();
     d.turno.conteoFinal = { total: 1234567 };

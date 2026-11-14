@@ -8,11 +8,13 @@ import PinDueno from "../../components/PinDueno";
 import {
   abrirCaja,
   cerrarCaja,
+  gavetaCierre,
   gavetaDueno,
   hacerCorte,
   noVenta,
   type Corte,
   NOTA_REQUERIDA,
+  PIN_GAVETA,
   necesitaNota,
   registrarMovimiento,
   CONTEO_VACIO,
@@ -218,6 +220,7 @@ export function CerrarCaja(p: {
               : "Cuente todo el efectivo de la gaveta. Al cerrar verá si cuadra con lo esperado."}
           </p>
           {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {plural(p.esperasAbiertas, "venta", "ventas")} en espera sin cobrar. Se quedan para mañana.</Alert>}
+          <GavetaParaContar />
           <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" />
           <CasillasZ valor={opciones} onCambio={setOpciones} />
           {error && <Alert tono="error">{error}</Alert>}
@@ -304,12 +307,29 @@ function ResumenConteo(p: { denominaciones: number[]; conteo: ConteoEntrada }) {
   );
 }
 
+/** Paso de contar: abre la gaveta una vez (no cuenta como "sin venta" ni pide PIN). */
+function GavetaParaContar() {
+  const [abierta, setAbierta] = useState(false);
+  const { ocupado, error, enviar } = useEnvio();
+  return (
+    <div className="row">
+      <Button icono={Inbox} disabled={ocupado || abierta} onClick={() => void enviar(async () => (await gavetaCierre(), setAbierta(true)))}>
+        {abierta ? "Gaveta abierta" : "Abrir la gaveta para contar"}
+      </Button>
+      {error && <Alert tono="error">{error}</Alert>}
+    </div>
+  );
+}
+
 /** "No venta": abrir la gaveta sin vender (cambiar billetes…), con un motivo. Queda en la bitácora. */
 export function NoVenta(p: { motivos: string[]; onCerrar(): void; onListo(): void }) {
   const [motivo, setMotivo] = useState(p.motivos[0] ?? "");
   const [nota, setNota] = useState("");
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // Pasado el límite de aperturas del turno, Rust pide el PIN del dueño: aparece este campo.
+  const [pidePin, setPidePin] = useState("");
+  const [pin, setPin] = useState("");
   const otro = motivo.toLowerCase().startsWith("otro");
   return (
     <Modal titulo="Abrir la gaveta sin venta" onCerrar={p.onCerrar} ancho={440}>
@@ -319,10 +339,15 @@ export function NoVenta(p: { motivos: string[]; onCerrar(): void; onListo(): voi
           setError("");
           setOcupado(true);
           try {
-            await noVenta(motivo, nota.trim());
+            await noVenta(motivo, nota.trim(), pidePin ? pin : undefined);
             p.onListo();
           } catch (err) {
-            setError(textoError(err));
+            const m = textoError(err);
+            if (m.startsWith(PIN_GAVETA)) {
+              const aviso = m.slice(PIN_GAVETA.length).replace(/^:\s*/, "");
+              setPidePin(aviso.charAt(0).toUpperCase() + aviso.slice(1));
+            } else setError(m);
+            setPin("");
             setOcupado(false);
           }
         }}
@@ -340,8 +365,16 @@ export function NoVenta(p: { motivos: string[]; onCerrar(): void; onListo(): voi
             <input autoFocus value={nota} maxLength={200} onChange={(e) => setNota(e.target.value)} />
           </Field>
         )}
+        {pidePin && (
+          <>
+            <Alert tono="aviso">{pidePin}</Alert>
+            <Field label="PIN del dueño">
+              <input autoFocus className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+            </Field>
+          </>
+        )}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="primario" icono={Inbox} atajo="Enter" disabled={ocupado || !motivo || (otro && nota.trim().length < 3)}>
+        <Button type="submit" variante="primario" icono={Inbox} atajo="Enter" disabled={ocupado || !motivo || (otro && nota.trim().length < 3) || (!!pidePin && !pin)}>
           Abrir la gaveta
         </Button>
       </form>

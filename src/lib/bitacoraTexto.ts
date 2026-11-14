@@ -81,8 +81,10 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
       return f("dinero", `Cambió el número del próximo tiquete de ${String(d.antes ?? "")} a ${String(d.despues ?? "")}.`, true);
     case "caja.ajuste_pago":
       return f("dinero", `Corrigió la forma de pago de una venta de un día ya cerrado (${plata(d.monto)}): de ${txt(antes.forma)} a ${txt(despues.forma)}${motivo(d)}.`, true);
+    case "gaveta.cierre":
+      return f("dinero", "Abrió la gaveta para contar el efectivo del cierre.");
     case "gaveta.no_venta":
-      return f("dinero", `Abrió la gaveta sin vender (${txt(d.motivo)})${txt(d.nota) ? `: «${txt(d.nota)}»` : ""}.`, true);
+      return f("dinero", `Abrió la gaveta sin vender (${txt(d.motivo)})${txt(d.nota) ? `: «${txt(d.nota)}»` : ""}${d.autorizadoPor ? `, pasado el límite del turno${autorizo}` : ""}.`, true);
     case "gaveta.orden_dueno":
       return f("dinero", `Abrió la gaveta por orden del dueño${motivo(d)}${autorizo}.`, true);
 

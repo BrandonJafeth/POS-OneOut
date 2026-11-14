@@ -40,7 +40,7 @@ interface Fila extends Omit<PagoEntrada, "monto"> {
 }
 
 /** `total`: redondeado, lo que se cobra en efectivo. `totalExacto`: sin redondear, lo que se cobra si no hay efectivo. */
-export default function Cobro(p: { total: number; totalExacto: number; formas: FormaPago[]; bancos: Banco[]; onCobrar(pagos: PagoEntrada[]): Promise<void>; onCerrar(): void }) {
+export default function Cobro(p: { total: number; totalExacto: number; /** Cliente de la venta: llena "Nombre de quien paga" en SINPE. */ pagador?: string; formas: FormaPago[]; bancos: Banco[]; onCobrar(pagos: PagoEntrada[]): Promise<void>; onCerrar(): void }) {
   const { config } = useSesion();
   const efectivo = p.formas.find((f) => f.daVuelto) ?? p.formas[0];
   const clave = useRef(1);
@@ -63,7 +63,9 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
   }, [filas[0]?.formaPagoId]);
 
   /** Forma única (sin dividir): el monto pasa al total de esa forma. */
-  const elegirForma = (f: FormaPago) => setFilas([{ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(totalDe(f))) }]);
+  const elegirForma = (f: FormaPago) => setFilas([conPagador({ clave: filas[0].clave, formaPagoId: f.id, texto: conMiles(String(totalDe(f))) })]);
+  /** SINPE sin nombre todavía: el del cliente de la venta (se puede cambiar; borrado a mano queda borrado). */
+  const conPagador = (f: Fila): Fila => (f.pagador == null && p.pagador && forma(f.formaPagoId)?.tipo === "sinpe" ? { ...f, pagador: p.pagador.slice(0, 60) } : f);
   // F1–F4: forma de pago por tipo. En cualquier campo del cobro; con el pago dividido no aplica.
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -129,7 +131,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
       clearTimeout(t);
     };
   }, [referencias]);
-  const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? { ...f, ...patch } : f)));
+  const set = (k: number, patch: Partial<Fila>) => setFilas(filas.map((f) => (f.clave === k ? conPagador({ ...f, ...patch }) : f)));
   const nuevaFila = useRef<HTMLInputElement>(null);
 
   /** Agrega otra forma de pago. Si todavía no hay efectivo, la nueva es efectivo (cubre lo que falte);
@@ -141,7 +143,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
       : (efectivo ?? p.formas[0]);
     // Al dividir, el efectivo que tenía el total queda en blanco: cubre lo que falte.
     const previas = filas.map((f) => (forma(f.formaPagoId)?.daVuelto && leerMontoEntero(f.texto) === p.total ? { ...f, texto: "" } : f));
-    setFilas([...previas, { clave: clave.current++, formaPagoId: otra.id, texto: "" }]);
+    setFilas([...previas, conPagador({ clave: clave.current++, formaPagoId: otra.id, texto: "" })]);
     setTimeout(() => nuevaFila.current?.focus(), 0);
   }
 
@@ -289,11 +291,12 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
                 </Field>
                 <Field
                   label={forma(f.formaPagoId)?.daVuelto ? "Recibido" : "Monto"}
-                  ayuda={f === filaAuto ? (restoEfectivo > 0 ? `Vacío = ${monto(restoEfectivo)}` : undefined) : !f.texto ? "Escriba el monto." : undefined}
+                  ayuda={f !== filaAuto && !f.texto ? "Escriba el monto." : undefined}
                 >
                   <CampoMonto
                     ref={i === 0 ? primerMonto : i === filas.length - 1 ? nuevaFila : undefined}
-                    valor={f.texto}
+                    // Efectivo sin escribir: muestra lo que falta (exacto). Al tocarlo queda seleccionado: escribir lo reemplaza.
+                    valor={f === filaAuto ? conMiles(String(restoEfectivo)) : f.texto}
                     onCambio={(texto) => set(f.clave, { texto })}
                   />
                 </Field>

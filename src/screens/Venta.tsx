@@ -34,7 +34,7 @@ import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
-import { FAVORITOS, useCatalogo } from "./venta/useCatalogo";
+import { FAVORITOS, lecturaConCantidad, useCatalogo } from "./venta/useCatalogo";
 import { useEsperas } from "./venta/useEsperas";
 import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { fondoPildora, textoSobre } from "../ui/departamentos";
@@ -47,8 +47,9 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
   {
     grupo: "Vender",
     lista: [
+      { teclas: ["F1"], texto: "Ver esta lista de atajos" },
       { teclas: ["F3"], texto: "Ir al buscador" },
-      { teclas: ["3", "*", "código"], texto: "Agregar 3 unidades de una vez" },
+      { teclas: ["3", "*"], texto: "Antes del código, del escaneo o de tocar un producto: agrega 3 de una vez" },
       { teclas: ["↑", "↓"], texto: "Elegir entre los resultados" },
       { teclas: ["Enter"], texto: "Agregar el producto elegido" },
       { teclas: ["Esc"], texto: "Borrar la búsqueda" },
@@ -61,6 +62,8 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
     lista: [
       { teclas: ["F2"], texto: "Nueva venta en espera" },
       { teclas: ["Ctrl", "1…9"], texto: "Cambiar de venta en espera" },
+      { teclas: ["Número", "Enter"], texto: "Justo después de tocar un producto: cambia su cantidad (Esc la deja igual)" },
+      { teclas: ["+", "−"], texto: "Una más / una menos de la última línea (con el buscador vacío)" },
       { teclas: ["Supr"], texto: "Quitar la línea abierta" },
       { teclas: ["F8"], texto: "Descuento al total" },
     ],
@@ -69,11 +72,11 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
     grupo: "Cobrar",
     lista: [
       { teclas: ["F12"], texto: "Abrir el cobro" },
-      { teclas: ["F12"], texto: "Dentro del cobro: confirmar (F12 dos veces = efectivo exacto)" },
-      { teclas: ["F1"], texto: "Dentro del cobro: efectivo" },
-      { teclas: ["F2"], texto: "Dentro del cobro: tarjeta" },
-      { teclas: ["F3"], texto: "Dentro del cobro: SINPE Móvil" },
-      { teclas: ["F4"], texto: "Dentro del cobro: transferencia" },
+      { teclas: ["F12"], texto: "Dentro del cobro: confirmar, también con Enter (F12 dos veces = efectivo exacto)" },
+      { teclas: ["F1"], texto: "Dentro del cobro: efectivo (con un solo pago, no al dividir)" },
+      { teclas: ["F2"], texto: "Dentro del cobro: tarjeta (con un solo pago)" },
+      { teclas: ["F3"], texto: "Dentro del cobro: SINPE Móvil (con un solo pago)" },
+      { teclas: ["F4"], texto: "Dentro del cobro: transferencia (con un solo pago)" },
       { teclas: ["Enter"], texto: "Al terminar: siguiente venta" },
       { teclas: ["Esc"], texto: "Cerrar cualquier ventana" },
     ],
@@ -93,6 +96,8 @@ export default function Venta() {
   const [texto, setTexto] = useState("");
   const [filtro, setFiltro] = useState<string>(FAVORITOS); // ★ o id de departamento
   const [lineaSel, setLineaSel] = useState<string | null>(null);
+  // Producto recién tocado en la grilla: su cantidad queda enfocada y seleccionada ("5" + Enter = 5).
+  const [focoCantidad, setFocoCantidad] = useState<{ productoId: string; n: number } | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [pendiente, setPendiente] = useState<EstadoEspera | null>(null); // cambio que espera PIN de dueño
   const [sinExistencia, setSinExistencia] = useState<{ pagos: PagoEntrada[]; mensaje: string } | null>(null);
@@ -150,7 +155,7 @@ export default function Venta() {
     buscador.current?.focus();
     return () => clearInterval(i);
   }, [modal, activaId]);
-  const alBuscador = () => setTimeout(() => buscador.current?.focus(), 0);
+  const alBuscador = () => (setFocoCantidad(null), setTimeout(() => buscador.current?.focus(), 0));
   // Venta lista: el foco vuelve al buscador para la siguiente (escribir o escanear sin hacer clic).
   const cerrarCobrada = () => (setCobrada(null), alBuscador());
 
@@ -184,6 +189,17 @@ export default function Venta() {
     agregarLinea({ ...l, descuento: descuentoCatalogo(l) });
   }
 
+  /** Toque en la grilla. Con "3*" en el buscador agrega 3 y vuelve al buscador; si no, agrega 1 y deja su cantidad lista para cambiarla. */
+  function tocarProducto(p: Producto) {
+    const m = /^(\d+)\*/.exec(texto.trim());
+    if (!m) return (agregarProducto(p), setFocoCantidad({ productoId: p.id, n: Date.now() }));
+    const n = Math.max(1, Number(m[1]));
+    if (n > MAX_CANTIDAD) return setAviso("La cantidad máxima por línea es 100.000.");
+    agregarProducto(p, n);
+    setTexto("");
+    alBuscador();
+  }
+
   async function porCodigo(codigo: string, cantidad = 1): Promise<boolean> {
     const p = await productoPorCodigo(codigo);
     if (!p) return false;
@@ -204,7 +220,11 @@ export default function Venta() {
     async (c) => {
       try {
         if (cobrada) cerrarCobrada();
-        if (!(await porCodigo(c))) setAviso(`El código ${c} no está registrado. Use Venta simple o asócielo en Productos.`);
+        // "3*" y escanear: 3 unidades. El "3*" se limpia al agregar (si no, el siguiente escaneo también sería de 3).
+        const { codigo, cantidad } = lecturaConCantidad(c, texto);
+        if (cantidad > MAX_CANTIDAD) return setAviso("La cantidad máxima por línea es 100.000.");
+        if (!(await porCodigo(codigo, cantidad))) setAviso(`El código ${codigo} no está registrado. Use Venta simple o asócielo en Productos.`);
+        else if (cantidad > 1 || /^\d+\*/.test(texto.trim())) setTexto("");
       } catch (e) {
         setError(textoError(e));
       }
@@ -294,18 +314,19 @@ export default function Venta() {
     setSinExistencia(null);
     let errorImpresion: string | undefined;
     let errorGaveta: string | undefined;
-    if (config.imprime_tiquete) {
-      try {
-        await imprimirVenta(r.ventaId, config);
-      } catch (e) {
-        errorImpresion = textoError(e);
-      }
-    }
+    // Primero la gaveta (el cajero da el vuelto mientras sale el tiquete); un fallo en una no frena la otra.
     if (r.abrirGaveta) {
       try {
         await abrirGavetaVenta(r.ventaId);
       } catch (e) {
         errorGaveta = textoError(e);
+      }
+    }
+    if (config.imprime_tiquete) {
+      try {
+        await imprimirVenta(r.ventaId, config);
+      } catch (e) {
+        errorImpresion = textoError(e);
       }
     }
     setDialogo(null);
@@ -364,6 +385,8 @@ export default function Venta() {
       };
       if (atajos[e.key]) {
         e.preventDefault();
+        // Una cantidad recién escrita (sin Enter) se aplica antes: el cobro y el descuento usan el total nuevo.
+        if (document.activeElement instanceof HTMLInputElement && document.activeElement !== buscador.current) document.activeElement.blur();
         return atajos[e.key]();
       }
       if (e.ctrlKey && /^[1-9]$/.test(e.key)) {
@@ -377,6 +400,14 @@ export default function Venta() {
       if (e.key === "Delete" && lineaSel && !escribiendo && (!enBuscador || !texto)) {
         e.preventDefault();
         quitarLinea(lineaSel);
+      }
+      // + / − con el buscador vacío: una más o una menos de la última línea (nunca menos de 1; quitar es Supr).
+      const ultima = estado.lineas[estado.lineas.length - 1];
+      if ((e.key === "+" || e.key === "-") && enBuscador && !texto && ultima && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        const c = ultima.cantidad + (e.key === "+" ? 1 : -1);
+        if (c >= 1 && c <= MAX_CANTIDAD) setLinea(ultima.id, conCantidad(ultima, c));
+        return;
       }
       if ((e.key === "ArrowUp" || e.key === "ArrowDown") && enBuscador && buscando && productos.length) {
         e.preventDefault();
@@ -525,7 +556,7 @@ export default function Venta() {
             <div key={p.id} style={{ position: "relative" }}>
               <button
                 className={["tile", buscando && i === sel ? "sel" : "", enVenta.has(p.id) ? "en-venta" : ""].join(" ")}
-                onClick={() => (agregarProducto(p), alBuscador())}
+                onClick={() => tocarProducto(p)}
                 aria-label={`Agregar ${p.nombre}, ${monto(p.precio)}${p.id in existencias ? (existencias[p.id] > 0 ? `, hay ${existencias[p.id]}` : ", agotado") : ""}`}
               >
                 <span className="tile-nombre">{p.nombre}</span>
@@ -616,7 +647,7 @@ export default function Venta() {
           </div>
         ) : (
           <ul className="lineas">
-            {estado.lineas.map((l) => (
+            {estado.lineas.map((l, i) => (
               <LineaTiquete
                 key={l.id}
                 linea={l}
@@ -625,6 +656,9 @@ export default function Venta() {
                 onAbrir={() => setLineaSel(l.id === lineaSel ? null : l.id)}
                 onCambio={(patch) => setLinea(l.id, patch)}
                 onQuitar={() => quitarLinea(l.id)}
+                // La última línea de ese producto (si se juntó con una existente, esa misma).
+                focoCantidad={focoCantidad && l.productoId === focoCantidad.productoId && !estado.lineas.slice(i + 1).some((x) => x.productoId === l.productoId) ? focoCantidad.n : undefined}
+                onSalirCantidad={alBuscador}
               />
             ))}
           </ul>
@@ -708,7 +742,7 @@ export default function Venta() {
           </div>
         </Modal>
       )}
-      {dialogo === "cobro" && <Cobro total={t.total} totalExacto={t.total - t.redondeo} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
+      {dialogo === "cobro" && <Cobro total={t.total} totalExacto={t.total - t.redondeo} pagador={estado.cliente?.nombre ?? estado.nombreTiquete ?? undefined} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
       {sinExistencia && (
         <PinDueno motivo={sinExistencia.mensaje} onCerrar={() => setSinExistencia(null)} onPin={(pin) => cobrar(sinExistencia.pagos, pin)} />
       )}
@@ -786,6 +820,9 @@ function LineaTiquete(p: {
   onAbrir(): void;
   onCambio(patch: Partial<LineaEspera>): void;
   onQuitar(): void;
+  /** Cambia cada vez que se toca el producto en la grilla: enfoca y selecciona la cantidad. */
+  focoCantidad?: number;
+  onSalirCantidad(): void;
 }) {
   const l = p.linea;
   // El error se muestra en la misma línea (antes salía arriba, en el catálogo, lejos de aquí).
@@ -833,7 +870,7 @@ function LineaTiquete(p: {
               <Minus size={16} aria-hidden />
             </button>
           )}
-          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : setError("La cantidad debe ser un número entero de 1 a 100.000."))} />
+          <CampoNumero etiqueta={`Cantidad de ${l.descripcion}`} valor={String(l.cantidad)} foco={p.focoCantidad} onSalir={p.onSalirCantidad} onListo={(v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= MAX_CANTIDAD ? cantidad(Number(v)) : setError("La cantidad debe ser un número entero de 1 a 100.000."))} />
           <button aria-label={`Una más de ${l.descripcion}`} onClick={() => cantidad(l.cantidad + 1)}>
             <Plus size={16} aria-hidden />
           </button>
@@ -896,22 +933,47 @@ function CampoPorcentaje({ valor, onCambio, ...rest }: { valor: string; onCambio
   );
 }
 
-/** Campo que aplica su valor al salir o con Enter (no en cada tecla). */
-function CampoNumero(p: { valor: string; etiqueta: string; onListo(v: string): void }) {
+/** Campo que aplica su valor al salir o con Enter (no en cada tecla). Enter o Esc devuelven al buscador. */
+function CampoNumero(p: { valor: string; etiqueta: string; foco?: number; onSalir?(): void; onListo(v: string): void }) {
   const [v, setV] = useState(p.valor);
+  const [enfocado, setEnfocado] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const descartar = useRef(false);
   useEffect(() => setV(p.valor), [p.valor]);
+  useEffect(() => {
+    if (p.foco) (ref.current?.focus(), ref.current?.select());
+  }, [p.foco]);
+  // Una lectura del lector con la cantidad enfocada no es una cantidad: se descarta lo escrito (el
+  // producto lo agrega el lector de la venta). Después de los demás manejadores del Enter.
+  useEscaner(
+    () =>
+      setTimeout(() => {
+        descartar.current = true;
+        ref.current?.blur();
+        p.onSalir?.();
+      }, 0),
+    { activo: enfocado, debounceMs: 0 },
+  );
   return (
     <input
+      ref={ref}
       aria-label={p.etiqueta}
       inputMode="numeric"
       value={v}
       // Seleccionado al tocarlo: escribir "8" reemplaza el 1 (no queda "18").
       {...seleccionarAlTocar}
+      onFocus={(e) => (setEnfocado(true), seleccionarAlTocar.onFocus(e))}
       onChange={(e) => setV(e.target.value.replace(/\D/g, ""))}
-      onBlur={() => v !== p.valor && p.onListo(v)}
+      onBlur={() => {
+        setEnfocado(false);
+        // Vacío o descartado: se queda la cantidad que tenía (no es un error).
+        if (descartar.current || !v) setV(p.valor);
+        else if (v !== p.valor) p.onListo(v);
+        descartar.current = false;
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-        if (e.key === "Escape") setV(p.valor);
+        if (e.key === "Escape") (setV(p.valor), (descartar.current = true));
+        if (e.key === "Enter" || e.key === "Escape") (e.currentTarget.blur(), p.onSalir?.());
       }}
     />
   );

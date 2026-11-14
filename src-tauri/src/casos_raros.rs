@@ -193,7 +193,7 @@ async fn caja_de_ayer_deja_anotar_el_gasto_olvidado_pero_no_vender() {
     caja::abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
     sqlx::query("UPDATE caja_turnos SET dia = '2020-01-01'").execute(p).await.unwrap();
     assert!(cobrar(p, &cajero, &est(vec![linea(Some(&pid), 1000, 1, 0)]), &[pago(EF, 1000)]).await.unwrap_err().contains("Quedó abierta"));
-    assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.unwrap_err().contains("Quedó abierta"));
+    assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "", None).await.unwrap_err().contains("Quedó abierta"));
     caja::movimiento(p, &cajero, CAJA_1, &salida(1000), None).await.unwrap();
     assert_eq!(caja::cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 4)]), "").await.unwrap().diferencia, Some(0));
 }

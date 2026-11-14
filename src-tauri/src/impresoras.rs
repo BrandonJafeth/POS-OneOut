@@ -425,7 +425,7 @@ pub mod tests {
         // Cuando el driver por fin contesta, la impresora vuelve a recibir trabajos.
         std::thread::sleep(std::time::Duration::from_millis(2200));
         // La gaveta no confirmó pero pudo abrirse: la apertura queda registrada (nunca sin rastro).
-        let err = crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.unwrap_err();
+        let err = crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "", None).await.unwrap_err();
         assert!(err.contains("quedó registrado"), "{err}");
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas").fetch_one(p).await.unwrap();
         assert_eq!(n, 1);
@@ -434,7 +434,7 @@ pub mod tests {
         // Impresora apagada (no recibió nada): la apertura NO se registra.
         printer::simulada::trabar(&a, false);
         printer::simulada::apagar(&a, true);
-        assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "").await.is_err());
+        assert!(crate::gaveta::no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "", None).await.is_err());
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas").fetch_one(p).await.unwrap();
         assert_eq!(n, 1);
         printer::simulada::apagar(&a, false);

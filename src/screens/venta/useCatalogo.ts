@@ -11,6 +11,18 @@ const POR_PAGINA = 60;
 /** Lo buscado sin el "3*" de cantidad. Con menos de 2 letras no se busca: se muestra el filtro. */
 export const textoBuscado = (texto: string) => texto.replace(/^\d+\*/, "").trim();
 
+/**
+ * Lectura del lector con "3*" escrito antes en el buscador: cuántas y qué código. Con una pausa, el
+ * lector lee solo el código y el "3*" queda en el buscador; escaneando enseguida del "*", la ráfaga
+ * trae "3*7501234…" pegado.
+ */
+export function lecturaConCantidad(codigo: string, texto: string): { codigo: string; cantidad: number } {
+  const pegado = /^(\d+)\*(.+)$/.exec(codigo.trim());
+  if (pegado) return { codigo: pegado[2].trim(), cantidad: Math.max(1, Number(pegado[1])) };
+  const antes = /^(\d+)\*/.exec(texto.trim());
+  return { codigo, cantidad: antes ? Math.max(1, Number(antes[1])) : 1 };
+}
+
 /** Orden elegido en este equipo (comodidad del cajero; si no se puede leer, A–Z). */
 function ordenGuardado(): OrdenProductos {
   try {

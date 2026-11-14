@@ -450,9 +450,15 @@ async fn gaveta_venta(st: St<'_>, venta_id: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn gaveta_no_venta(st: St<'_>, motivo: String, nota: String) -> Res<()> {
+async fn gaveta_cierre(st: St<'_>) -> Res<()> {
     let a = st.actor().await?;
-    gaveta::no_venta(st.pool()?, &a, caja::CAJA_1, &motivo, &nota).await
+    gaveta::para_cierre(st.pool()?, &a, caja::CAJA_1).await
+}
+
+#[tauri::command]
+async fn gaveta_no_venta(st: St<'_>, motivo: String, nota: String, pin: Option<String>) -> Res<()> {
+    let a = st.actor().await?;
+    gaveta::no_venta(st.pool()?, &a, caja::CAJA_1, &motivo, &nota, pin.as_deref()).await
 }
 
 #[tauri::command]
@@ -1154,6 +1160,7 @@ pub fn run() {
             caja_turnos,
             gaveta_venta,
             gaveta_no_venta,
+            gaveta_cierre,
             gaveta_dueno,
             gaveta_aperturas,
             venta_esperas,

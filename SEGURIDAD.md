@@ -116,7 +116,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - Los pagos y los montos de una venta de un turno cerrado no se pueden cambiar (triggers). Una corrección posterior queda como `caja_ajustes` en el turno actual, la hace solo el dueño con PIN, y una devolución de efectivo entra como salida.
 
 ### Gaveta e impresoras
-- La gaveta solo se abre por `gaveta_venta` (venta con efectivo del turno abierto, una sola vez: `ventas.gaveta_abierta_en`), `gaveta_no_venta` (motivo de la lista; "Otro" pide texto) o `gaveta_dueno` (PIN del dueño). Las dos últimas quedan en `gaveta_aperturas` (solo añadir, triggers) y en la bitácora; si el pulso no llega, no queda registro.
+- La gaveta solo se abre por `gaveta_venta` (venta con efectivo del turno abierto, una sola vez: `ventas.gaveta_abierta_en`), `gaveta_no_venta` (motivo de la lista; "Otro" pide texto) , `gaveta_dueno` (PIN del dueño) o `gaveta_cierre` (una vez por turno, quien puede cerrarlo, para contar; no cuenta como "sin venta"). Las tres últimas quedan en `gaveta_aperturas` (solo añadir, triggers) y en la bitácora; si el pulso no llega, no queda registro.
 - **Todo lo que se imprime pasa por una lista blanca** (`escpos::validar`): texto, saltos, negrita, tamaño, alineación, tabla de caracteres, código de barras, logo (sus datos se saltan por su largo) y corte. `ESC p`, `DLE DC4` y cualquier otro control se rechazan: ni un tiquete, ni el diagnóstico del técnico, ni una prueba de impresora pueden abrir la gaveta.
 - Las impresoras se eligen de lo que detecta Windows (impresoras, puertos COM, dispositivos USB de impresora); Rust lo vuelve a revisar al guardar y al imprimir. No se aceptan rutas escritas a mano (`\\otra-pc\cola`).
 - El tiquete original sale una vez (`ventas.impreso_en`); después solo como COPIA marcada, y cada copia queda en la bitácora.
@@ -185,6 +185,7 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `caja_turnos` | ✔ | ✔ | — |
 | `gaveta_venta` | ✔ | ✔ | — |
 | `gaveta_no_venta` | ✔ | ✔ | — |
+| `gaveta_cierre` | ✔ | ✔ | — |
 | `gaveta_dueno` | ✔ | ✔ | — |
 | `gaveta_aperturas` | — | ✔ | — |
 | `venta_esperas / crear / guardar` | ✔ | ✔ | — |

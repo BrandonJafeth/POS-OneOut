@@ -49,6 +49,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("caja_turnos", true, true, false),
     ("gaveta_venta", true, true, false),
     ("gaveta_no_venta", true, true, false),
+    ("gaveta_cierre", true, true, false),
     ("gaveta_dueno", true, true, false),
     ("gaveta_aperturas", false, true, false),
     ("venta_esperas / crear / guardar", true, true, false),
@@ -135,7 +136,8 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("caja_corte", denegado(caja::corte(p, a, CAJA_1, None, None).await));
     s("caja_turnos", denegado(caja::listar(p, a, CAJA_1, "2000-01-01", "2999-01-01").await));
     s("gaveta_venta", denegado(gaveta::por_venta(p, a, x).await));
-    s("gaveta_no_venta", denegado(gaveta::no_venta(p, a, CAJA_1, "Cambio de billetes", "").await));
+    s("gaveta_no_venta", denegado(gaveta::no_venta(p, a, CAJA_1, "Cambio de billetes", "", None).await));
+    s("gaveta_cierre", denegado(gaveta::para_cierre(p, a, CAJA_1).await));
     s("gaveta_dueno", denegado(gaveta::orden_dueno(p, a, CAJA_1, "000000", "motivo").await));
     s("gaveta_aperturas", denegado(gaveta::listar(p, a, CAJA_1, "2000-01-01", "2999-01-01", None).await));
     s("venta_esperas / crear / guardar", denegado(ventas::listar_esperas(p, a, CAJA_1).await));

@@ -83,6 +83,11 @@ export function exigirCuadre(r: Resumen): void {
 
 // ─── Piezas ───
 
+/** Nombre + sufijo a la izquierda y monto a la derecha: el nombre usa todo el espacio libre y solo se corta si no cabe. */
+function fila(nombre: string, sufijo: string, der: string, cols: number): string {
+  return lr(`${cortar(nombre, cols - 1 - der.length - sufijo.length)}${sufijo}`, der, cols);
+}
+
 /** Título de sección en UNA línea ("-- EFECTIVO -------"): el separador aparte gastaba papel. */
 function titulo(l: LineaDoc[], texto: string, cols: number) {
   l.push({ t: `-- ${texto} `.padEnd(cols, "-"), b: true });
@@ -189,7 +194,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   l.push(...cabeceraTurno(d, cols, nombreSiHayLogo(n)));
 
   titulo(l, "VENTAS POR FORMA DE PAGO", cols);
-  for (const f of r.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.nombre, cols - 18)} (${f.pagos})`, monto(f.monto), cols) });
+  for (const f of r.porForma) l.push({ t: fila(`${f.codigo} ${f.nombre}`, ` (${f.pagos})`, monto(f.monto), cols) });
   if (!r.porForma.length) l.push({ t: "  Sin ventas" });
   l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
 
@@ -217,7 +222,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
 
   if (o.completo) {
     titulo(l, "VENTAS POR USUARIO", cols);
-    for (const u of r.porUsuario) l.push({ t: lr(`${cortar(u.usuario, cols - 18)} (${u.ventas} tiq.)`, monto(u.total), cols) });
+    for (const u of r.porUsuario) l.push({ t: fila(u.usuario, ` (${u.ventas} tiq.)`, monto(u.total), cols) });
     if (!r.porUsuario.length) l.push({ t: "  Sin ventas" });
     wrap(NOTA_USUARIOS, cols).forEach((x) => l.push({ t: x }));
     l.push(...lineasLectura(r, cols));
@@ -226,7 +231,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   if (r.conDesglose && r.desglose.departamentos.length) {
     titulo(l, "POR DEPARTAMENTO", cols);
     for (const x of r.desglose.departamentos) {
-      l.push({ t: lr(`${cortar(x.nombre, cols - 18)} (${x.cantidad})`, monto(x.monto), cols) });
+      l.push({ t: fila(x.nombre, ` (${x.cantidad})`, monto(x.monto), cols) });
     }
     l.push({ t: lr(`Total (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true });
   }
@@ -371,7 +376,7 @@ export function lineasCorte(n: Negocio, k: Corte, cols: number): LineaDoc[] {
   l.push({ t: lr("Caja:", cortar(t.caja || "Caja", cols - 6), cols) }, { t: lr("Turno:", `${t.dia} ${hora(t.abiertoEn)}`, cols) });
   l.push({ t: lr("Corte:", `${cortar(k.usuario, cols - 14)} ${hora(k.fecha)}`, cols) });
   titulo(l, "ACUMULADO POR FORMA DE PAGO", cols);
-  for (const f of r.porForma) l.push({ t: lr(`${f.codigo} ${cortar(f.nombre, cols - 18)} (${f.pagos})`, monto(f.monto), cols) });
+  for (const f of r.porForma) l.push({ t: fila(`${f.codigo} ${f.nombre}`, ` (${f.pagos})`, monto(f.monto), cols) });
   if (!r.porForma.length) l.push({ t: "  Sin ventas" });
   l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
   titulo(l, "EFECTIVO", cols);

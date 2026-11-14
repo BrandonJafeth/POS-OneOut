@@ -146,7 +146,7 @@ export interface Desglose {
 export interface NoVenta {
   fecha: string;
   usuario: string;
-  causa: "no_venta" | "dueno";
+  causa: "no_venta" | "dueno" | "cierre";
   motivo: string;
   nota: string | null;
   autorizadoPor: string | null;
@@ -236,7 +236,7 @@ export interface AperturaGaveta {
   dia: string | null;
   usuarioId: string;
   usuario: string;
-  causa: "no_venta" | "dueno";
+  causa: "no_venta" | "dueno" | "cierre";
   motivo: string;
   nota: string | null;
   autorizadoPor: string | null;
@@ -334,8 +334,16 @@ export function hacerCorte(retiro: { monto: number; categoria: string; nota: str
 
 // ─── Gaveta: solo venta con efectivo (lib/venta/imprimir), "no venta" con motivo u orden del dueño ───
 
-export async function noVenta(motivo: string, nota: string): Promise<void> {
-  await invocar("gaveta_no_venta", { motivo, nota });
+/** Error de "no venta" pasado el límite del turno: falta el PIN del dueño (gaveta::PIN_GAVETA). */
+export const PIN_GAVETA = "PIN_GAVETA";
+
+export async function noVenta(motivo: string, nota: string, pin?: string): Promise<void> {
+  await invocar("gaveta_no_venta", { motivo, nota, pin: pin ?? null });
+}
+
+/** Al cerrar: abre la gaveta una vez para contar (no cuenta como "sin venta"). */
+export async function gavetaCierre(): Promise<void> {
+  await invocar("gaveta_cierre");
 }
 
 export async function gavetaDueno(pin: string, motivo: string): Promise<void> {

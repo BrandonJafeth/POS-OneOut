@@ -244,7 +244,7 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
         let t = turno_abierto(&mut c, caja_id).await?;
         let comp = compartido(&mut c).await;
         let n: i64 = match &t {
-            Some(t) => sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ?").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?,
+            Some(t) => sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?,
             None => 0,
         };
         (t, comp, n)
@@ -742,7 +742,7 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
     r.por_usuario = pu.iter().map(|f| PorUsuario { usuario: f.get("nombre"), ventas: f.get("n"), total: f.get("total") }).collect();
     let nv = sqlx::query(
         "SELECT g.fecha, u.nombre AS usuario, g.causa, g.motivo, g.nota, ua.nombre AS autorizado FROM gaveta_aperturas g
-         JOIN usuarios u ON u.id = g.usuario_id LEFT JOIN usuarios ua ON ua.id = g.autorizado_por WHERE g.turno_id = ? ORDER BY g.fecha, g.id",
+         JOIN usuarios u ON u.id = g.usuario_id LEFT JOIN usuarios ua ON ua.id = g.autorizado_por WHERE g.turno_id = ? AND g.causa != 'cierre' ORDER BY g.fecha, g.id",
     )
     .bind(&t.id)
     .fetch_all(&mut *c)
@@ -1220,7 +1220,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
             .fetch_one(&mut *c)
             .await
             .map_err(e)?;
-        let nv: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ?").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?;
+        let nv: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?;
         let pendiente = t.revisada_por.is_none() && t.diferencia.is_some_and(|d| fuera_de_umbral(d, umbral));
         let ve = ve_totales(a, &t);
         out.push(TurnoFila { ventas: ve.then_some(n), total: ve.then_some(total), pendiente_revision: pendiente && admin, no_ventas: nv, alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv, turno: t });

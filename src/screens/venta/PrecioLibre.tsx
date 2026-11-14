@@ -13,12 +13,21 @@ import { seleccionarAlTocar } from "../../ui/seleccionarAlTocar";
 /** Venta simple (precio libre): monto + departamento con un toque, descripción opcional. */
 /** Una venta simple desde aquí suele ser un cero de más; se confirma con un segundo Agregar. */
 const MONTO_GRANDE = 50_000;
+const ULTIMO_DEPTO = "venta.simple.depto";
 
 export default function PrecioLibre(p: { departamentos: Departamento[]; onAgregar(l: LineaEspera): void; onCerrar(): void }) {
   const { config } = useSesion();
   const [monto, setMonto] = useState("");
   const [cantidad, setCantidad] = useState("1");
-  const [depto, setDepto] = useState<string | null>(null);
+  // El último departamento usado en este equipo (Fotocopias se repite mucho); si ya no existe, ninguno.
+  const [depto, setDepto] = useState<string | null>(() => {
+    try {
+      const id = localStorage.getItem(ULTIMO_DEPTO);
+      return p.departamentos.some((x) => x.id === id) ? id : null;
+    } catch {
+      return null;
+    }
+  });
   const [descripcion, setDescripcion] = useState("");
   const [errores, setErrores] = useState<{ monto?: string; cantidad?: string; depto?: string }>({});
   const [revisado, setRevisado] = useState(""); // monto grande que ya se avisó (segundo Agregar lo acepta)
@@ -41,6 +50,11 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
           if (m * n >= MONTO_GRANDE && revisado !== clave) return setRevisado(clave);
           if (agregada.current) return;
           agregada.current = true;
+          try {
+            localStorage.setItem(ULTIMO_DEPTO, d.id);
+          } catch {
+            /* sin almacenamiento: no lo recuerda, nada más */
+          }
           p.onAgregar({
             id: ulid(),
             productoId: null,

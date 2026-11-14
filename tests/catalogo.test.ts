@@ -4,6 +4,7 @@ import { buscarProductos, crearProducto } from "../src/db/productos";
 import { conMiles, leerMontoEntero } from "../src/lib/texto";
 import type { Actor } from "../src/tipos";
 import { baseDePrueba } from "./driverNode";
+import { lecturaConCantidad } from "../src/screens/venta/useCatalogo";
 
 const DUENO: Actor = { id: "D", rol: "dueno" };
 const LIBRERIA = "00000000000000000000000D01";
@@ -44,5 +45,18 @@ describe("orden y páginas del catálogo", () => {
     expect(p1.filas).toHaveLength(3);
     const p2 = await buscarProductos({ orden: "precio", limite: 3, desplazamiento: 3 });
     expect(p2.filas.map((p) => p.nombre)).toEqual(["Agenda"]);
+  });
+});
+
+describe("3* y escanear", () => {
+  it("toma la cantidad del buscador o de la lectura pegada", () => {
+    // Con pausa: el lector lee solo el código; "3*" quedó en el buscador (con o sin el código todavía).
+    expect(lecturaConCantidad("7501234567890", "3*")).toEqual({ codigo: "7501234567890", cantidad: 3 });
+    expect(lecturaConCantidad("7501234567890", "3*7501234567890")).toEqual({ codigo: "7501234567890", cantidad: 3 });
+    // Escaneando enseguida del "*": la ráfaga trae todo junto.
+    expect(lecturaConCantidad("12*07toc", "")).toEqual({ codigo: "07toc", cantidad: 12 });
+    // Sin "N*": uno. "0*" cuenta como uno.
+    expect(lecturaConCantidad("7501234567890", "lapiz")).toEqual({ codigo: "7501234567890", cantidad: 1 });
+    expect(lecturaConCantidad("7501234567890", "0*")).toEqual({ codigo: "7501234567890", cantidad: 1 });
   });
 });
