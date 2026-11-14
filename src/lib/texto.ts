@@ -39,6 +39,14 @@ export function diaLocal(d = new Date()): string {
   return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
 }
 
+/** Cada día local de `desde` a `hasta` (AAAA-MM-DD), ambos incluidos. */
+export function diasEntre(desde: string, hasta: string): string[] {
+  const dias: string[] = [];
+  // Mediodía: un cambio de horario no salta ni repite días.
+  for (const d = new Date(`${desde}T12:00:00`); diaLocal(d) <= hasta; d.setDate(d.getDate() + 1)) dias.push(diaLocal(d));
+  return dias;
+}
+
 /** Solo las cifras, con punto de miles mientras se escribe: "3500" → "3.500", "¢3 500" → "3.500". */
 export function conMiles(s: string): string {
   const d = s.replace(/\D/g, "").replace(/^0+(?=\d)/, "");

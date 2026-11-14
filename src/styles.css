@@ -2338,6 +2338,20 @@ mark {
   margin-top: calc(14px * 1.45 + 6px);
 }
 
+/* Pago dividido con 2+ datos (SINPE: nombre, banco, referencia): en la columna angosta se apilaban uno
+   bajo otro y empujaban todo hacia abajo. Van en su propia fila, a lo ancho y lado a lado. */
+.fila-pago.cobro-campos > .btn {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.fila-pago.cobro-campos > .cobro-extras:has(> :nth-child(2)) {
+  grid-column: 1 / 4;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .cobro-forma {
   display: flex;
   align-items: center;

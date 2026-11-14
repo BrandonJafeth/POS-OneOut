@@ -1,11 +1,12 @@
 // Caja: el turno abierto (de la caja, no de una persona), movimientos, "no venta", corte, cierre
 // con arqueo y cierre Z; historial de turnos y, para el dueño, las aperturas de gaveta sin venta.
 // Con el turno abierto, el cajero no ve totales de ventas (Rust ni siquiera se los manda).
-import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, FileDown, History, Inbox, KeyRound, Lock, LockOpen, NotebookPen, Printer, RotateCcw, Scissors } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, Eye, FileDown, History, Inbox, KeyRound, Lock, LockOpen, NotebookPen, Printer, RotateCcw, Scissors } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
+import Papel from "../components/Papel";
 import PinDueno from "../components/PinDueno";
 import {
   aperturasGaveta,
@@ -22,17 +23,19 @@ import {
   type ResultadoCierre,
   type TurnoFila,
 } from "../db/caja";
+import { ajustesPara } from "../db/impresoras";
 import { obtenerNegocio } from "../db/negocio";
 import { listarUsuarios } from "../db/usuarios";
-import { listarEsperas } from "../db/ventas";
+import { listarEsperas, listarVentasDia, obtenerVenta } from "../db/ventas";
 import { imprimirCorte, imprimirMovimiento, imprimirZ } from "../lib/caja/imprimir";
 import { pdfCierre } from "../lib/caja/pdfZ";
-import { horaCierre, opcionesPorDefecto } from "../lib/caja/reporteZ";
+import { documentosCierre, horaCierre, opcionesPorDefecto } from "../lib/caja/reporteZ";
+import { interpret } from "../lib/preview";
 import { descargar } from "../lib/exportarCliente";
 import { DIAS_SIN_RESPALDO, estadoAutomatico, ultimoRespaldo } from "../lib/respaldoApi";
-import { diaLocal, plural } from "../lib/texto";
-import { fechaHora, monto, montoConSigno as signo } from "../lib/tickets";
-import type { Usuario } from "../tipos";
+import { diaLocal, diasEntre, plural } from "../lib/texto";
+import { columnas, DEFAULT_SETTINGS, fechaHora, monto, montoConSigno as signo, type Doc } from "../lib/tickets";
+import type { Usuario, Venta } from "../tipos";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
@@ -446,7 +449,8 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
       {d && <VistaZ d={d} denominaciones={p.estado.denominaciones} />}
       <div className="fila-botones">
         {d && <BotonImprimirZ turnoId={res.turnoId} opciones={p.cierre.o} denominaciones={p.estado.denominaciones} onError={setError} onListo={() => setError("")} />}
-        {d && puede("caja.admin") && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
+        {d && <BotonVerPapel d={d} opciones={p.cierre.o} denominaciones={p.estado.denominaciones} />}
+        {d && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
         <span className="separador" />
         <Button variante="primario" onClick={p.onCerrar}>
           Listo
@@ -500,21 +504,71 @@ function BotonImprimirZ(p: { turnoId: string; opciones: OpcionesCierre; denomina
   );
 }
 
+/** Muestra el papel del Z tal como saldría (mismos bytes), sin impresora y sin gastar la impresión original. */
+function BotonVerPapel(p: { d: Detalle; opciones: OpcionesCierre; denominaciones: number[] }) {
+  const [docs, setDocs] = useState<Doc[] | null>(null);
+  const [ancho, setAncho] = useState(32);
+  const toast = useToast();
+  return (
+    <>
+      <Button
+        icono={Eye}
+        onClick={async () => {
+          try {
+            // Sin impresora asignada: se ve en 58 mm.
+            const s = await ajustesPara("cierre").catch(() => DEFAULT_SETTINGS);
+            // Lo mismo que lee imprimirZ: si ya se imprimió, la vista también dice COPIA.
+            const { detalle, copia } = await datosReporteZ(p.d.turno.id);
+            setAncho(columnas(s));
+            setDocs(documentosCierre(await obtenerNegocio(), detalle, s, { ...p.opciones, copia, denominaciones: p.denominaciones }));
+          } catch (e) {
+            toast.error("No se pudo armar la vista previa", textoError(e));
+          }
+        }}
+      >
+        Ver cómo sale
+      </Button>
+      {docs && (
+        <Modal titulo={`Vista previa del papel (${ancho} columnas)`} onCerrar={() => setDocs(null)} ancho={480}>
+          {docs.map((x, i) => (
+            <Papel key={i} items={interpret(x.bytes)} />
+          ))}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Tiquetes del turno, en orden. Cada venta guarda el día en que se cobró: un turno que pasó la medianoche tiene ventas de varios días. */
+async function ventasDelTurno(t: Detalle["turno"]): Promise<Venta[]> {
+  const dias = diasEntre(t.dia, diaLocal(t.cerradoEn ? new Date(t.cerradoEn) : new Date()));
+  const lista = (await Promise.all(dias.map(listarVentasDia))).flat();
+  const ventas = await Promise.all(lista.map((v) => obtenerVenta(v.id)));
+  return ventas.filter((v): v is Venta => v?.turnoId === t.id).sort((a, b) => a.consecutivo - b.consecutivo);
+}
+
 function BotonPdf(p: { d: Detalle; denominaciones: number[] }) {
   const toast = useToast();
+  const envio = useEnvio(); // un doble clic = un solo archivo
+  const admin = useSesion().puede("caja.admin");
   return (
     <Button
       icono={FileDown}
-      onClick={async () => {
+      disabled={envio.ocupado}
+      onClick={() =>
+        void envio.enviar(async () => {
         try {
           const n = await obtenerNegocio();
-          const bytes = pdfCierre(n, p.d, { copia: p.d.turno.reimpresiones > 0, denominaciones: p.denominaciones });
+          const bytes = pdfCierre(n, p.d, { copia: p.d.turno.reimpresiones > 0, denominaciones: p.denominaciones, ventas: await ventasDelTurno(p.d.turno) });
           const nombre = `cierre-${p.d.turno.dia}-${p.d.turno.id.slice(-6)}.pdf`;
-          toast.guardado("PDF guardado.", await descargar(nombre, bytes, "Cierres de caja", p.d.turno.dia.slice(0, 7)));
+          // El cajero lo manda al dueño: a Descargas, donde lo encuentra. El dueño lo archiva por mes en Documentos.
+          const ruta = admin ? await descargar(nombre, bytes, "Cierres de caja", p.d.turno.dia.slice(0, 7)) : await descargar(nombre, bytes);
+          toast.guardado("PDF guardado.", ruta);
         } catch (e) {
           toast.error("No se pudo crear el PDF", textoError(e));
         }
-      }}
+        })
+      }
     >
       Exportar PDF
     </Button>
@@ -680,7 +734,8 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                     texto={t.reimpresiones > 0 ? "Reimprimir (COPIA)" : "Imprimir cierre Z"}
                   />
                 )}
-                {t.estado === "cerrado" && admin && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
+                {t.estado === "cerrado" && d.veTotales && <BotonVerPapel d={d} opciones={opciones} denominaciones={p.estado.denominaciones} />}
+                {t.estado === "cerrado" && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
                 <span className="separador" />
                 {admin && t.estado === "cerrado" && t.dia === diaLocal() && (
                   <Button icono={RotateCcw} onClick={() => setReabrir(true)}>

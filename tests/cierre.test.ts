@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Corte, Detalle } from "../src/db/caja";
 import { obtenerNegocio } from "../src/db/negocio";
 import { pdfCierre } from "../src/lib/caja/pdfZ";
-import { comprobanteMovimiento, descuadres, documentosCierre, NOTA_USUARIOS, opcionesPorDefecto, reporteCorte, reporteZ } from "../src/lib/caja/reporteZ";
+import { aEscPos, comprobanteMovimiento, descuadres, documentosCierre, lineasZ, NOTA_USUARIOS, opcionesPorDefecto, reporteCorte, reporteZ } from "../src/lib/caja/reporteZ";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS, lr } from "../src/lib/tickets";
-import type { Negocio } from "../src/tipos";
+import type { Negocio, Venta } from "../src/tipos";
 import { baseDePrueba } from "./driverNode";
 import { validarEscPos } from "./escposValidar";
 
@@ -114,9 +114,23 @@ function detalle(): Detalle {
 const SIN: { copia: boolean; detalleCompleto: boolean; porDepartamento: boolean } = { copia: false, detalleCompleto: false, porDepartamento: false };
 
 describe("reporte Z", () => {
-  it("resumen, efectivo, usuarios, departamentos, pagos electrónicos, movimientos, conteo y firmas", async () => {
+  it("conteo con el total escrito: la etiqueta y el monto caben en 32 columnas", async () => {
+    const d = detalle();
+    d.turno.conteoFinal = { total: 1234567 };
+    const l = lineasTexto(reporteZ(await obtenerNegocio(), d, DEFAULT_SETTINGS, SIN).bytes);
+    expect(l).toContain(lr("Total (sin detalle)", "¢1.234.567"));
+  });
+
+  it("el papel lleva solo lo básico: lo demás va al PDF", async () => {
+    const t = texto(reporteZ(await obtenerNegocio(), detalle(), DEFAULT_SETTINGS, SIN).bytes);
+    for (const s of ["VENTAS POR FORMA DE PAGO", "-- EFECTIVO", "POR DEPARTAMENTO", "MOVIMIENTOS DE EFECTIVO", "-- CONTEO", "Cajero: Isaias", "Supervisor: Isaias"]) expect(t).toContain(s);
+    expect(t.replace(/\n/g, " ")).toContain("ATENCION: muchas aperturas sin venta (umbral 2)");
+    for (const s of ["-- OTROS", "VENTAS POR USUARIO", "CONTROL POR USUARIO", "LECTURA DEL D", "MÁS VENDIDOS", "DETALLE TARJETA", "APERTURAS SIN VENTA", "-- CORTES"]) expect(t).not.toContain(s);
+  });
+
+  it("completo (PDF): resumen, efectivo, usuarios, departamentos, pagos electrónicos, movimientos, conteo y firmas", async () => {
     const neg = await obtenerNegocio();
-    const doc = reporteZ(neg, detalle(), DEFAULT_SETTINGS, SIN);
+    const doc = aEscPos(neg, lineasZ(neg, detalle(), 32, { ...SIN, completo: true }), DEFAULT_SETTINGS);
     const l = lineasTexto(doc.bytes);
     const t = l.join("\n");
     for (const s of ["CIERRE DE CAJA (Z)", "Caja 1", "2026-11-03", "Juarez", "Isaias", "VENTAS POR FORMA DE PAGO", "VENTAS POR USUARIO", "POR DEPARTAMENTO", "DETALLE TARJETA/SINPE/TRANSF.", "MOVIMIENTOS DE EFECTIVO", "APERTURAS SIN VENTA", "CORTES", "CONTEO", "BILLETES", "MONEDAS", "Cajero: Isaias", "Supervisor:"])
@@ -136,7 +150,7 @@ describe("reporte Z", () => {
     expect(l).toContain(lr("Juarez (2 tiq.)", "¢8.600"));
     expect(t.replace(/\n/g, " ")).toContain(NOTA_USUARIOS);
     expect(l).toContain(lr("Fotocopias (46)", "¢9.170"));
-    expect(l).toContain(lr("  en efectivo", "¢484"));
+    expect(l).not.toContain(lr("  en efectivo", "¢484")); // por departamento: solo el total
     // La referencia completa: en la misma línea si cabe; si no, en la siguiente.
     expect(t).toMatch(/67979[\s\S]{0,40}BCR ref 69898/);
     expect(t).toMatch(/67981 ref 777 +¢1\.000/);
@@ -221,7 +235,7 @@ describe("reporte Z", () => {
     const esperado = detalle();
     esperado.resumen.efectivoEsperado += 100;
     expect(() => documentosCierre(neg, esperado, DEFAULT_SETTINGS, SIN)).toThrow(/efectivo esperado/);
-    expect(() => pdfCierre(neg, mal, { copia: false })).toThrow(/no cuadran/);
+    expect(() => pdfCierre(neg, mal, { copia: false, ventas: [] })).toThrow(/no cuadran/);
   });
 
   it("80 mm: 48 columnas", async () => {
@@ -232,17 +246,26 @@ describe("reporte Z", () => {
 });
 
 describe("PDF del cierre", () => {
-  it("carta con logo, detalle completo y cada departamento en su página", async () => {
+  it("carta con logo, Z completo, detalle por departamento y transacciones", async () => {
     const neg: Negocio = { ...(await obtenerNegocio()), nombreComercial: "Librería Chagui", logo: { ancho: 16, alto: 2, bits: new Uint8Array([0xff, 0x00, 0x0f, 0xf0]) } };
-    const pdf = new TextDecoder("latin1").decode(pdfCierre(neg, detalle(), { copia: false }));
+    const venta = {
+      numero: "067588", fecha: "2026-11-03T14:31:12Z", cajero: "Juarez", estado: "completada", total: 2200,
+      lineas: [{ cantidad: 4, descripcion: "POINTER 0.5 AYN", precioUnitario: 400, total: 1600 }],
+      pagos: [{ forma: "Tarjeta", banco: null, referencia: null, ultimos4: "4242", pagador: null, monto: 2200 }],
+    } as unknown as Venta;
+    const pdf = new TextDecoder("latin1").decode(pdfCierre(neg, detalle(), { copia: false, ventas: [venta] }));
     expect(pdf.startsWith("%PDF-1.4")).toBe(true);
     expect(pdf).toContain("/Subtype /Image");
     expect(pdf).toContain("/Im1 Do");
     expect(pdf).toContain("/MediaBox [0 0 612 792]");
     expect(pdf).toContain("(DETALLE DE VENTAS)");
-    expect(pdf).toContain("(VENTAS POR DEPARTAMENTO)");
-    // Z + detalle + 2 departamentos: al menos 4 páginas.
-    expect(Number(/\/Count (\d+)/.exec(pdf)?.[1])).toBeGreaterThanOrEqual(4);
+    expect(pdf).toContain("-- VENTAS POR USUARIO");
+    expect(pdf).toContain("(TRANSACCIONES DEL TURNO)");
+    expect(pdf).toMatch(/Tiquete 067588 .*Juarez/);
+    expect(pdf).toMatch(/4 POINTER 0\.5 AYN/);
+    expect(pdf).toContain("****4242");
+    // Sin la hoja aparte por departamento: repetía el detalle.
+    expect(pdf).not.toContain("(VENTAS POR DEPARTAMENTO)");
     expect(pdf.trimEnd().endsWith("%%EOF")).toBe(true);
   });
 });

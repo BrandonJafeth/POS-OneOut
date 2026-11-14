@@ -18,7 +18,7 @@ export const NUBE_LISTA_BLANCA: Readonly<Record<string, readonly string[]>> = {
 };
 
 /** Columnas que nunca pueden salir, aunque alguien las agregue por error a la lista blanca. */
-export const COLUMNAS_PERSONALES = ["cliente_id", "cedula", "telefono", "correo", "notas", "pin_hash", "usuario_id", "nombre_busqueda", "tipo_identificacion", "nombre_tiquete"];
+export const COLUMNAS_PERSONALES = ["cliente_id", "cedula", "telefono", "pagador", "correo", "notas", "pin_hash", "usuario_id", "nombre_busqueda", "tipo_identificacion", "nombre_tiquete"];
 export const TABLAS_PROHIBIDAS = ["clientes", "cuentas", "cuenta_lineas", "abonos", "usuarios", "bitacora", "negocio"];
 
 export function tablaSincronizable(tabla: string): boolean {

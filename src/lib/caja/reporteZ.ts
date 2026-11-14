@@ -1,11 +1,10 @@
 // Reporte Z (cierre de caja), tiquete por departamento, corte parcial y comprobante de movimiento.
-// Formato basado en el cierre del sistema anterior: resumen por forma de pago, efectivo, ventas por
-// usuario, totales por departamento, detalle de tarjeta/SINPE/transferencia, movimientos, conteo
-// por billetes y monedas, firmas; y al final, si se elige, el detalle completo por departamento
-// (Co/Ta/De/Mx, producto, cantidad, precio, monto y efectivo).
+// El papel lleva lo básico (formas de pago, efectivo, departamentos, movimientos, conteo, firmas) y,
+// si se elige, el detalle completo por departamento (Co/Ta/De/Mx). El PDF agrega lo demás: ventas
+// por usuario, lectura del día, tarjeta/SINPE/transferencia, aperturas, cortes y las transacciones.
 //
 // El contenido se arma una sola vez como líneas de texto para un ancho dado (32 columnas en 58 mm,
-// 48 en 80 mm, ~90 en el PDF carta): la térmica y el PDF dicen exactamente lo mismo.
+// 48 en 80 mm, ~90 en el PDF carta).
 // Si los números no cuadran entre sí, no se arma nada: se avisa (Rust también lo revisa).
 import type { Corte, DepartamentoDesglose, Detalle, Movimiento, Resumen } from "../../db/caja";
 import { agruparPorForma } from "../../db/caja";
@@ -29,6 +28,8 @@ export interface OpcionesZ {
   detalleCompleto: boolean;
   /** Un comprobante aparte por cada departamento con ventas. */
   porDepartamento: boolean;
+  /** Todo (control por usuario, lectura, tarjetas/SINPE, aperturas, cortes...): solo el PDF. El papel lleva lo básico. */
+  completo?: boolean;
   /** Denominaciones configuradas (para listar el conteo completo, también las que fueron 0). */
   denominaciones?: number[];
 }
@@ -203,30 +204,34 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   if (t.diferencia != null) l.push({ t: lr(t.diferencia === 0 ? "Diferencia: cuadra" : t.diferencia > 0 ? "Sobrante" : "Faltante", signo(t.diferencia), cols), b: true });
   if (t.notaCierre) wrap("Nota: " + t.notaCierre, cols).forEach((x) => l.push({ t: x }));
 
-  titulo(l, "OTROS", cols);
-  l.push({ t: lr("Descuentos", monto(r.descuentos), cols) });
-  l.push({ t: lr(`Anulaciones (${r.anuladas})`, monto(r.totalAnuladas), cols) });
-  l.push({ t: lr("Aperturas sin venta", String(r.noVentas.length), cols) });
+  if (o.completo) {
+    titulo(l, "OTROS", cols);
+    l.push({ t: lr("Descuentos", monto(r.descuentos), cols) });
+    l.push({ t: lr(`Anulaciones (${r.anuladas})`, monto(r.totalAnuladas), cols) });
+    l.push({ t: lr("Aperturas sin venta", String(r.noVentas.length), cols) });
+    l.push({ t: lr("Cortes realizados", String(r.cortes.length), cols) });
+  }
+  // La alerta va también en el papel: es lo que el dueño tiene que ver.
   if (r.noVentaUmbral > 0 && r.noVentas.length >= r.noVentaUmbral)
     wrap(`ATENCION: muchas aperturas sin venta (umbral ${r.noVentaUmbral})`, cols).forEach((x) => l.push({ t: x, b: true }));
-  l.push({ t: lr("Cortes realizados", String(r.cortes.length), cols) });
 
-  titulo(l, "VENTAS POR USUARIO", cols);
-  for (const u of r.porUsuario) l.push({ t: lr(`${cortar(u.usuario, cols - 18)} (${u.ventas} tiq.)`, monto(u.total), cols) });
-  if (!r.porUsuario.length) l.push({ t: "  Sin ventas" });
-  wrap(NOTA_USUARIOS, cols).forEach((x) => l.push({ t: x }));
-  l.push(...lineasLectura(r, cols));
+  if (o.completo) {
+    titulo(l, "VENTAS POR USUARIO", cols);
+    for (const u of r.porUsuario) l.push({ t: lr(`${cortar(u.usuario, cols - 18)} (${u.ventas} tiq.)`, monto(u.total), cols) });
+    if (!r.porUsuario.length) l.push({ t: "  Sin ventas" });
+    wrap(NOTA_USUARIOS, cols).forEach((x) => l.push({ t: x }));
+    l.push(...lineasLectura(r, cols));
+  }
 
   if (r.conDesglose && r.desglose.departamentos.length) {
     titulo(l, "POR DEPARTAMENTO", cols);
     for (const x of r.desglose.departamentos) {
       l.push({ t: lr(`${cortar(x.nombre, cols - 18)} (${x.cantidad})`, monto(x.monto), cols) });
-      l.push({ t: lr("  en efectivo", monto(x.efectivo), cols) });
     }
     l.push({ t: lr(`Total (${r.desglose.cantidad})`, monto(r.desglose.total), cols), b: true });
   }
 
-  const grupos = agruparPorForma(r.pagosElectronicos ?? []);
+  const grupos = o.completo ? agruparPorForma(r.pagosElectronicos ?? []) : [];
   if (grupos.length) {
     titulo(l, "DETALLE TARJETA/SINPE/TRANSF.", cols);
     for (const g of grupos) {
@@ -249,7 +254,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     l.push({ t: `  ${hora(m.fecha)} ${cortar([m.usuario, m.motivo].filter(Boolean).join(" · "), cols - 8)}` });
   }
 
-  if (r.noVentas.length) {
+  if (o.completo && r.noVentas.length) {
     titulo(l, "APERTURAS SIN VENTA", cols);
     for (const x of r.noVentas) {
       const que = x.causa === "dueno" ? `Orden del dueño: ${x.motivo}` : x.nota ? `${x.motivo}: ${x.nota}` : x.motivo;
@@ -257,7 +262,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     }
   }
 
-  if (r.cortes.length) {
+  if (o.completo && r.cortes.length) {
     titulo(l, "CORTES", cols);
     for (const k of r.cortes) {
       l.push({ t: lr(`${hora(k.fecha)} ${cortar(k.usuario, cols - 20)}`, monto(k.total), cols) });
@@ -265,14 +270,14 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     }
   }
 
-  if (r.ajustes.length) {
+  if (o.completo && r.ajustes.length) {
     titulo(l, "AJUSTES DE TURNOS ANTERIORES", cols);
     for (const a of r.ajustes) l.push({ t: lr(`${a.tipo === "anulacion" ? "Anula" : "Pago"} ${a.ventaNumero}`, monto(a.monto), cols) });
   }
 
   titulo(l, "CONTEO", cols);
   const c = t.conteoFinal;
-  if (c && "total" in c) l.push({ t: lr("Total escrito, sin detalle", monto(Number(c.total)), cols) });
+  if (c && "total" in c) l.push({ t: lr("Total (sin detalle)", monto(Number(c.total)), cols) });
   else {
     const lista = (o.denominaciones?.length ? o.denominaciones : DENOMINACIONES).slice().sort((a, b) => b - a);
     for (const [nombre, filtro] of [["BILLETES", (x: number) => x >= 1000], ["MONEDAS", (x: number) => x < 1000]] as const) {

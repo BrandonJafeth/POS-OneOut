@@ -289,7 +289,7 @@ export default function Cobro(p: { total: number; totalExacto: number; formas: F
                 </Field>
                 <Field
                   label={forma(f.formaPagoId)?.daVuelto ? "Recibido" : "Monto"}
-                  ayuda={f === filaAuto ? `Vacío: cubre lo que falta (${monto(restoEfectivo)})` : !f.texto ? "Escriba el monto." : undefined}
+                  ayuda={f === filaAuto ? (restoEfectivo > 0 ? `Vacío = ${monto(restoEfectivo)}` : undefined) : !f.texto ? "Escriba el monto." : undefined}
                 >
                   <CampoMonto
                     ref={i === 0 ? primerMonto : i === filas.length - 1 ? nuevaFila : undefined}

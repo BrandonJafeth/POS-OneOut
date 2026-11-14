@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { codePageByEscT, encode } from "../src/lib/codepages";
-import { limpiarNombre, normalizar } from "../src/lib/texto";
+import { diasEntre, limpiarNombre, normalizar } from "../src/lib/texto";
 
 // Mismos casos que util::tests en Rust: la búsqueda solo funciona si las dos dan lo mismo.
 describe("nombres normalizados igual en toda la app", () => {
@@ -23,5 +23,13 @@ describe("nombres normalizados igual en toda la app", () => {
     const r = encode("Café", cp);
     expect(r.missing).toEqual([]);
     expect(r.bytes).toEqual(encode("Café", cp).bytes);
+  });
+});
+
+describe("diasEntre", () => {
+  it("incluye los extremos y cruza fin de mes y de año", () => {
+    expect(diasEntre("2026-11-03", "2026-11-03")).toEqual(["2026-11-03"]);
+    expect(diasEntre("2026-12-30", "2027-01-02")).toEqual(["2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]);
+    expect(diasEntre("2026-11-05", "2026-11-03")).toEqual([]);
   });
 });
