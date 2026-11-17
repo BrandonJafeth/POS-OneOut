@@ -311,8 +311,8 @@ async fn estado_auto(bd: &Bd) -> Res<EstadoAutomatico> {
     let configurado = dir.join(SECRETO_AUTO).exists();
     let ultimo: Option<(String, String)> = sqlx::query_as("SELECT fecha, detalle FROM bitacora WHERE accion = 'respaldo.automatico' ORDER BY rowid DESC LIMIT 1").fetch_optional(&bd.pool).await.map_err(e)?;
     let usb: Option<String> = sqlx::query_scalar("SELECT MAX(fecha) FROM bitacora WHERE accion = 'respaldo.usb_confirmado'").fetch_one(&bd.pool).await.map_err(e)?;
-    let dia_local = |iso: &str| chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default();
-    let hace_7 = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let dia_local = |iso: &str| crate::util::local_de(iso).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    let hace_7 = crate::util::iso((crate::util::ahora() - chrono::Duration::days(7)).with_timezone(&chrono::Utc));
     Ok(EstadoAutomatico {
         configurado,
         hecho_hoy: ultimo.as_ref().is_some_and(|(f, _)| dia_local(f) == crate::util::dia_local()),

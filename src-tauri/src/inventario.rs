@@ -213,7 +213,7 @@ pub struct Entrada {
 
 fn fecha_valida(f: &str) -> Res<()> {
     let d = chrono::NaiveDate::parse_from_str(f, "%Y-%m-%d").map_err(|_| "La fecha de la factura no es válida".to_string())?;
-    if d > chrono::Local::now().date_naive() {
+    if d > crate::util::ahora().date_naive() {
         return Err("La fecha de la factura no puede ser de un día que todavía no llega".into());
     }
     Ok(())

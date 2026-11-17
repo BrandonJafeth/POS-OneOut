@@ -16,11 +16,7 @@ import Consecutivo from "./caja/Consecutivo";
 export const AYUDA_TURNO_COMPARTIDO =
   "Si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona. El cierre Z dice qué vendió cada uno, pero el efectivo es uno solo. Si quiere controlar el efectivo de cada cajero por separado, desactive esta opción y cada uno abre y cierra su propio turno.";
 
-const HORAS = Array.from({ length: 24 }, (_, h) => (
-  <option key={h} value={h}>
-    {String(h).padStart(2, "0")}:00
-  </option>
-));
+const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
 export default function ConfigCaja() {
   const { actor, config, recargarConfig } = useSesion();
@@ -29,7 +25,6 @@ export default function ConfigCaja() {
   const [motivos, setMotivos] = useState(config.caja_no_venta_motivos.join("\n"));
   const [umbralNv, setUmbralNv] = useState(String(config.caja_no_venta_umbral));
   const [quitar, setQuitar] = useState(conMiles(String(config.caja_quitar_linea_bitacora)));
-  const [porDia, setPorDia] = useState(config.caja_hora_cierre_dia.some((h) => h !== null));
 
   async function guardar(cambios: Record<string, unknown>, ok = "Guardado.") {
     setError("");
@@ -63,44 +58,49 @@ export default function ConfigCaja() {
             <span className="ayuda">{AYUDA_TURNO_COMPARTIDO}</span>
           </span>
         </label>
-        <Field
-          label="Hora de cierre del negocio"
-          ayuda="Si la caja ya se cerró hoy y se abre otra desde esta hora (cliente que llega tarde), cuenta para mañana. Si se abre antes, se pregunta si es para hoy (cambio de turno) o para mañana."
-        >
-          <select value={config.caja_hora_cierre} onChange={(e) => void guardar({ caja_hora_cierre: Number(e.target.value) })}>
-            {HORAS}
-          </select>
-        </Field>
-        <label className="opcion">
-          <input
-            type="checkbox"
-            checked={porDia}
-            onChange={(e) => {
-              setPorDia(e.target.checked);
-              // Al volver a una sola hora, todos los días usan la general.
-              if (!e.target.checked) void guardar({ caja_hora_cierre_dia: Array(7).fill(null) });
-            }}
-          />
-          <span>
-            <strong>Distinta según el día</strong>
-            <span className="ayuda">Por ejemplo, si el sábado o el domingo se cierra más temprano.</span>
-          </span>
-        </label>
-        {porDia && (
-          <div className="row">
-            {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d, i) => (
-              <Field key={d} label={d}>
-                <select
-                  value={config.caja_hora_cierre_dia[i] ?? ""}
-                  onChange={(e) => void guardar({ caja_hora_cierre_dia: config.caja_hora_cierre_dia.map((h, j) => (j === i ? (e.target.value === "" ? null : Number(e.target.value)) : h)) })}
-                >
-                  <option value="">General</option>
-                  {HORAS}
-                </select>
-              </Field>
-            ))}
-          </div>
-        )}
+        <h3>Días de trabajo y hora de cierre</h3>
+        <p className="ayuda">
+          Ponga una hora un poco antes de la hora real de cierre, para que un cliente que llega justo al cerrar cuente para el siguiente día de trabajo sin
+          preguntar.
+        </p>
+        <table className="tbl tbl-compacta horario">
+          <tbody>
+            {DIAS.map((d, i) => {
+              const h = config.caja_horario[i] ?? null;
+              const cambiar = (v: string | null) => {
+                const nuevo = config.caja_horario.map((x, j) => (j === i ? v : x));
+                if (nuevo.every((x) => x === null)) return setError("Tiene que haber al menos un día de trabajo.");
+                void guardar({ caja_horario: nuevo });
+              };
+              return (
+                <tr key={d}>
+                  <th scope="row">{d}</th>
+                  <td>
+                    <label className="opcion sin-margen">
+                      <input type="checkbox" checked={h !== null} onChange={(e) => cambiar(e.target.checked ? "18:30" : null)} />
+                      <span>Se trabaja</span>
+                    </label>
+                  </td>
+                  <td>
+                    {h !== null ? (
+                      <label>
+                        <span className="muted">Cierra a las </span>
+                        <input type="time" step={60} value={h} aria-label={`Hora de cierre del ${d.toLowerCase()}`} onChange={(e) => e.target.value && cambiar(e.target.value)} />
+                      </label>
+                    ) : (
+                      <span className="muted">No se trabaja</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="ayuda">
+          Si la caja ya se cerró y se abre otra desde la hora de cierre (cliente que llega tarde), cuenta para el siguiente día de trabajo. Si se abre antes,
+          se pregunta si es para hoy o para el siguiente día de trabajo. En un día que no se trabaja, abrir la caja pide confirmar. Cambiar el horario no mueve
+          las cajas ya abiertas o cerradas.
+        </p>
       </section>
 
       <section className="card">

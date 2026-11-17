@@ -47,19 +47,28 @@ export interface Turno {
   aperturaCuadra: boolean | null;
   /** Lo que se dejó en la gaveta para la próxima caja; contado − esto = retiro de cierre. */
   quedaEnGaveta: number | null;
+  /** Abierto en un día no laborable (evento especial): cuenta para ese mismo día. */
+  noLaborable: boolean;
 }
 
 /** Qué pasaría al abrir la caja ahora (lo decide Rust). */
 export interface Apertura {
-  caso: "primera" | "tarde" | "duda";
+  caso: "primera" | "tarde" | "duda" | "noLaborable";
   hoy: string;
-  manana: string;
+  /** Próximo día laborable ("mañana" en la lógica de fechas). */
+  siguiente: string;
+  /** "domingo", para el aviso de día no laborable. */
+  nombreHoy: string;
 }
 
 export interface EstadoCaja {
   turno: Turno | null;
   /** Quedó abierta la caja de un día anterior: hay que cerrarla antes de vender. */
   deOtroDia: boolean;
+  /** Día de negocio actual según Rust (la pantalla no decide con su propia hora). */
+  hoy: string;
+  /** Próximo día laborable según el horario del negocio. */
+  siguiente: string;
   /** Sin turno abierto: qué pasaría al abrirla ahora (avisar "cuenta para mañana" o preguntar). */
   apertura: Apertura | null;
   /** Turno por cajero: hay uno de otro cajero abierto desde un día anterior y este usuario lo puede cerrar. */
@@ -310,8 +319,10 @@ export function estadoCaja(): Promise<EstadoCaja> {
 
 /** Rust rechaza con este prefijo si la caja ya se cerró hoy, es antes de la hora de cierre y no se eligió el día. */
 export const ELEGIR_DIA = "ELEGIR_DIA";
+/** Rust rechaza con este prefijo si hoy no es laborable y no se confirmó abrir igual. */
+export const NO_LABORABLE = "NO_LABORABLE";
 
-/** `eleccion`: solo cuando la apertura está en duda (después de un cierre, antes de la hora de cierre). */
+/** `eleccion`: "hoy" o "manana" (= próximo día laborable) cuando la apertura está en duda; "hoy" para confirmar un día no laborable. */
 export function abrirCaja(conteo: ConteoEntrada, eleccion?: "hoy" | "manana"): Promise<Turno> {
   return invocar<Turno>("caja_abrir", { conteo: aRust(conteo), eleccion: eleccion ?? null });
 }

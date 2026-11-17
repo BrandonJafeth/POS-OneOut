@@ -25,6 +25,9 @@ describe("bitácora en palabras", () => {
     expect(tarde.importante).toBe(true);
     expect(describir(entrada("caja.abrir", { fondo: 20000, dia: "2026-11-16", caso: "primera" })).importante).toBe(false);
     expect(describir(entrada("caja.abrir", { fondo: 20000, caso: "hoy" })).texto).toContain("eligió que cuenta para hoy");
+    const domingo = describir(entrada("caja.abrir", { fondo: 20000, dia: "2026-11-22", caso: "primera", noLaborable: true }));
+    expect(domingo.texto).toContain("día no laborable");
+    expect(domingo.importante).toBe(true);
     expect(describir(entrada("caja.diferencia_apertura", { esperada: 20000, contado: 19000, diferencia: -1000 })).importante).toBe(true);
     expect(describir(entrada("caja.cerrar", { ventas: 1, total: 1000, esperado: 2000, contado: 2000, diferencia: 0, enNombreDe: "Luis" })).texto).toContain("en nombre de Luis");
     expect(describir(entrada("caja.corregir_dia", { antes: "2026-11-17", despues: "2026-11-16", motivo: "Se eligió mal", autorizadoPor: "U1" }, "T1")).importante).toBe(true);

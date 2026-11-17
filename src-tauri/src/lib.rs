@@ -180,7 +180,7 @@ async fn sesion_usuarios(st: St<'_>) -> Res<Vec<Value>> {
 
 async fn entrar(st: &App, id: &str, pin: &str) -> Res<Value> {
     let pool = st.pool()?;
-    let ahora = chrono::Utc::now().timestamp_millis();
+    let ahora = util::ahora().timestamp_millis();
     match usuarios::iniciar_sesion(pool, id, pin, ahora).await? {
         usuarios::Login::Ok { usuario } => {
             let minutos = config::entero(pool, "sesion_inactividad_min", 10).await;

@@ -256,7 +256,7 @@ pub async fn iniciar_sesion(pool: &SqlitePool, id: &str, p: &str, ahora_ms: i64)
 /// Un PIN que puso otra persona (debe_cambiar_pin) no autoriza nada hasta que el dueño lo cambie.
 pub async fn autorizar_dueno(pool: &SqlitePool, p: &str, contexto: &str, actor_id: &str) -> Res<String> {
     let _turno = PIN_EN_CURSO.lock().await;
-    freno_autorizacion(pool, chrono::Utc::now()).await?;
+    freno_autorizacion(pool, crate::util::ahora().with_timezone(&chrono::Utc)).await?;
     let duenos = sqlx::query("SELECT id, pin_hash FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL").fetch_all(pool).await.map_err(e)?;
     for d in &duenos {
         if pin::verificar(p, &d.get::<String, _>("pin_hash")) {
@@ -305,7 +305,7 @@ pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &
         return Err(sin_permiso(contexto));
     }
     let _turno = PIN_EN_CURSO.lock().await;
-    freno_autorizacion(pool, chrono::Utc::now()).await?;
+    freno_autorizacion(pool, crate::util::ahora().with_timezone(&chrono::Utc)).await?;
     let hash: Option<String> = sqlx::query_scalar("SELECT pin_hash FROM usuarios WHERE id = ? AND activo = 1 AND eliminado_en IS NULL")
         .bind(&a.id)
         .fetch_optional(pool)
@@ -412,7 +412,7 @@ pub mod tests {
         }
         // 5 fallos: ni el PIN correcto pasa hasta que se cumpla la espera (30 s desde el último).
         assert!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.unwrap_err().contains("Espere"));
-        let luego = chrono::Utc::now() + chrono::Duration::seconds(31);
+        let luego = crate::util::ahora().with_timezone(&chrono::Utc) + chrono::Duration::seconds(31);
         assert!(freno_autorizacion(&bd.pool, luego).await.is_ok());
         assert!(freno_autorizacion(&bd.pool, luego - chrono::Duration::seconds(5)).await.is_err());
     }

@@ -20,6 +20,7 @@ import {
   CONTEO_VACIO,
   diaConNombre,
   ELEGIR_DIA,
+  NO_LABORABLE,
   totalConteo,
   type Turno,
   type ConteoEntrada,
@@ -40,6 +41,8 @@ import { opcionesPorDefecto } from "../../lib/caja/reporteZ";
 import ConteoDinero from "./Conteo";
 import PagosElectronicos from "./PagosElectronicos";
 
+const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
 export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta(): void }) {
   const [conteo, setConteo] = useState<ConteoEntrada>(CONTEO_VACIO);
   const [error, setError] = useState("");
@@ -47,10 +50,29 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
   // La fecha la decide Rust; aquí solo se avisa o se pregunta. Si Rust pide elegir (pasó la hora mientras contaba), se pregunta.
   const [duda, setDuda] = useState(p.estado.apertura?.caso === "duda");
   const [eleccion, setEleccion] = useState<"hoy" | "manana" | null>(null);
+  // Día no laborable (evento especial): primero se confirma; cuenta para hoy.
+  const [noLaborable, setNoLaborable] = useState(p.estado.apertura?.caso === "noLaborable");
+  const [confirmado, setConfirmado] = useState(false);
   // Conteo ciego: el resultado de la comparación se ve solo después de confirmar.
   const [abierta, setAbierta] = useState<Turno | null>(null);
   const ap = p.estado.apertura;
   const admin = puede(useSesion().actor.rol, "caja.admin");
+
+  if (noLaborable && !confirmado && ap) {
+    return (
+      <Modal titulo="Abrir caja" onCerrar={p.onCerrar} ancho={520}>
+        <Alert tono="aviso">Hoy es {ap.nombreHoy}, día no laborable. ¿Abrir igual?</Alert>
+        <p className="muted">La caja cuenta para hoy y queda anotado en la bitácora.</p>
+        <div className="fila-botones">
+          <Button onClick={p.onCerrar}>No</Button>
+          <span className="separador" />
+          <Button variante="primario" tamano="lg" autoFocus onClick={() => setConfirmado(true)}>
+            Sí, abrir
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
 
   if (abierta) {
     return (
@@ -76,17 +98,18 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
     <Modal titulo="Abrir caja" onCerrar={p.onCerrar} ancho={720}>
       <p className="muted">Cuente el dinero con que empieza (el fondo para dar vuelto).</p>
       {ap?.caso === "tarde" && !duda && (
-        <Alert tono="aviso">La caja de hoy ya se cerró: esta caja cuenta para mañana ({diaConNombre(ap.manana)}). Mañana se sigue vendiendo en ella sin cerrarla.</Alert>
+        <Alert tono="aviso">La caja de hoy ya se cerró: esta caja cuenta para el {diaConNombre(ap.siguiente)}. Ese día se sigue vendiendo en ella sin cerrarla.</Alert>
       )}
+      {noLaborable && ap && <Alert tono="info">Esta caja cuenta para hoy, {diaConNombre(ap.hoy)}.</Alert>}
       {duda && ap && (
         <fieldset className="eleccion-dia">
-          <legend>La caja ya se cerró hoy. ¿Esta caja es para hoy o para mañana?</legend>
+          <legend>La caja ya se cerró hoy. ¿Esta caja es para hoy o para el {diaConNombre(ap.siguiente)}?</legend>
           <div className="fila-botones">
             <Button tamano="xl" variante={eleccion === "hoy" ? "primario" : "normal"} aria-pressed={eleccion === "hoy"} onClick={() => setEleccion("hoy")}>
               Hoy
             </Button>
             <Button tamano="xl" variante={eleccion === "manana" ? "primario" : "normal"} aria-pressed={eleccion === "manana"} onClick={() => setEleccion("manana")}>
-              Mañana, {diaConNombre(ap.manana)}
+              {mayuscula(diaConNombre(ap.siguiente))}
             </Button>
           </div>
         </fieldset>
@@ -106,12 +129,14 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
             setOcupado(true);
             setError("");
             try {
-              const t = await abrirCaja(conteo, duda ? (eleccion ?? undefined) : undefined);
+              const t = await abrirCaja(conteo, duda ? (eleccion ?? undefined) : noLaborable ? "hoy" : undefined);
               if (t.aperturaCuadra === null) p.onAbierta();
               else setAbierta(t);
             } catch (e) {
               const m = textoError(e);
+              // Pasó la hora (o cambió el día) mientras contaba: Rust pide elegir o confirmar.
               if (String(e).includes(ELEGIR_DIA)) setDuda(true);
+              else if (String(e).includes(NO_LABORABLE)) setNoLaborable(true);
               else setError(m);
               setOcupado(false);
             }
@@ -275,7 +300,7 @@ export function CerrarCaja(p: {
           </p>
           {p.esperasAbiertas > 0 && <Alert tono="aviso">Hay {plural(p.esperasAbiertas, "venta", "ventas")} en espera sin cobrar. Se quedan para mañana.</Alert>}
           <GavetaParaContar abierta={gavetaAbierta} onAbierta={() => setGavetaAbierta(true)} />
-          <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo contado" />
+          <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Efectivo en caja" />
           <CasillasZ valor={opciones} onCambio={setOpciones} />
           {error && <Alert tono="error">{error}</Alert>}
           <div className="fila-botones">

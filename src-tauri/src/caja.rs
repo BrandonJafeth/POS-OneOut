@@ -64,6 +64,8 @@ pub struct Turno {
     pub apertura_cuadra: Option<bool>,
     /// Lo que se dejó en la gaveta para la próxima caja (contado − esto = retiro de cierre).
     pub queda_en_gaveta: Option<i64>,
+    /// Abierto en un día no laborable (evento especial): cuenta para ese día.
+    pub no_laborable: bool,
 }
 
 impl Turno {
@@ -111,6 +113,7 @@ fn a_turno(f: &sqlx::sqlite::SqliteRow) -> Turno {
         diferencia_apertura: f.get("diferencia_apertura"),
         apertura_cuadra: f.get::<Option<i64>, _>("diferencia_apertura").map(|d| d == 0),
         queda_en_gaveta: f.get("queda_en_gaveta"),
+        no_laborable: f.get::<Option<i64>, _>("no_laborable") == Some(1),
     }
 }
 
@@ -163,7 +166,7 @@ pub fn puede_cerrar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
 }
 
 pub fn hora_local(iso: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string()).unwrap_or_default()
+    crate::util::local_de(iso).map(|d| d.format("%H:%M").to_string()).unwrap_or_default()
 }
 
 /// El turno donde este usuario puede vender ahora: abierto, de hoy y que pueda usar.
@@ -241,6 +244,10 @@ pub struct EstadoCaja {
     pub turno: Option<Turno>,
     /// Hay un turno abierto de un día anterior: hay que cerrarlo antes de vender.
     pub de_otro_dia: bool,
+    /// Día de negocio actual (hoy, con el reloj de Rust): la pantalla no decide con su propia hora.
+    pub hoy: String,
+    /// Próximo día laborable (para corregir el día de una caja).
+    pub siguiente: String,
     /// Sin turno abierto: qué pasaría al abrir ahora (avisar "cuenta para mañana" o preguntar).
     pub apertura: Option<Apertura>,
     /// Hay un turno de otro cajero abierto desde un día anterior y este usuario lo puede cerrar en su nombre.
@@ -273,7 +280,7 @@ pub async fn motivos_no_venta(pool: &SqlitePool) -> Vec<String> {
 
 pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCaja> {
     a.exigir("caja", "usar la caja")?;
-    let (t, comp, no_ventas, apertura) = {
+    let (t, comp, no_ventas, apertura, siguiente) = {
         let mut c = pool.acquire().await.map_err(e)?;
         let t = turno_abierto(&mut c, caja_id).await?;
         let comp = compartido(&mut c).await;
@@ -281,10 +288,13 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
             Some(t) => sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?,
             None => 0,
         };
-        let apertura = if t.is_none() { Some(apertura_para(&mut c, caja_id).await?) } else { None };
-        (t, comp, n, apertura)
+        let ap = apertura_para(&mut c, caja_id).await?;
+        let siguiente = ap.siguiente.clone();
+        (t.clone(), comp, n, t.is_none().then_some(ap), siguiente)
     };
     Ok(EstadoCaja {
+        hoy: dia_local(),
+        siguiente,
         apertura,
         de_otro_dia: t.as_ref().is_some_and(|t| t.dia < dia_local()),
         puede_usar: t.as_ref().is_some_and(|t| puede_operar(a, t, comp).is_ok()),
@@ -313,7 +323,7 @@ pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
     .fetch_one(&mut *c)
     .await
     .map_err(e)?;
-    let margen = (chrono::Utc::now() + chrono::Duration::minutes(10)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let margen = crate::util::iso((crate::util::ahora() + chrono::Duration::minutes(10)).with_timezone(&chrono::Utc));
     // Salida para el técnico: si el reloj estuvo ADELANTADO y ya se corrigió, lo registrado con fecha
     // futura bloquearía la caja hasta que llegue ese día. La clave «reloj_ignorar_hasta» acepta lo
     // registrado hasta esa fecha.
@@ -321,92 +331,144 @@ pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
     if let Some(u) = ultimo.filter(|u| *u > margen && *u > ignorar) {
         return Err(format!(
             "La fecha u hora de la computadora está atrasada: lo último registrado es del {}. Corrija la fecha y la hora de Windows antes de {para}. Si Windows ya tiene la fecha correcta, el técnico lo autoriza en Configuración técnica → Claves: reloj_ignorar_hasta = \"{u}\".",
-            chrono::DateTime::parse_from_rfc3339(&u).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u.clone())
+            crate::util::local_de(&u).map(|d| d.format("%d/%m/%Y %H:%M").to_string()).unwrap_or(u.clone())
         ));
     }
     Ok(())
 }
 
 /// Un cierre antes de esta hora es de la noche anterior (se cerró tarde, pasada la medianoche).
-const MADRUGADA: u32 = 5;
+const MADRUGADA: i64 = 5;
+
+/// Horario del negocio: minuto de la hora de cierre de cada día, de lunes a domingo. None = no laborable.
+pub type Horario = [Option<u32>; 7];
+
+/// Valores de la instalación (Chaguí): lunes a viernes 18:30, sábado 17:30, domingo cerrado.
+pub const HORARIO_INICIAL: Horario = [Some(1110), Some(1110), Some(1110), Some(1110), Some(1110), Some(1050), None];
+
+const DIAS: [&str; 7] = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+
+/// "lun 18:30 · … · dom no se trabaja", para la lista de preparación.
+pub fn horario_texto(h: &Horario) -> String {
+    let corto = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+    h.iter().zip(corto).map(|(m, d)| m.map_or(format!("{d} no se trabaja"), |m| format!("{d} {:02}:{:02}", m / 60, m % 60))).collect::<Vec<_>>().join(" · ")
+}
+
+/// "18:30" → 1110.
+pub fn minutos(hhmm: &str) -> Option<u32> {
+    let (h, m) = hhmm.split_once(':')?;
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60 && hhmm.len() == 5).then_some(h * 60 + m)
+}
+
+/// Config `caja_horario`: ["18:30", …, null] de lunes a domingo. Si falta o no sirve, el inicial.
+pub fn leer_horario(v: Option<&Value>) -> Horario {
+    let Some(l) = v.and_then(|v| v.as_array()).filter(|l| l.len() == 7) else { return HORARIO_INICIAL };
+    let mut h = [None; 7];
+    for (i, x) in l.iter().enumerate() {
+        h[i] = x.as_str().and_then(minutos);
+    }
+    h
+}
+
+fn dia_semana(d: chrono::NaiveDate) -> usize {
+    chrono::Datelike::weekday(&d).num_days_from_monday() as usize
+}
+
+/// El próximo día laborable después de `dia` ("mañana" en toda la lógica de fechas).
+pub fn siguiente_laborable(dia: chrono::NaiveDate, h: &Horario) -> chrono::NaiveDate {
+    (1..=7).map(|k| dia + chrono::Duration::days(k)).find(|d| h[dia_semana(*d)].is_some()).unwrap_or(dia + chrono::Duration::days(1))
+}
 
 /// Cómo se decide la fecha de negocio del turno que se abre (igual en turno compartido y por cajero):
 /// - Primera: la caja no se ha cerrado hoy → hoy.
-/// - Tarde: ya se cerró hoy y es la hora de cierre del negocio o más tarde (cliente que llega después
-///   del cierre) → mañana. Ese turno sigue abierto y se usa al otro día sin cerrarlo.
-/// - Duda: ya se cerró hoy, antes de la hora de cierre (cambio de turno, o cierre temprano) → quien
-///   abre elige hoy o mañana.
+/// - Tarde: ya se cerró hoy y es la hora de cierre del día o más tarde (cliente que llega después del
+///   cierre) → el próximo día laborable. Ese turno sigue abierto y se usa ese día sin cerrarlo.
+/// - Duda: ya se cerró hoy, antes de la hora de cierre (cambio de turno o cierre temprano) → quien abre
+///   elige hoy o el próximo día laborable.
+/// - NoLaborable: hoy no se trabaja (evento especial) → se confirma y cuenta para hoy.
 #[derive(Serialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum CasoApertura {
     Primera,
     Tarde,
     Duda,
-}
-
-pub fn caso_apertura(cerrada_hoy: bool, hora: u32, hora_cierre: u32) -> CasoApertura {
-    match (cerrada_hoy, hora >= hora_cierre) {
-        (false, _) => CasoApertura::Primera,
-        (true, true) => CasoApertura::Tarde,
-        (true, false) => CasoApertura::Duda,
-    }
+    NoLaborable,
 }
 
 /// Lo que pasaría al abrir la caja ahora (para avisar o preguntar en la pantalla).
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Apertura {
     pub caso: CasoApertura,
     pub hoy: String,
-    pub manana: String,
+    /// Próximo día laborable.
+    pub siguiente: String,
+    /// "domingo", para el aviso de día no laborable.
+    pub nombre_hoy: String,
 }
 
-/// Hora de cierre del negocio para hoy: la del día de la semana si tiene, si no la general.
-async fn hora_cierre(c: &mut SqliteConnection) -> u32 {
-    use chrono::Datelike;
-    let general = config::entero_con(c, "caja_hora_cierre", 18).await;
-    let dia = chrono::Local::now().weekday().num_days_from_monday() as usize;
-    let propia = config::valor_con(c, "caja_hora_cierre_dia").await.and_then(|v| v.get(dia).and_then(|h| h.as_i64()));
-    propia.unwrap_or(general).clamp(0, 23) as u32
-}
-
-/// Único lugar donde se calcula la fecha de negocio de un turno nuevo.
-async fn apertura_para(c: &mut SqliteConnection, caja_id: &str) -> Res<Apertura> {
+/// Decisión pura (sin base ni reloj): hora actual, último cierre de la caja (ISO) y horario.
+pub fn apertura_en(ahora: chrono::DateTime<chrono::FixedOffset>, ultimo_cierre: Option<&str>, h: &Horario) -> Apertura {
     use chrono::Timelike;
-    let ahora = chrono::Local::now();
-    let hoy = dia_local();
-    // Se mira cuándo se cerró (cualquier turno de esta caja), no de qué día era: un cierre de
-    // madrugada cuenta como de la noche anterior.
-    let cerrada_hoy: bool = sqlx::query_scalar(&format!(
-        "SELECT EXISTS(SELECT 1 FROM caja_turnos WHERE caja_id = ? AND estado = 'cerrado' AND eliminado_en IS NULL
-           AND date(cerrado_en, 'localtime', '-{MADRUGADA} hours') = ?)"
-    ))
-    .bind(caja_id)
-    .bind(&hoy)
-    .fetch_one(&mut *c)
-    .await
-    .map_err(e)?;
-    let caso = caso_apertura(cerrada_hoy, ahora.hour(), hora_cierre(c).await);
-    Ok(Apertura { caso, hoy, manana: (ahora + chrono::Duration::days(1)).format("%Y-%m-%d").to_string() })
+    let hoy = ahora.date_naive();
+    // Un cierre de madrugada cuenta como de la noche anterior.
+    let cerrada_hoy = ultimo_cierre
+        .and_then(|c| chrono::DateTime::parse_from_rfc3339(c).ok())
+        .is_some_and(|c| (c.with_timezone(&ahora.timezone()) - chrono::Duration::hours(MADRUGADA)).date_naive() == hoy);
+    let minuto = ahora.hour() * 60 + ahora.minute();
+    let caso = match (h[dia_semana(hoy)], cerrada_hoy) {
+        (None, _) => CasoApertura::NoLaborable,
+        (Some(_), false) => CasoApertura::Primera,
+        (Some(cierre), true) if minuto >= cierre => CasoApertura::Tarde,
+        (Some(_), true) => CasoApertura::Duda,
+    };
+    Apertura { caso, hoy: hoy.to_string(), siguiente: siguiente_laborable(hoy, h).to_string(), nombre_hoy: DIAS[dia_semana(hoy)].into() }
 }
 
-/// Fecha y caso que quedan en el turno. En la duda, sin elección no se abre.
-pub fn decidir_dia(ap: &Apertura, eleccion: Option<&str>) -> Res<(String, &'static str)> {
+async fn horario(c: &mut SqliteConnection) -> Horario {
+    leer_horario(config::valor_con(c, "caja_horario").await.as_ref())
+}
+
+/// Único lugar donde se calcula la fecha de negocio de un turno nuevo (con el reloj de util).
+async fn apertura_para(c: &mut SqliteConnection, caja_id: &str) -> Res<Apertura> {
+    let ultimo: Option<String> = sqlx::query_scalar("SELECT MAX(cerrado_en) FROM caja_turnos WHERE caja_id = ? AND estado = 'cerrado' AND eliminado_en IS NULL")
+        .bind(caja_id)
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
+    let h = horario(c).await;
+    Ok(apertura_en(crate::util::ahora(), ultimo.as_deref(), &h))
+}
+
+/// Fecha, caso y si es día no laborable, tal como quedan en el turno. En la duda sin elección, o en
+/// un día no laborable sin confirmar, no se abre.
+pub fn decidir_dia(ap: &Apertura, eleccion: Option<&str>) -> Res<(String, &'static str, bool)> {
     match (ap.caso, eleccion) {
-        (CasoApertura::Primera, _) => Ok((ap.hoy.clone(), "primera")),
-        (CasoApertura::Tarde, _) => Ok((ap.manana.clone(), "tarde")),
-        (CasoApertura::Duda, Some("hoy")) => Ok((ap.hoy.clone(), "hoy")),
-        (CasoApertura::Duda, Some("manana")) => Ok((ap.manana.clone(), "manana")),
-        (CasoApertura::Duda, _) => Err(format!("{ELEGIR_DIA}: la caja ya se cerró hoy. ¿Esta caja es para hoy o para mañana?")),
+        (CasoApertura::Primera, _) => Ok((ap.hoy.clone(), "primera", false)),
+        (CasoApertura::Tarde, _) => Ok((ap.siguiente.clone(), "tarde", false)),
+        (CasoApertura::Duda, Some("hoy")) => Ok((ap.hoy.clone(), "hoy", false)),
+        (CasoApertura::Duda, Some("manana")) => Ok((ap.siguiente.clone(), "manana", false)),
+        (CasoApertura::Duda, _) => Err(format!("{ELEGIR_DIA}: la caja ya se cerró hoy. ¿Esta caja es para hoy o para el {}?", nombre_dia(&ap.siguiente))),
+        (CasoApertura::NoLaborable, Some("hoy")) => Ok((ap.hoy.clone(), "primera", true)),
+        (CasoApertura::NoLaborable, _) => Err(format!("{NO_LABORABLE}: hoy es {}, día no laborable. ¿Abrir igual?", ap.nombre_hoy)),
     }
 }
 
-/// Error de abrir sin elegir el día cuando hace falta: la pantalla pregunta "¿hoy o mañana?".
-pub const ELEGIR_DIA: &str = "ELEGIR_DIA";
+/// "lunes 23".
+pub fn nombre_dia(dia: &str) -> String {
+    chrono::NaiveDate::parse_from_str(dia, "%Y-%m-%d").map(|d| format!("{} {}", DIAS[dia_semana(d)], chrono::Datelike::day(&d))).unwrap_or_else(|_| dia.into())
+}
 
+/// Error de abrir sin elegir el día cuando hace falta: la pantalla pregunta "¿hoy o el lunes 23?".
+pub const ELEGIR_DIA: &str = "ELEGIR_DIA";
+/// Error de abrir en un día no laborable sin confirmar: la pantalla pregunta "¿Abrir igual?".
+pub const NO_LABORABLE: &str = "NO_LABORABLE";
+
+/// Pruebas: abre eligiendo "hoy" si hace falta (duda o día no laborable), así no dependen de la hora.
 #[cfg(test)]
 pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo) -> Res<Turno> {
-    abrir_eligiendo(pool, a, caja_id, conteo, None).await
+    abrir_eligiendo(pool, a, caja_id, conteo, Some("hoy")).await
 }
 
 /// Abre la caja. `eleccion` ("hoy" | "manana") solo cuenta cuando la fecha está en duda (ver `CasoApertura`).
@@ -430,7 +492,7 @@ pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo
     }
     reloj_atrasado(&mut tx, "abrir la caja").await?;
     let ap = apertura_para(&mut tx, caja_id).await?;
-    let (dia, caso) = decidir_dia(&ap, eleccion)?;
+    let (dia, caso, no_laborable) = decidir_dia(&ap, eleccion)?;
     // Se compara con lo que quedó en la gaveta al cerrar la caja anterior (si se anotó).
     let esperada: Option<i64> = sqlx::query_scalar(
         "SELECT queda_en_gaveta FROM caja_turnos WHERE caja_id = ? AND estado = 'cerrado' AND eliminado_en IS NULL ORDER BY cerrado_en DESC LIMIT 1",
@@ -443,8 +505,8 @@ pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo
     let diferencia = esperada.map(|q| fondo - q);
     sqlx::query(
         "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en,
-           apertura_caso, apertura_esperada, diferencia_apertura)
-         SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
+           apertura_caso, apertura_esperada, diferencia_apertura, no_laborable)
+         SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ?, ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
     )
     .bind(&id)
     .bind(&a.id)
@@ -457,6 +519,7 @@ pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo
     .bind(caso)
     .bind(esperada)
     .bind(diferencia)
+    .bind(no_laborable as i64)
     .bind(caja_id)
     .execute(&mut *tx)
     .await
@@ -467,7 +530,7 @@ pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo
         "caja.abrir",
         "caja_turno",
         Some(&id),
-        &json!({"fondo": fondo, "conteo": detalle, "dia": dia, "caso": caso, "esperada": esperada, "diferenciaApertura": diferencia}),
+        &json!({"fondo": fondo, "conteo": detalle, "dia": dia, "caso": caso, "noLaborable": no_laborable, "esperada": esperada, "diferenciaApertura": diferencia}),
     )
     .await?;
     if diferencia.is_some_and(|d| d != 0) {
@@ -501,7 +564,7 @@ pub async fn queda_en_gaveta(pool: &SqlitePool, a: &Actor, turno_id: &str, monto
 }
 
 /// El dueño corrige la fecha de negocio de un turno (quedó mal al abrir), con PIN y motivo: mientras
-/// esté abierto o el mismo día en que se cerró. Solo a hoy o mañana.
+/// esté abierto o el mismo día en que se cerró. Solo a hoy o al próximo día laborable.
 pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &str, pin: &str, motivo: &str) -> Res<()> {
     let motivo = texto(motivo, 300, "motivo", true)?;
     if motivo.chars().count() < 5 {
@@ -510,14 +573,14 @@ pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &st
     let dueno = usuarios::confirmar_dueno(pool, a, pin, "corregir el día de la caja").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
-    let hoy = dia_local();
-    let manana = (chrono::Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let ap = apertura_en(crate::util::ahora(), None, &horario(&mut tx).await);
+    let (hoy, siguiente) = (ap.hoy, ap.siguiente);
     let cerrado_hoy = t.cerrado_en.as_deref().is_some_and(|c| dia_de(c) == hoy);
     if t.estado != "abierto" && !cerrado_hoy {
         return Err("Solo se corrige el día de una caja abierta o cerrada hoy.".into());
     }
-    if dia != hoy && dia != manana {
-        return Err("El día de la caja solo puede ser hoy o mañana.".into());
+    if dia != hoy && dia != siguiente {
+        return Err(format!("El día de la caja solo puede ser hoy o el {}.", nombre_dia(&siguiente)));
     }
     if dia == t.dia {
         return Err("La caja ya es de ese día.".into());
@@ -530,7 +593,7 @@ pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &st
 
 /// Día local ("AAAA-MM-DD") de un instante ISO.
 fn dia_de(iso: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default()
+    crate::util::local_de(iso).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
 // ─────────── Movimientos de efectivo ───────────
@@ -769,8 +832,9 @@ pub struct VentaTardia {
     pub total: i64,
 }
 
-/// Una venta es "después del cierre" si su fecha real es anterior al día de negocio de su turno.
-pub const VENTA_TARDIA: &str = "date(v.fecha, 'localtime') < t.dia";
+/// Una venta es "después del cierre" si su día real es anterior al día de negocio de su turno.
+/// `ventas.dia` es el día local real del cobro (lo pone Rust con su reloj, no SQLite).
+pub const VENTA_TARDIA: &str = "v.dia < t.dia";
 
 /// Una diferencia de caja pide nota y revisión si NO es cero y llega al umbral
 /// (con umbral 0, cualquier diferencia; un cierre que cuadra nunca).

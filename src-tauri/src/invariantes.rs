@@ -452,7 +452,7 @@ async fn dueno_bloqueado_lo_recupera_el_tecnico() {
     use crate::usuarios::{cambiar_pin, iniciar_sesion, Login};
     let (bd, tec, dueno, _) = base_con_usuarios().await;
     let p = &bd.pool;
-    let ahora = chrono::Utc::now().timestamp_millis();
+    let ahora = crate::util::ahora().timestamp_millis();
     for i in 0..8 {
         let _ = iniciar_sesion(p, &dueno.id, "000000", ahora + i).await.unwrap();
     }

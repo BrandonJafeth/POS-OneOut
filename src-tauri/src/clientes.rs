@@ -378,7 +378,8 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
 pub async fn sugerencias_retencion(pool: &SqlitePool, a: &Actor) -> Res<Vec<Basico>> {
     a.exigir("clientes", "ver clientes")?;
     let meses = config::entero(pool, "retencion_clientes_meses", 36).await.clamp(1, 240) as u32;
-    let limite = chrono::Utc::now().checked_sub_months(chrono::Months::new(meses)).unwrap_or_else(chrono::Utc::now);
+    let ahora = crate::util::ahora().with_timezone(&chrono::Utc);
+    let limite = ahora.checked_sub_months(chrono::Months::new(meses)).unwrap_or(ahora);
     let filas = sqlx::query(
         "SELECT id, nombre, telefono, cedula FROM (
            SELECT c.id, c.nombre, c.telefono, c.cedula, max(

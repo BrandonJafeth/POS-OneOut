@@ -1,6 +1,6 @@
 // Utilidades compartidas: errores, ULID, fechas y normalización de texto.
 
-use chrono::{Local, Utc};
+use chrono::{DateTime, FixedOffset, Local, Utc};
 
 pub type Res<T> = Result<T, String>;
 
@@ -43,14 +43,53 @@ pub fn ulid() -> String {
     s
 }
 
+// ─── Reloj ───
+// Toda decisión por fecha u hora (día de negocio, hora de cierre, caja olvidada, reloj atrasado,
+// vencimientos) lee la hora de aquí. En la app es la hora local de la computadora; en las pruebas,
+// la que fija cada prueba (por hilo: cada #[tokio::test] corre en el suyo). Fijo, avanza 1 ms por
+// lectura para que dos registros nunca tengan la misma hora.
+thread_local! {
+    static RELOJ: std::cell::Cell<Option<(DateTime<FixedOffset>, i64)>> = const { std::cell::Cell::new(None) };
+}
+
+pub fn ahora() -> DateTime<FixedOffset> {
+    if let Some((f, n)) = RELOJ.with(|r| r.get()) {
+        RELOJ.with(|r| r.set(Some((f, n + 1))));
+        return f + chrono::Duration::milliseconds(n);
+    }
+    // Solo en pruebas: correr toda la suite como si la computadora tuviera otra hora.
+    #[cfg(test)]
+    if let Some(f) = std::env::var("POS_RELOJ_PRUEBA").ok().and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
+        RELOJ.with(|r| r.set(Some((f, 1))));
+        return f;
+    }
+    Local::now().fixed_offset()
+}
+
+/// Pruebas: fija la hora (con su huso, p. ej. "2026-11-21T22:00:00-06:00") para el resto de la prueba.
+#[cfg(test)]
+pub fn fijar_reloj(iso: &str) {
+    let f = DateTime::parse_from_rfc3339(iso).expect("hora de prueba");
+    RELOJ.with(|r| r.set(Some((f, 0))));
+}
+
 /// "2026-10-29T18:00:00.123Z" (mismo formato que usa el frontend).
 pub fn ahora_iso() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    iso(ahora().with_timezone(&Utc))
+}
+
+pub fn iso(d: DateTime<Utc>) -> String {
+    d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
 /// Día local "AAAA-MM-DD" (la jornada de la caja, en la hora de la computadora).
 pub fn dia_local() -> String {
-    Local::now().format("%Y-%m-%d").to_string()
+    ahora().format("%Y-%m-%d").to_string()
+}
+
+/// Un instante guardado (ISO UTC) en la hora local del reloj.
+pub fn local_de(iso: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(iso).ok().map(|d| d.with_timezone(&ahora().timezone()))
 }
 
 /// Caracteres invisibles que no tienen nada que hacer en un texto: control (C0/C1, incluido ESC),

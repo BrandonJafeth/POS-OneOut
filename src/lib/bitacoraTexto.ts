@@ -53,7 +53,8 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
     case "caja.abrir": {
       // Después de un cierre del mismo día: cómo se decidió para qué día cuenta.
       const tras = { tarde: " después del cierre: cuenta para el día siguiente", hoy: " después de un cierre: eligió que cuenta para hoy", manana: " después de un cierre: eligió que cuenta para mañana" }[String(d.caso)] ?? "";
-      return f("dinero", `Abrió la caja${tras} con un fondo de ${plata(d.fondo)}${txt(d.dia) ? ` (día ${txt(d.dia)})` : ""}.`, !!tras);
+      const noLab = d.noLaborable === true ? " en un día no laborable" : "";
+      return f("dinero", `Abrió la caja${tras}${noLab} con un fondo de ${plata(d.fondo)}${txt(d.dia) ? ` (día ${txt(d.dia)})` : ""}.`, !!tras || !!noLab);
     }
     case "caja.diferencia_apertura":
       return f("dinero", `Al abrir, el fondo contado (${plata(d.contado)}) no coincide con lo que quedó en el cierre anterior (${plata(d.esperada)}): diferencia de ${plata(d.diferencia)}.`, true);
@@ -65,7 +66,7 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
       const dif = num(d.diferencia) ?? 0;
       const cuadre = dif === 0 ? "Cuadró." : dif < 0 ? `Faltaron ${monto(-dif)}.` : `Sobraron ${monto(dif)}.`;
       const otro = txt(d.enNombreDe) ? ` en nombre de ${txt(d.enNombreDe)}` : "";
-      return f("dinero", `Cerró la caja${otro}: ${num(d.ventas) ?? 0} ventas por ${plata(d.total)}. Debía haber en caja ${plata(d.esperado)}, se contó ${plata(d.contado)}. ${cuadre}`, dif !== 0 || !!otro);
+      return f("dinero", `Cerró la caja${otro}: ${num(d.ventas) ?? 0} ventas por ${plata(d.total)}. Efectivo que debe haber ${plata(d.esperado)}, efectivo en caja ${plata(d.contado)}. ${cuadre}`, dif !== 0 || !!otro);
     }
     case "caja.diferencia":
       return f("dinero", `El cierre quedó con una diferencia de ${plata(d.diferencia)}, más de lo permitido: hay que revisarlo.`, true);
@@ -249,8 +250,7 @@ const CONFIG: Record<string, string> = {
   departamentos_color: "colores de los departamentos",
   color_fondo: "color de fondo",
   caja_turno_compartido: "turno compartido",
-  caja_hora_cierre: "hora de cierre del negocio",
-  caja_hora_cierre_dia: "hora de cierre por día",
+  caja_horario: "días laborables y hora de cierre",
   caja_umbral_diferencia: "diferencia permitida al cerrar",
   caja_salida_max_sin_pin: "salida máxima sin PIN",
   permitir_vender_sin_existencia: "vender sin existencia",

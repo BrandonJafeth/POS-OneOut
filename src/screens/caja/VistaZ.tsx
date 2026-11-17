@@ -45,12 +45,12 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
           <dd>{monto(r.totalVentas)}</dd>
         </div>
         <div>
-          <dt>Efectivo en caja</dt>
+          <dt>Efectivo que debe haber</dt>
           <dd>{monto(r.efectivoEsperado)}</dd>
         </div>
         {t.contado != null && (
           <div>
-            <dt>Contado</dt>
+            <dt>Efectivo en caja</dt>
             <dd>{monto(t.contado)}</dd>
           </div>
         )}
@@ -95,7 +95,7 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
               <Fila k="Salidas" v={"−" + monto(r.salidas)} />
               <Fila k="Vueltos" v={"−" + monto(r.vueltos)} />
               <tr className="total">
-                <td>Efectivo en caja</td>
+                <td>Efectivo que debe haber</td>
                 <td className="num">{monto(r.efectivoEsperado)}</td>
               </tr>
               {t.diferenciaApertura !== null && t.diferenciaApertura !== 0 && <Fila k="Diferencia de apertura" v={signo(t.diferenciaApertura)} />}

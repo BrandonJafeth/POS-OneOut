@@ -40,8 +40,9 @@ function otroDia(v: VentaResumen): string {
 export default function VentasHoy() {
   const { caja, irA, puede } = useSesion();
   // Por defecto, el día de negocio de la caja abierta: la caja abierta después del cierre ya es de mañana.
-  const diaCaja = caja?.turno?.dia ?? diaLocal();
-  const maxDia = diaCaja > diaLocal() ? diaCaja : diaLocal();
+  const hoy = caja?.hoy ?? diaLocal();
+  const diaCaja = caja?.turno?.dia ?? hoy;
+  const maxDia = diaCaja > hoy ? diaCaja : hoy;
   const [dia, setDia] = useState(diaCaja);
   const [lista, setLista] = useState<VentaResumen[]>([]);
   const [abierta, setAbierta] = useState<string | null>(null);

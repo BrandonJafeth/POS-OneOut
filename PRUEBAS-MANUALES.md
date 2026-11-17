@@ -64,7 +64,7 @@ Cada prueba dice lo que debe pasar. Si algo no coincide, anote el número de la 
 
 ## S. Fecha de negocio de los turnos (cliente tardío, cambio de turno, medianoche)
 
-Hágalo dos veces: con **Turno compartido** marcado (como Chaguí) y desmarcado (turno por cajero), en Administración → Caja y cierre. Ponga la **Hora de cierre del negocio** una hora antes de la hora actual para los pasos 1 y 2, y una hora después para el paso 3.
+Hágalo dos veces: con **Turno compartido** marcado (como Chaguí) y desmarcado (turno por cajero), en Administración → Caja y cierre. En **Días de trabajo y hora de cierre**, ponga la hora de cierre de hoy una hora antes de la hora actual para los pasos 1 y 2, y una hora después para el paso 3. Al terminar, deje lun–vie 18:30, sáb 17:30 y domingo sin trabajar.
 
 1. **Cliente tardío (queda para mañana).**
    - Abra la caja, haga una venta, cierre con su conteo. Al final pregunta "¿Cuánto queda en la gaveta para la próxima caja?": escriba un monto y **Guardar** (sin eso no se puede pulsar Listo).
@@ -73,13 +73,17 @@ Hágalo dos veces: con **Turno compartido** marcado (como Chaguí) y desmarcado 
    - Deje la caja abierta, cambie la fecha de Windows al día siguiente y venda. → Vende normal, sin "Quedó abierta la caja…".
    - Ciérrela. → El Z trae la sección **Ventas después del cierre** con la hora real, el tiquete, el usuario y el monto. En Turnos, el día aparece marcado.
 2. **Bitácora.** Abra una caja después de un cierre y no venda nada. → En Administración → Bitácora aparece la apertura con usuario y hora.
-3. **Cambio de turno (antes de la hora de cierre).** Cierre la caja y ábrala otra vez. → Pregunta "¿Esta caja es para hoy o para mañana?" con dos botones y ninguno marcado; **Abrir** no se habilita sin elegir. Elija **Hoy**. → En Turnos, el día muestra los dos turnos y un solo total del día (sin sumar fondos); el segundo dice "Abierta después de un cierre: elegida para hoy".
+3. **Cambio de turno (antes de la hora de cierre).** Cierre la caja y ábrala otra vez. → Pregunta "¿Esta caja es para hoy o para el martes 17?" (el próximo día de trabajo) con dos botones y ninguno marcado; **Abrir** no se habilita sin elegir. Elija **Hoy**. → En Turnos, el día muestra los dos turnos y un solo total del día (sin sumar fondos); el segundo dice "Abierta después de un cierre: elegida para hoy".
 4. **Diferencia de apertura.** Cierre dejando ¢20.000 en la gaveta y al abrir cuente ¢19.000. → El cajero ve "Diferencia". Como Ana: en Turnos sale "Diferencia de apertura −¢1.000" y en el Z del turno nuevo también.
 5. **Corregir el día (dueño).** Como Ana, abra un turno abierto (o cerrado hoy) en Turnos → **Corregir día**, elija el otro día, motivo y PIN. → Cambia el día y queda en la bitácora. Un turno cerrado otro día no deja.
 6. **Venta cerca de medianoche.** Con la caja de hoy abierta, cambie la hora de Windows a las 11:55 p. m., venda, y luego a las 12:05 a. m. → La venta de las 11:55 es del día; a las 12:05 pide cerrar la caja de ayer ("caja olvidada"). Ciérrela a las 12:30 a. m. y vuelva a abrir. → Cuenta para hoy (un cierre de madrugada es de la noche anterior).
 7. **Caja olvidada de un día anterior.** Deje una caja abierta y adelante la fecha dos días. → Pide cerrarla antes de vender.
 8. **Turno por cajero: cerrar el turno de otro.** Con turno por cajero, Luis abre y deja la caja abierta; adelante la fecha un día y entre como otro cajero. → Ofrece **Cerrar el turno de Luis** con conteo ciego; queda anotado quién lo cerró. Luego abre el suyo.
 9. **Un solo turno abierto.** Con una caja abierta, otro usuario intenta abrir. → No deja (en los dos modos).
+10. **Caja tardía del sábado.** Ponga la fecha de Windows en un sábado. Abra, venda, cierre después de las 17:30 y vuelva a abrir. → Avisa "esta caja cuenta para el lunes 23". Venda algo. Cambie la fecha al domingo y luego al lunes. → En ninguno pide cerrar la caja ("caja olvidada"); el lunes se sigue vendiendo en ella. En Ventas del día, la venta del sábado sale en el lunes con "Venta del sábado 21, cuenta para el lunes 23".
+11. **Sábado antes de las 17:30.** Un sábado, cierre a las 3 p. m. y vuelva a abrir. → Pregunta "¿Esta caja es para hoy o para el lunes 23?".
+12. **Apertura en domingo.** Ponga la fecha en un domingo y abra la caja. → "Hoy es domingo, día no laborable. ¿Abrir igual?". Con **Sí, abrir**, la caja cuenta para el domingo (Caja dice "Hoy · día no laborable") y queda en la bitácora.
+13. **Caja olvidada del viernes.** Deje abierta la caja de un viernes y ponga la fecha en lunes. → Pide cerrarla antes de vender.
 
 ## G. Respaldo y restauración
 

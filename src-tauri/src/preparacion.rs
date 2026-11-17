@@ -43,6 +43,11 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
     v.push(Punto { titulo: "Gaveta", listo: gaveta > 0, detalle: "Marcada en la impresora de tiquetes. Administración → Impresoras.".into() });
     let productos = n(bd, "SELECT COUNT(*) FROM productos WHERE eliminado_en IS NULL").await?;
     v.push(Punto { titulo: "Productos", listo: productos > 0, detalle: format!("{productos} en el catálogo. Productos → Importar productos.") });
+    // Días de trabajo y hora de cierre (fecha de negocio de la caja). Chaguí: lun–vie 18:30, sáb 17:30, dom no.
+    let mut c = bd.pool.acquire().await.map_err(e)?;
+    let horario = crate::caja::leer_horario(crate::config::valor_con(&mut c, "caja_horario").await.as_ref());
+    drop(c);
+    v.push(Punto { titulo: "Días de trabajo y hora de cierre", listo: horario.iter().any(|h| h.is_some()), detalle: format!("{}. Administración → Caja y cierre.", crate::caja::horario_texto(&horario)) });
     let siguiente = n(bd, "SELECT MIN(consecutivo_siguiente) FROM cajas WHERE eliminado_en IS NULL").await?;
     v.push(Punto { titulo: "Número del próximo tiquete", listo: true, detalle: format!("{siguiente}. Si venía de otro sistema, que siga al último tiquete entregado. Administración → Caja y cierre.") });
     let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
@@ -84,6 +89,9 @@ mod tests {
         let punto = |t: &str| lista.iter().find(|p| p.titulo == t).unwrap().listo;
         assert!(!punto("Usuario del dueño") && !punto("Impresoras") && !punto("Respaldo automático") && !punto("Productos"));
         assert!(punto("Sin datos de prueba") && punto("Sin usuarios de prueba"));
+        // Horario de Chaguí ya cargado en la base limpia.
+        let h = lista.iter().find(|p| p.titulo == "Días de trabajo y hora de cierre").unwrap();
+        assert!(h.listo && h.detalle.contains("lun 18:30") && h.detalle.contains("sáb 17:30") && h.detalle.contains("dom no se trabaja"), "{}", h.detalle);
         crate::usuarios::crear(&bd.pool, &tec, "Usuario Prueba", Rol::Cajero, "1593").await.unwrap();
         let lista = revisar(&bd, &tec).await.unwrap();
         assert!(!lista.iter().find(|p| p.titulo == "Sin usuarios de prueba").unwrap().listo);

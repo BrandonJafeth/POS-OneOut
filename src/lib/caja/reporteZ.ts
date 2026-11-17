@@ -11,7 +11,7 @@ import { agruparPorForma } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { diaLocal } from "../texto";
-import { columnas, cortar, fechaHora, lr, monto, montoConSigno, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
+import { columnas, cortar, fechaHora, lr, lrLargo, monto, montoConSigno, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
 /** Una línea del reporte, independiente de la impresora. */
 export interface LineaDoc {
@@ -204,8 +204,9 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   l.push({ t: lr("Entradas", "+" + monto(r.entradas), cols) });
   l.push({ t: lr("Salidas", "-" + monto(r.salidas), cols) });
   l.push({ t: lr("Vueltos", "-" + monto(r.vueltos), cols) });
-  l.push({ t: lr("Efectivo en caja", monto(r.efectivoEsperado), cols), b: true });
-  if (t.contado != null) l.push({ t: lr("Efectivo contado", monto(t.contado), cols), b: true });
+  // Si no cabe en una línea (montos grandes en 58 mm), el monto baja a la siguiente: no se corta.
+  l.push(...lrLargo("Efectivo que debe haber", monto(r.efectivoEsperado), cols).map((t) => ({ t, b: true })));
+  if (t.contado != null) l.push({ t: lr("Efectivo en caja", monto(t.contado), cols), b: true });
   if (t.diferencia != null) l.push({ t: lr(t.diferencia === 0 ? "Diferencia: cuadra" : t.diferencia > 0 ? "Sobrante" : "Faltante", signo(t.diferencia), cols), b: true });
   if (t.notaCierre) wrap("Nota: " + t.notaCierre, cols).forEach((x) => l.push({ t: x }));
   if (t.diferenciaApertura) l.push({ t: lr("Diferencia de apertura", signo(t.diferenciaApertura), cols) });
@@ -395,7 +396,7 @@ export function lineasCorte(n: Negocio, k: Corte, cols: number): LineaDoc[] {
   if (!r.porForma.length) l.push({ t: "  Sin ventas" });
   l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
   titulo(l, "EFECTIVO", cols);
-  l.push({ t: lr("Efectivo en caja", monto(r.efectivoEsperado), cols) });
+  l.push(...lrLargo("Efectivo que debe haber", monto(r.efectivoEsperado), cols).map((t) => ({ t })));
   if (k.retiro) l.push({ t: lr("Retiro", "-" + monto(k.retiro), cols) });
   l.push({ t: lr("Queda en la caja", monto(k.efectivoDespues), cols), b: true });
   if (k.retiro) l.push({ t: sep2(cols) }, { t: "" }, { t: "Retira:" }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });

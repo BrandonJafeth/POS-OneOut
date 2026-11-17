@@ -36,7 +36,7 @@ function detalle(): Detalle {
       usuarioAperturaId: "U1", usuarioApertura: "Juarez", usuarioCierreId: "U2", usuarioCierre: "Isaias", fondo: 10000, conteoInicial: null,
       conteoFinal: { "10000": 1, "2000": 1, "1000": 1, "500": 1, "100": 1, "50": 1, "25": 1, "10": 1, "5": 1 }, esperado: 13695, contado: 13690, diferencia: -5,
       notaCierre: null, revisadaPor: null, reimpresiones: 0,
-      aperturaCaso: "primera", aperturaEsperada: null, diferenciaApertura: null, aperturaCuadra: null, quedaEnGaveta: null,
+      aperturaCaso: "primera", aperturaEsperada: null, diferenciaApertura: null, aperturaCuadra: null, quedaEnGaveta: null, noLaborable: false,
     },
     resumen: {
       fondo: 10000, ventas: 3, totalVentas: 10595, descuentos: 105, anuladas: 1, totalAnuladas: 700,
@@ -146,9 +146,9 @@ describe("reporte Z", () => {
     expect(l).toContain(lr("Co Efectivo (2)", "¢1.195"));
     expect(l).toContain(lr("De SINPE Móvil (2)", "¢9.400"));
     expect(l).toContain(lr("TOTAL VENTAS (3)", "¢10.595"));
-    // Efectivo en caja = fondo + contado + entradas − salidas − vueltos.
-    expect(l).toContain(lr("Efectivo en caja", "¢13.695"));
-    expect(l).toContain(lr("Efectivo contado", "¢13.690"));
+    // Efectivo que debe haber = fondo + contado + entradas − salidas − vueltos.
+    expect(l).toContain(lr("Efectivo que debe haber", "¢13.695"));
+    expect(l).toContain(lr("Efectivo en caja", "¢13.690"));
     expect(l).toContain(lr("Faltante", "-¢5"));
     expect(l).toContain(lr("Descuentos", "¢105"));
     expect(l).toContain(lr("Anulaciones (1)", "¢700"));
@@ -327,5 +327,18 @@ describe("cliente después del cierre", () => {
     ]);
     // El cajero no ve totales de un turno abierto: el día tampoco.
     expect(turnosPorDia([turno("2026-11-16", 5000), turno("2026-11-16", null)])[0].total).toBeNull();
+  });
+});
+
+describe("efectivo que debe haber", () => {
+  it("con montos grandes en 58 mm el monto baja a la línea siguiente, sin cortar el texto", async () => {
+    const d = detalle();
+    d.resumen.efectivoEsperado = 1_234_565;
+    d.resumen.entradas += 1_234_565 - 13_695; // que siga cuadrando
+    const l = lineasZ(await obtenerNegocio(), d, 32, { ...SIN, completo: false }).map((x) => x.t);
+    const i = l.findIndex((x) => x.startsWith("Efectivo que debe haber"));
+    expect(i).toBeGreaterThan(-1);
+    expect(l[i + 1].trim()).toBe("¢1.234.565");
+    expect(l.every((x) => x.length <= 32)).toBe(true);
   });
 });

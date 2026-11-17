@@ -17,7 +17,7 @@ App de escritorio para Windows, local y sin internet, para cobrar en negocios ch
 - **Tauri v2** (Rust) + **React + TypeScript** (Vite) + **SQLite cifrado con SQLCipher**.
 - Rust decide todo lo sensible: dinero, permisos, PIN, caja, impresión, inventario. La pantalla (React) solo muestra y pide.
 - Todo el SQL está en `src/db` y en Rust. Las escrituras de catálogo pasan por `bd_lote` (operaciones con nombre) en una sola transacción. La lectura con SQL desde la pantalla (`bd_leer`) solo alcanza catálogo y configuración pública (lista blanca); todo lo demás va por comandos tipados.
-- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0019**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
+- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0020**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
 - Configuración: tabla `config` (clave → JSON). Rust valida cada clave en `src-tauri/src/config.rs` (`validar`); los valores por defecto de la pantalla están en `CONFIG_DEFECTO` (`src/db/config.ts`). Una clave nueva no necesita migración: si no existe, se usa el valor por defecto.
 - Pruebas: `npm test` (vitest con node:sqlite) y `cargo test` (Rust, ~128 pruebas). Correr desde `C:\Freelance\POS` (con `c:\` en minúscula vitest falla).
 
@@ -72,9 +72,10 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 - Abrir caja con fondo inicial. Valida si la hora del equipo no cuadra (reloj atrasado).
 - **Turno compartido** (`caja_turno_compartido`, activo por defecto): varios usuarios venden en el mismo turno y cada acción guarda quién la hizo. "Cambiar usuario" cierra la sesión sin cerrar el turno. Sin la opción, cada cajero abre y cierra su turno.
 - **Regla de fechas** (igual en turno compartido y por cajero; `caja.rs`: `apertura_para` + `decidir_dia`, único lugar):
-  1. Cada turno tiene su **fecha de negocio** (`caja_turnos.dia`), decidida una vez al abrir: primera caja del día → hoy; ya se cerró hoy y es la hora de cierre del negocio o más tarde (`caja_hora_cierre`, 18:00 por defecto; opcional por día `caja_hora_cierre_dia`) → mañana, con aviso; ya se cerró hoy y es antes de esa hora → quien abre elige "Hoy" o "Mañana" (sin opción marcada). Un cierre antes de las 5 a. m. cuenta como de la noche anterior.
+  1. Cada turno tiene su **fecha de negocio** (`caja_turnos.dia`), decidida una vez al abrir. **"Mañana" = el próximo día laborable** (`caja_horario`: hora de cierre "HH:MM" de cada día, null = no se trabaja; Chaguí: lun–vie 18:30, sáb 17:30, dom no). Primera caja del día → hoy; ya se cerró hoy y es la hora de cierre del día o más tarde → el próximo día laborable, con aviso ("cuenta para el lunes 23"); ya se cerró hoy y es antes → quien abre elige "Hoy" o "Lunes 23" (sin opción marcada); día no laborable → "Hoy es domingo, día no laborable. ¿Abrir igual?" y cuenta para ese día (`no_laborable`, bitácora). Un cierre antes de las 5 a. m. cuenta como de la noche anterior.
   2. El Z va por turno. La venta guarda su fecha y hora real (`ventas.fecha`, `ventas.dia`); su día de negocio sale siempre del turno (`ventas::DIA_NEGOCIO`): Ventas del día, lista de tiquetes del turno y estadísticas usan ese. Las ventas cobradas antes del día de su turno salen en "Ventas después del cierre" (Z e historial).
-  3. "Caja olvidada" solo si la fecha de negocio es anterior a hoy. Un solo turno abierto por caja (en los dos modos). El dueño corrige la fecha con PIN y motivo (abierto o cerrado hoy). Cambiar la hora de cierre no mueve turnos existentes.
+  3. "Caja olvidada" solo si la fecha de negocio es anterior a hoy (la tardía del sábado, con fecha del lunes, no lo es el domingo ni el lunes). Un solo turno abierto por caja (en los dos modos). El dueño corrige la fecha (hoy o el próximo laborable) con PIN y motivo, abierto o cerrado hoy. Cambiar días u horas no mueve turnos existentes.
+  5. **Reloj único**: toda decisión por fecha u hora lee `util::ahora()` (hora local de la PC; en pruebas, la que fija cada prueba con `util::fijar_reloj`, o toda la suite con `POS_RELOJ_PRUEBA`). La pantalla usa `EstadoCaja.hoy`/`siguiente` de Rust; su propia hora solo se muestra. Ninguna prueba depende de la hora a la que se corre.
   4. Conteo de apertura ciego y bloqueado; se compara con lo que quedó en la gaveta al cerrar la caja anterior ("¿Cuánto queda…?" después del conteo de cierre; contado − queda = retiro de cierre). Turno por cajero: otro cajero puede cerrar, con su conteo ciego, un turno que quedó abierto desde un día anterior.
 - Entradas y salidas de efectivo (movimientos grandes se validan), "da vuelto" con la caja abierta, y gastos olvidados de turnos anteriores.
 - **Corte** (dueño): ve lo acumulado y puede hacer un retiro con PIN.
@@ -140,7 +141,7 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 | 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ Incluido en el contrato (los de inventario ya están) |
 | 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ Incluido en el contrato |
 
-**Versión actual: 0.9.0 (versión de prueba en el negocio)**, migraciones 1 a 19. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
+**Versión actual: 0.9.0 (versión de prueba en el negocio)**, migraciones 1 a 20. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
 
 ### Cambios desde el 2026-11-08
 - Migración 12: control de inventario de productos nuevos según su código de barras.
@@ -148,6 +149,7 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 - Migraciones 14 y 15: descuento fijo por producto y su registro por línea vendida (separado en el Z).
 - Migraciones 16 y 17: SINPE Móvil anota el nombre de quien paga (columna `venta_pagos.pagador`).
 - Migración 18: apertura de gaveta al cerrar la caja (causa `cierre`).
+- Migración 20: días laborables (`caja_horario`, con los valores de Chaguí) y `caja_turnos.no_laborable`. Reloj inyectable en Rust (`util::ahora`).
 - Migración 19: apertura de cada turno (`apertura_caso`, `apertura_esperada`, `diferencia_apertura`) y `queda_en_gaveta`; conteo de apertura bloqueado (trigger).
 - Regla de fechas de los turnos (sección 4.3): hora de cierre del negocio (`caja_hora_cierre`, `caja_hora_cierre_dia`), pregunta hoy/mañana, corrección del dueño, "Ventas después del cierre", historial por día, ventas agrupadas por el día de su turno. Orden de campos en SINPE (referencia, banco, nombre).
 - Pantalla de bitácora para el dueño; impresoras solo las configura el técnico.

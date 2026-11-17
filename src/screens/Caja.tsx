@@ -144,7 +144,7 @@ export default function Caja() {
               <h2>La caja la tiene abierta {turno.usuarioApertura}</h2>
               <p className="muted">
                 {caja.cierraPorOtro
-                  ? `Quedó abierta desde el ${turno.dia === diaLocal() ? "día anterior" : turno.dia}. Ciérrela con su conteo en nombre de ${turno.usuarioApertura} (queda anotado) y después abra la suya.`
+                  ? `Quedó abierta desde el ${turno.dia === caja.hoy ? "día anterior" : turno.dia}. Ciérrela con su conteo en nombre de ${turno.usuarioApertura} (queda anotado) y después abra la suya.`
                   : `Desde las ${hora(turno.abiertoEn)}. En este negocio cada persona usa su propio turno: ${turno.usuarioApertura} la cierra con su conteo (o el dueño) y después usted abre el suyo.`}
               </p>
             </div>
@@ -167,7 +167,7 @@ export default function Caja() {
             <div className="caja-cabeza">
               <div>
                 <h2>
-                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : turno.dia > diaLocal() ? `Cuenta para mañana, ${diaConNombre(turno.dia)}` : "Hoy"}</Badge>
+                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : turno.dia > caja.hoy ? `Cuenta para el ${diaConNombre(turno.dia)}` : turno.noLaborable ? "Hoy · día no laborable" : "Hoy"}</Badge>
                 </h2>
                 <p className="muted">
                   Abrió {turno.usuarioApertura} a las {hora(turno.abiertoEn)} con {monto(turno.fondo)}
@@ -240,7 +240,7 @@ export default function Caja() {
                     <dd>{monto(r.salidas)}</dd>
                   </div>
                   <div className="destacado">
-                    <dt>Efectivo en caja</dt>
+                    <dt>Efectivo que debe haber</dt>
                     <dd>{monto(r.efectivoEsperado)}</dd>
                   </div>
                 </dl>
@@ -377,7 +377,7 @@ export default function Caja() {
           </table>
           <dl className="caja-cifras">
             <div>
-              <dt>Efectivo en caja</dt>
+              <dt>Efectivo que debe haber</dt>
               <dd>{monto(corte.k.resumen.efectivoEsperado)}</dd>
             </div>
             {corte.k.retiro > 0 && (
@@ -438,7 +438,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
         </Alert>
       ) : (
         <Alert tono={res.requiereRevision ? "aviso" : "info"} titulo={dif > 0 ? "Sobrante" : "Faltante"}>
-          Debía haber en caja {monto(res.esperado ?? 0)}, se contó {monto(res.contado)}: {signo(dif)}.{res.requiereRevision && " Queda para revisión del dueño."}
+          Efectivo que debe haber {monto(res.esperado ?? 0)}, efectivo en caja {monto(res.contado)}: {signo(dif)}.{res.requiereRevision && " Queda para revisión del dueño."}
         </Alert>
       )}
       {!res.bitacoraOk && <Alert tono="error">La bitácora no pasó la verificación. Avise al técnico.</Alert>}
@@ -772,7 +772,7 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                 .join(" · ")}
             </p>
           )}
-          {admin && corregir && <CorregirDia turno={t} onCerrar={() => setCorregir(false)} onListo={async () => (setCorregir(false), await cargar(), await p.onCambio())} />}
+          {admin && corregir && <CorregirDia turno={t} hoy={p.estado.hoy} siguiente={p.estado.siguiente} onCerrar={() => setCorregir(false)} onListo={async () => (setCorregir(false), await cargar(), await p.onCambio())} />}
           {reabrir ? (
             <form
               onSubmit={(e) => {
@@ -823,10 +823,10 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                 {t.estado === "cerrado" && d.veTotales && <BotonVerPapel d={d} opciones={opciones} denominaciones={p.estado.denominaciones} />}
                 {t.estado === "cerrado" && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
                 <span className="separador" />
-                {admin && (t.estado === "abierto" || (t.cerradoEn !== null && diaLocal(new Date(t.cerradoEn)) === diaLocal())) && (
+                {admin && (t.estado === "abierto" || (t.cerradoEn !== null && diaLocal(new Date(t.cerradoEn)) === p.estado.hoy)) && (
                   <Button onClick={() => setCorregir(true)}>Corregir día</Button>
                 )}
-                {admin && t.estado === "cerrado" && t.dia >= diaLocal() && (
+                {admin && t.estado === "cerrado" && t.dia >= p.estado.hoy && (
                   <Button icono={RotateCcw} onClick={() => setReabrir(true)}>
                     Reabrir
                   </Button>
@@ -841,9 +841,9 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
 }
 
 /** El dueño corrige el día de negocio de un turno (abierto o cerrado hoy): hoy o mañana, con PIN y motivo. */
-function CorregirDia(p: { turno: Detalle["turno"]; onCerrar(): void; onListo(): Promise<void> }) {
-  const hoy = diaLocal();
-  const manana = diaLocal(new Date(Date.now() + 86_400_000));
+function CorregirDia(p: { turno: Detalle["turno"]; hoy: string; siguiente: string; onCerrar(): void; onListo(): Promise<void> }) {
+  // Hoy y el próximo día laborable los da Rust (con su reloj y el horario del negocio).
+  const { hoy, siguiente: manana } = p;
   const [dia, setDia] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
   const [pin, setPin] = useState("");
@@ -875,7 +875,7 @@ function CorregirDia(p: { turno: Detalle["turno"]; onCerrar(): void; onListo(): 
           <div className="fila-botones">
             {[
               [hoy, "Hoy"],
-              [manana, `Mañana, ${diaConNombre(manana)}`],
+              [manana, `El ${diaConNombre(manana)}`],
             ].map(([d, texto]) => (
               <Button key={d} tamano="lg" variante={dia === d ? "primario" : "normal"} aria-pressed={dia === d} disabled={d === p.turno.dia} onClick={() => setDia(d)}>
                 {texto}
