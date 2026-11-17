@@ -2,7 +2,7 @@
 // cuadre de totales, ancho del papel y lista blanca ESC/POS. Que los números salgan bien de la
 // base (reparto exacto, efectivo esperado, permisos) lo prueba Rust: desglose.rs, caja.rs, ventas.rs.
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Corte, Detalle } from "../src/db/caja";
+import { turnosPorDia, type Corte, type Detalle } from "../src/db/caja";
 import { obtenerNegocio } from "../src/db/negocio";
 import { pdfCierre } from "../src/lib/caja/pdfZ";
 import { aEscPos, comprobanteMovimiento, descuadres, documentosCierre, lineasZ, NOTA_USUARIOS, opcionesPorDefecto, reporteCorte, reporteZ } from "../src/lib/caja/reporteZ";
@@ -36,6 +36,7 @@ function detalle(): Detalle {
       usuarioAperturaId: "U1", usuarioApertura: "Juarez", usuarioCierreId: "U2", usuarioCierre: "Isaias", fondo: 10000, conteoInicial: null,
       conteoFinal: { "10000": 1, "2000": 1, "1000": 1, "500": 1, "100": 1, "50": 1, "25": 1, "10": 1, "5": 1 }, esperado: 13695, contado: 13690, diferencia: -5,
       notaCierre: null, revisadaPor: null, reimpresiones: 0,
+      aperturaCaso: "primera", aperturaEsperada: null, diferenciaApertura: null, aperturaCuadra: null, quedaEnGaveta: null,
     },
     resumen: {
       fondo: 10000, ventas: 3, totalVentas: 10595, descuentos: 105, anuladas: 1, totalAnuladas: 700,
@@ -145,8 +146,8 @@ describe("reporte Z", () => {
     expect(l).toContain(lr("Co Efectivo (2)", "¢1.195"));
     expect(l).toContain(lr("De SINPE Móvil (2)", "¢9.400"));
     expect(l).toContain(lr("TOTAL VENTAS (3)", "¢10.595"));
-    // Efectivo esperado = fondo + contado + entradas − salidas − vueltos.
-    expect(l).toContain(lr("Efectivo esperado", "¢13.695"));
+    // Efectivo en caja = fondo + contado + entradas − salidas − vueltos.
+    expect(l).toContain(lr("Efectivo en caja", "¢13.695"));
     expect(l).toContain(lr("Efectivo contado", "¢13.690"));
     expect(l).toContain(lr("Faltante", "-¢5"));
     expect(l).toContain(lr("Descuentos", "¢105"));
@@ -295,5 +296,36 @@ describe("corte y comprobantes", () => {
     const doc = comprobanteMovimiento(await obtenerNegocio(), { ...m, autorizadoPor: "Isaias" }, DEFAULT_SETTINGS);
     expect(texto(doc.bytes)).toContain("SALIDA DE EFECTIVO");
     validarEscPos(doc.bytes);
+  });
+});
+
+describe("cliente después del cierre", () => {
+  it("el Z trae las ventas después del cierre, la diferencia de apertura y lo que quedó en la gaveta", async () => {
+    const d = detalle();
+    d.turno.dia = "2026-11-04";
+    d.turno.diferenciaApertura = -1000;
+    d.turno.quedaEnGaveta = 10000;
+    d.resumen.despuesDelCierre = [{ fecha: "2026-11-04T02:30:00Z", numero: "67990", usuario: "Juarez", total: 1500 }];
+    const t = lineasZ(await obtenerNegocio(), d, 32, { ...SIN, completo: false }).map((l) => l.t).join("\n");
+    expect(t).toContain("VENTAS DESPUÉS DEL CIERRE");
+    expect(t).toContain("67990");
+    expect(t).toMatch(/Diferencia de apertura\s+-¢1\.000/);
+    expect(t).toMatch(/Retiro de cierre\s+¢3\.690/);
+  });
+
+  it("sin ventas después del cierre no va la sección", async () => {
+    const t = lineasZ(await obtenerNegocio(), detalle(), 32, { ...SIN, completo: true }).map((l) => l.t).join("\n");
+    expect(t).not.toContain("DESPUÉS DEL CIERRE");
+  });
+
+  it("el total del día suma las ventas de sus turnos, nunca los fondos", () => {
+    const turno = (dia: string, total: number | null, tardias = 0) => ({ dia, total, fondo: 20000, ventasDespuesDelCierre: tardias });
+    const g = turnosPorDia([turno("2026-11-16", 5000), turno("2026-11-16", 7000, 2), turno("2026-11-17", 1000, 1)]);
+    expect(g.map((x) => [x.dia, x.total, x.tardias, x.turnos.length])).toEqual([
+      ["2026-11-17", 1000, 1, 1],
+      ["2026-11-16", 12000, 2, 2],
+    ]);
+    // El cajero no ve totales de un turno abierto: el día tampoco.
+    expect(turnosPorDia([turno("2026-11-16", 5000), turno("2026-11-16", null)])[0].total).toBeNull();
   });
 });

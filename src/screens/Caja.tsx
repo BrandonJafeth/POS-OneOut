@@ -15,7 +15,11 @@ import {
   listarTurnos,
   marcarRevisada,
   notaCierre,
+  quedaEnGaveta,
   reabrirCaja,
+  corregirDiaCaja,
+  diaConNombre,
+  turnosPorDia,
   type AperturaGaveta,
   type Corte,
   type Detalle,
@@ -26,19 +30,20 @@ import {
 import { ajustesPara } from "../db/impresoras";
 import { obtenerNegocio } from "../db/negocio";
 import { listarUsuarios } from "../db/usuarios";
-import { listarEsperas, listarVentasDia, obtenerVenta } from "../db/ventas";
+import { listarEsperas, listarVentasTurno, obtenerVenta } from "../db/ventas";
 import { imprimirCorte, imprimirMovimiento, imprimirZ } from "../lib/caja/imprimir";
 import { pdfCierre } from "../lib/caja/pdfZ";
 import { documentosCierre, horaCierre, opcionesPorDefecto } from "../lib/caja/reporteZ";
 import { interpret } from "../lib/preview";
 import { descargar } from "../lib/exportarCliente";
 import { DIAS_SIN_RESPALDO, estadoAutomatico, ultimoRespaldo } from "../lib/respaldoApi";
-import { diaLocal, diasEntre, plural } from "../lib/texto";
+import { diaLocal, leerMontoEntero, plural } from "../lib/texto";
 import { columnas, DEFAULT_SETTINGS, fechaHora, monto, montoConSigno as signo, type Doc } from "../lib/tickets";
 import type { Usuario, Venta } from "../tipos";
 import Alert from "../ui/Alert";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
+import CampoMonto from "../ui/CampoMonto";
 import EmptyState from "../ui/EmptyState";
 import FilaClic from "../ui/FilaClic";
 import Field from "../ui/Field";
@@ -138,17 +143,31 @@ export default function Caja() {
             <div>
               <h2>La caja la tiene abierta {turno.usuarioApertura}</h2>
               <p className="muted">
-                Desde las {hora(turno.abiertoEn)}. En este negocio cada persona usa su propio turno: {turno.usuarioApertura} la cierra con su conteo
-                (o el dueño) y después usted abre el suyo.
+                {caja.cierraPorOtro
+                  ? `Quedó abierta desde el ${turno.dia === diaLocal() ? "día anterior" : turno.dia}. Ciérrela con su conteo en nombre de ${turno.usuarioApertura} (queda anotado) y después abra la suya.`
+                  : `Desde las ${hora(turno.abiertoEn)}. En este negocio cada persona usa su propio turno: ${turno.usuarioApertura} la cierra con su conteo (o el dueño) y después usted abre el suyo.`}
               </p>
             </div>
+            {caja.cierraPorOtro && (
+              <Button
+                variante="primario"
+                tamano="lg"
+                icono={Lock}
+                onClick={async () => {
+                  setEsperas((await listarEsperas().catch(() => [])).filter((e) => e.estado.lineas.length).length);
+                  setDialogo("cerrar");
+                }}
+              >
+                Cerrar el turno de {turno.usuarioApertura.split(" ")[0]}
+              </Button>
+            )}
           </div>
         ) : (
           <>
             <div className="caja-cabeza">
               <div>
                 <h2>
-                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : turno.dia > diaLocal() ? `Cuenta para el ${turno.dia}` : "Hoy"}</Badge>
+                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : turno.dia > diaLocal() ? `Cuenta para mañana, ${diaConNombre(turno.dia)}` : "Hoy"}</Badge>
                 </h2>
                 <p className="muted">
                   Abrió {turno.usuarioApertura} a las {hora(turno.abiertoEn)} con {monto(turno.fondo)}
@@ -221,7 +240,7 @@ export default function Caja() {
                     <dd>{monto(r.salidas)}</dd>
                   </div>
                   <div className="destacado">
-                    <dt>Efectivo esperado</dt>
+                    <dt>Efectivo en caja</dt>
                     <dd>{monto(r.efectivoEsperado)}</dd>
                   </div>
                 </dl>
@@ -358,7 +377,7 @@ export default function Caja() {
           </table>
           <dl className="caja-cifras">
             <div>
-              <dt>Efectivo esperado</dt>
+              <dt>Efectivo en caja</dt>
               <dd>{monto(corte.k.resumen.efectivoEsperado)}</dd>
             </div>
             {corte.k.retiro > 0 && (
@@ -404,6 +423,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
   const [d, setD] = useState<Detalle | null>(null);
   const [nota, setNota] = useState("");
   const [notaGuardada, setNotaGuardada] = useState(false);
+  const [queda, setQueda] = useState("");
   const [error, setError] = useState(p.cierre.errorImpresion ?? "");
   const toast = useToast();
   const cargar = () => datosReporteZ(res.turnoId).then((x) => setD(x.detalle), (e) => setError(textoError(e)));
@@ -418,10 +438,39 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
         </Alert>
       ) : (
         <Alert tono={res.requiereRevision ? "aviso" : "info"} titulo={dif > 0 ? "Sobrante" : "Faltante"}>
-          Esperado {monto(res.esperado ?? 0)}, contado {monto(res.contado)}: {signo(dif)}.{res.requiereRevision && " Queda para revisión del dueño."}
+          Debía haber en caja {monto(res.esperado ?? 0)}, se contó {monto(res.contado)}: {signo(dif)}.{res.requiereRevision && " Queda para revisión del dueño."}
         </Alert>
       )}
       {!res.bitacoraOk && <Alert tono="error">La bitácora no pasó la verificación. Avise al técnico.</Alert>}
+      {d && d.turno.quedaEnGaveta === null && (usuario.id === d.turno.usuarioCierreId || puede("caja.admin")) && (
+        <form
+          className="row abajo"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const m = leerMontoEntero(queda);
+            if (m === null) return;
+            try {
+              await quedaEnGaveta(res.turnoId, m);
+              toast.ok(`Queda ${monto(m)} para la próxima caja; retiro de cierre ${monto(res.contado - m)}.`);
+              await cargar();
+            } catch (err) {
+              setError(textoError(err));
+            }
+          }}
+        >
+          <Field label="¿Cuánto queda en la gaveta para la próxima caja?" ayuda={`Lo demás de lo contado (${monto(res.contado)}) es el retiro de cierre.`} flex={1} className="sin-margen">
+            <CampoMonto valor={queda} onCambio={setQueda} />
+          </Field>
+          <Button type="submit" variante="primario" disabled={leerMontoEntero(queda) === null}>
+            Guardar
+          </Button>
+        </form>
+      )}
+      {d && d.turno.quedaEnGaveta !== null && (
+        <p className="muted">
+          Queda en la gaveta {monto(d.turno.quedaEnGaveta)} · retiro de cierre {monto((d.turno.contado ?? 0) - d.turno.quedaEnGaveta)}
+        </p>
+      )}
       {res.requiereRevision && !notaGuardada && d && !d.turno.notaCierre && (usuario.rol === "cajero" || puede("caja.admin")) && (
         <form
           className="row abajo"
@@ -452,7 +501,8 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
         {d && <BotonVerPapel d={d} opciones={p.cierre.o} denominaciones={p.estado.denominaciones} />}
         {d && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
         <span className="separador" />
-        <Button variante="primario" onClick={p.onCerrar}>
+        {/* Primero se anota lo que queda en la gaveta: la próxima caja se compara con eso. */}
+        <Button variante="primario" onClick={p.onCerrar} disabled={!d || d.turno.quedaEnGaveta === null}>
           Listo
         </Button>
       </div>
@@ -539,10 +589,9 @@ function BotonVerPapel(p: { d: Detalle; opciones: OpcionesCierre; denominaciones
   );
 }
 
-/** Tiquetes del turno, en orden. Cada venta guarda el día en que se cobró: un turno que pasó la medianoche tiene ventas de varios días. */
+/** Tiquetes del turno, en orden. Se buscan por turno: uno abierto después del cierre tiene ventas de antes de su día. */
 async function ventasDelTurno(t: Detalle["turno"]): Promise<Venta[]> {
-  const dias = diasEntre(t.dia, diaLocal(t.cerradoEn ? new Date(t.cerradoEn) : new Date()));
-  const lista = (await Promise.all(dias.map(listarVentasDia))).flat();
+  const lista = await listarVentasTurno(t.id);
   const ventas = await Promise.all(lista.map((v) => obtenerVenta(v.id)));
   return ventas.filter((v): v is Venta => v?.turnoId === t.id).sort((a, b) => a.consecutivo - b.consecutivo);
 }
@@ -574,6 +623,13 @@ function BotonPdf(p: { d: Detalle; denominaciones: number[] }) {
     </Button>
   );
 }
+
+/** Turnos abiertos después de un cierre del mismo día: cómo se decidió su día. */
+const TRAS_CIERRE: Record<string, string> = {
+  tarde: "Abierta después del cierre: cuenta para el día siguiente",
+  hoy: "Abierta después de un cierre: elegida para hoy",
+  manana: "Abierta después de un cierre: elegida para mañana",
+};
 
 function Historial(p: { admin: boolean; onVer(id: string): void }) {
   const [desde, setDesde] = useState(haceDias(7));
@@ -613,26 +669,42 @@ function Historial(p: { admin: boolean; onVer(id: string): void }) {
               <th />
             </tr>
           </thead>
-          <tbody>
-            {filas.map((t) => (
-              <FilaClic key={t.id} etiqueta={`Abrir turno del ${t.dia}`} onAbrir={() => p.onVer(t.id)}>
-                <td>{t.dia}</td>
-                <td>
-                  {t.usuarioApertura} · {hora(t.abiertoEn)}
-                </td>
-                <td>{t.cerradoEn ? `${t.usuarioCierre ?? ""} · ${horaCierre(t)}` : <Badge tono="ok">Abierta</Badge>}</td>
-                <td className="num">{t.ventas ?? <span className="muted" title="Se ve al cerrar">—</span>}</td>
-                <td className="num">{t.total == null ? <span className="muted" title="Se ve al cerrar">—</span> : monto(t.total)}</td>
-                <td className="num">{t.diferencia == null ? "" : signo(t.diferencia)}</td>
-                <td>
+          {turnosPorDia(filas).map((g) => (
+            <tbody key={g.dia}>
+              <tr className="fila-grupo">
+                <th colSpan={7} scope="rowgroup">
                   <div className="row">
-                    {t.pendienteRevision && <Badge tono="aviso">Revisar</Badge>}
-                    {t.alertaNoVentas && <Badge tono="aviso">{plural(t.noVentas, "apertura", "aperturas")} sin venta</Badge>}
+                    <span>
+                      {g.dia} · {plural(g.turnos.length, "turno", "turnos")}
+                      {g.total !== null && ` · total del día ${monto(g.total)}`}
+                    </span>
+                    {g.tardias > 0 && <Badge tono="aviso">{plural(g.tardias, "venta", "ventas")} después del cierre</Badge>}
                   </div>
-                </td>
-              </FilaClic>
-            ))}
-          </tbody>
+                </th>
+              </tr>
+              {g.turnos.map((t) => (
+                <FilaClic key={t.id} etiqueta={`Abrir turno del ${t.dia}`} onAbrir={() => p.onVer(t.id)}>
+                  <td>{t.dia}</td>
+                  <td>
+                    {t.usuarioApertura} · {hora(t.abiertoEn)}
+                  </td>
+                  <td>{t.cerradoEn ? `${t.usuarioCierre ?? ""} · ${horaCierre(t)}` : <Badge tono="ok">Abierta</Badge>}</td>
+                  <td className="num">{t.ventas ?? <span className="muted" title="Se ve al cerrar">—</span>}</td>
+                  <td className="num">{t.total == null ? <span className="muted" title="Se ve al cerrar">—</span> : monto(t.total)}</td>
+                  <td className="num">{t.diferencia == null ? "" : signo(t.diferencia)}</td>
+                  <td>
+                    <div className="row">
+                      {t.pendienteRevision && <Badge tono="aviso">Revisar</Badge>}
+                      {t.alertaNoVentas && <Badge tono="aviso">{plural(t.noVentas, "apertura", "aperturas")} sin venta</Badge>}
+                      {TRAS_CIERRE[t.aperturaCaso ?? ""] && <Badge tono="info">{TRAS_CIERRE[t.aperturaCaso ?? ""]}</Badge>}
+                      {t.aperturaCuadra === false && <Badge tono="aviso">Diferencia de apertura{t.diferenciaApertura !== null ? ` ${signo(t.diferenciaApertura)}` : ""}</Badge>}
+                      {t.ventasDespuesDelCierre > 0 && <Badge tono="aviso">{plural(t.ventasDespuesDelCierre, "venta", "ventas")} después del cierre</Badge>}
+                    </div>
+                  </td>
+                </FilaClic>
+              ))}
+            </tbody>
+          ))}
         </table>
       )}
     </section>
@@ -644,6 +716,7 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
   const [d, setD] = useState<Detalle | null>(null);
   const [error, setError] = useState("");
   const [reabrir, setReabrir] = useState(false);
+  const [corregir, setCorregir] = useState(false);
   const [pin, setPin] = useState("");
   const [motivo, setMotivo] = useState("");
   const [opciones, setOpciones] = useState<OpcionesCierre>(opcionesPorDefecto(p.estado));
@@ -687,6 +760,19 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
               </Button>
             </Alert>
           )}
+          {(TRAS_CIERRE[t.aperturaCaso ?? ""] || t.aperturaCuadra !== null || t.quedaEnGaveta !== null) && (
+            <p className="muted">
+              {[
+                TRAS_CIERRE[t.aperturaCaso ?? ""],
+                t.aperturaCuadra === true && "Apertura: cuadra con el cierre anterior",
+                t.aperturaCuadra === false && `Diferencia de apertura${t.diferenciaApertura !== null ? ` ${signo(t.diferenciaApertura)} (quedó ${monto(t.aperturaEsperada ?? 0)}, se contó ${monto(t.fondo)})` : ""}`,
+                t.quedaEnGaveta !== null && `Quedó en la gaveta ${monto(t.quedaEnGaveta)} · retiro de cierre ${monto((t.contado ?? 0) - t.quedaEnGaveta)}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+          {admin && corregir && <CorregirDia turno={t} onCerrar={() => setCorregir(false)} onListo={async () => (setCorregir(false), await cargar(), await p.onCambio())} />}
           {reabrir ? (
             <form
               onSubmit={(e) => {
@@ -737,6 +823,9 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                 {t.estado === "cerrado" && d.veTotales && <BotonVerPapel d={d} opciones={opciones} denominaciones={p.estado.denominaciones} />}
                 {t.estado === "cerrado" && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
                 <span className="separador" />
+                {admin && (t.estado === "abierto" || (t.cerradoEn !== null && diaLocal(new Date(t.cerradoEn)) === diaLocal())) && (
+                  <Button onClick={() => setCorregir(true)}>Corregir día</Button>
+                )}
                 {admin && t.estado === "cerrado" && t.dia >= diaLocal() && (
                   <Button icono={RotateCcw} onClick={() => setReabrir(true)}>
                     Reabrir
@@ -747,6 +836,68 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
           )}
         </>
       )}
+    </Modal>
+  );
+}
+
+/** El dueño corrige el día de negocio de un turno (abierto o cerrado hoy): hoy o mañana, con PIN y motivo. */
+function CorregirDia(p: { turno: Detalle["turno"]; onCerrar(): void; onListo(): Promise<void> }) {
+  const hoy = diaLocal();
+  const manana = diaLocal(new Date(Date.now() + 86_400_000));
+  const [dia, setDia] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const envio = useEnvio();
+  const toast = useToast();
+  return (
+    <Modal titulo="Corregir el día de la caja" onCerrar={p.onCerrar} ancho={560}>
+      <p className="muted">Hoy cuenta para el {p.turno.dia}. Cambiarlo mueve todas sus ventas a ese día y queda en la bitácora.</p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!dia) return;
+          setError("");
+          void envio.enviar(async () => {
+            try {
+              await corregirDiaCaja(p.turno.id, dia, pin, motivo.trim());
+              toast.ok(`La caja ahora cuenta para el ${diaConNombre(dia)}.`);
+              await p.onListo();
+            } catch (err) {
+              setPin("");
+              setError(textoError(err));
+            }
+          });
+        }}
+      >
+        <fieldset className="eleccion-dia">
+          <legend>¿Para qué día cuenta esta caja?</legend>
+          <div className="fila-botones">
+            {[
+              [hoy, "Hoy"],
+              [manana, `Mañana, ${diaConNombre(manana)}`],
+            ].map(([d, texto]) => (
+              <Button key={d} tamano="lg" variante={dia === d ? "primario" : "normal"} aria-pressed={dia === d} disabled={d === p.turno.dia} onClick={() => setDia(d)}>
+                {texto}
+              </Button>
+            ))}
+          </div>
+        </fieldset>
+        <Field label="Motivo">
+          <input value={motivo} maxLength={300} onChange={(e) => setMotivo(e.target.value)} />
+        </Field>
+        <Field label="Su PIN de dueño">
+          <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+        </Field>
+        {error && <Alert tono="error">{error}</Alert>}
+        <div className="fila-botones">
+          <Button onClick={p.onCerrar}>Cancelar</Button>
+          <span className="separador" />
+          <Button type="submit" variante="primario" disabled={!dia || !pin || motivo.trim().length < 5 || envio.ocupado}>
+            Corregir día
+          </Button>
+        </div>
+      </form>
     </Modal>
   );
 }

@@ -78,10 +78,18 @@ export interface VentaResumen {
   /** Descripciones de las líneas, separadas por " · ". */
   productos: string;
   articulos: number;
+  /** Día de negocio (el del turno, lo decide Rust). `fecha` es la fecha y hora real del cobro. */
+  diaNegocio: string;
 }
 
+/** Ventas del día de negocio (el de su turno). */
 export function listarVentasDia(dia: string): Promise<VentaResumen[]> {
   return invocar<VentaResumen[]>("venta_listar_dia", { dia });
+}
+
+/** Tiquetes de un turno, aunque se hayan cobrado en días distintos. */
+export function listarVentasTurno(turnoId: string): Promise<VentaResumen[]> {
+  return invocar<VentaResumen[]>("venta_listar_turno", { turnoId });
 }
 
 export interface Correccion {

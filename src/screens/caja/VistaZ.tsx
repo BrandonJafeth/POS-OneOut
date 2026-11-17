@@ -45,7 +45,7 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
           <dd>{monto(r.totalVentas)}</dd>
         </div>
         <div>
-          <dt>Efectivo esperado</dt>
+          <dt>Efectivo en caja</dt>
           <dd>{monto(r.efectivoEsperado)}</dd>
         </div>
         {t.contado != null && (
@@ -95,9 +95,12 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
               <Fila k="Salidas" v={"−" + monto(r.salidas)} />
               <Fila k="Vueltos" v={"−" + monto(r.vueltos)} />
               <tr className="total">
-                <td>Esperado</td>
+                <td>Efectivo en caja</td>
                 <td className="num">{monto(r.efectivoEsperado)}</td>
               </tr>
+              {t.diferenciaApertura !== null && t.diferenciaApertura !== 0 && <Fila k="Diferencia de apertura" v={signo(t.diferenciaApertura)} />}
+              {t.quedaEnGaveta !== null && <Fila k="Queda para la próxima caja" v={monto(t.quedaEnGaveta)} />}
+              {t.quedaEnGaveta !== null && t.contado !== null && <Fila k="Retiro de cierre" v={monto(t.contado - t.quedaEnGaveta)} />}
             </tbody>
           </table>
         </section>
@@ -193,6 +196,24 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
 
       <h3>Tarjeta, SINPE y transferencias</h3>
       <PagosElectronicos pagos={r.pagosElectronicos ?? []} />
+
+      {(r.despuesDelCierre ?? []).length > 0 && (
+        <>
+          <h3>Ventas después del cierre</h3>
+          <ul className="caja-movs">
+            {r.despuesDelCierre!.map((v) => (
+              <li key={v.numero}>
+                <span>{fechaHora(new Date(v.fecha)).slice(0, 16)}</span>
+                <span>
+                  Tiquete {v.numero}
+                  <span className="muted"> · {v.usuario}</span>
+                </span>
+                <span className="num">{monto(v.total)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {r.movimientos.length > 0 && (
         <>

@@ -642,23 +642,40 @@ pub struct VentaResumen {
     /// Descripciones de las líneas ("Tijera · Cuaderno"), para buscar "la venta de la tijera".
     pub productos: String,
     pub articulos: i64,
+    /// Día de negocio (el del turno). La fecha y hora real es `fecha`.
+    pub dia_negocio: String,
 }
 
-/// Ventas del día, de todos los cajeros (una por una; las sumas del turno abierto son de Caja).
+/// Día de negocio de una venta: el de su turno (`v` = ventas, `t` = su caja_turnos con LEFT JOIN).
+/// No se copia en la venta: `ventas.dia` es el día real en que se cobró. Ventas de antes de los
+/// turnos, su día real.
+pub const DIA_NEGOCIO: &str = "COALESCE(t.dia, v.dia)";
+
+/// Ventas del día de negocio, de todos los cajeros (una por una; las sumas del turno abierto son de Caja).
 pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) -> Res<Vec<VentaResumen>> {
+    listar_donde(pool, a, &format!("v.caja_id = ?1 AND {DIA_NEGOCIO} = ?2"), caja_id, dia).await
+}
+
+/// Tiquetes de un turno, sin importar el día en que se cobraron.
+pub async fn listar_turno(pool: &SqlitePool, a: &Actor, turno_id: &str) -> Res<Vec<VentaResumen>> {
+    listar_donde(pool, a, "v.turno_id = ?1 AND ?2 = ?2", turno_id, "").await
+}
+
+async fn listar_donde(pool: &SqlitePool, a: &Actor, donde: &str, p1: &str, p2: &str) -> Res<Vec<VentaResumen>> {
     puede_consultar(a)?;
-    let filas = sqlx::query(
+    let filas = sqlx::query(&format!(
         "SELECT v.id, v.numero, v.fecha, v.total, v.estado, v.requiere_factura, v.factura_emitida, u.nombre AS cajero, t.estado AS turno_estado,
+           {DIA_NEGOCIO} AS dia_negocio,
            (SELECT group_concat(f.nombre, ' + ') FROM venta_pagos p JOIN formas_pago f ON f.id = p.forma_pago_id
             WHERE p.venta_id = v.id AND p.eliminado_en IS NULL) AS formas,
            (SELECT group_concat(l.descripcion, ' · ') FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL) AS productos,
            (SELECT COALESCE(SUM(l.cantidad), 0) FROM venta_lineas l WHERE l.venta_id = v.id AND l.eliminado_en IS NULL) AS articulos
          FROM ventas v JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
-         WHERE v.caja_id = ? AND v.dia = ? AND v.eliminado_en IS NULL
-         ORDER BY v.consecutivo DESC",
-    )
-    .bind(caja_id)
-    .bind(dia)
+         WHERE {donde} AND v.eliminado_en IS NULL
+         ORDER BY v.consecutivo DESC"
+    ))
+    .bind(p1)
+    .bind(p2)
     .fetch_all(pool)
     .await
     .map_err(e)?;
@@ -677,6 +694,7 @@ pub async fn listar_dia(pool: &SqlitePool, a: &Actor, caja_id: &str, dia: &str) 
             turno_abierto: f.get::<Option<String>, _>("turno_estado").as_deref() == Some("abierto"),
             productos: f.get::<Option<String>, _>("productos").unwrap_or_default(),
             articulos: f.get("articulos"),
+            dia_negocio: f.get("dia_negocio"),
         })
         .collect())
 }

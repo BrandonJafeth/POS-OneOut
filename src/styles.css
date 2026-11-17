@@ -3585,3 +3585,24 @@ td.linea-producto {
   color: var(--warn);
   flex: none;
 }
+
+/* Abrir caja después de un cierre, antes de la hora de cierre: ¿hoy o mañana? (sin opción marcada) */
+.eleccion-dia {
+  margin: var(--e3) 0;
+  padding: 0;
+  border: 0;
+}
+
+.eleccion-dia legend {
+  margin-bottom: var(--e2);
+  font-weight: 650;
+}
+
+/* Historial de turnos: una fila por día de negocio con el total del día. */
+.tbl .fila-grupo th {
+  padding-top: var(--e3);
+  text-align: left;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--texto, inherit);
+}

@@ -8,10 +8,10 @@ App de escritorio (Tauri v2 + React + TypeScript + SQLite) para Librería y Baza
 |---|---|---|
 | 0. Prototipo de hardware | Lector, POS-58, code pages, gaveta; elegir Tauri (quedó en **Configuración → Hardware**) | ✅ Hecho |
 | 1. Base | Base de datos, roles, datos del negocio, catálogo, importación CSV, códigos internos, etiquetas | ✅ Hecho |
-| 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, pendientes de factura, seguridad | 🟡 Casi completa |
+| 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, varios turnos, pendientes de factura, seguridad | ✅ Hecho |
 | 3. Apartados y créditos | Apartados con abonos (Chaguí) y crédito (otros negocios), según banderas por negocio | ⏳ Siguiente |
-| 4. Inventario | Existencias, entradas de mercadería, ajustes con motivo, mínimos y alertas, venta sin stock configurable | ⏳ |
-| 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ |
+| 4. Inventario | Existencias, entradas de mercadería, ajustes con motivo, mínimos y alertas, venta sin stock configurable | ✅ Hecho |
+| 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ (los de inventario ya están) |
 | 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ |
 
 Fuera de este alcance (módulos aparte): factura electrónica de Hacienda, sincronización con la nube o varias cajas en red, crédito (fiado) para Chaguí.
@@ -56,6 +56,7 @@ cd src-tauri && cargo test   # pruebas Rust (Argon2, migración en sqlx, sql_lot
 - El turno es de la caja: con `caja_turno_compartido` (por defecto sí), cualquier cajero o dueño vende en el turno abierto; cada venta, pago, movimiento, corte y apertura de gaveta guarda quién la hizo. **Cambiar usuario** (menú lateral) cierra la sesión sin cerrar el turno y la pantalla se arma de cero según el rol del que entra.
 - Con el turno abierto, el cajero no recibe ningún total de ventas (Rust no se los manda: ni en Caja, ni en Mis turnos, ni en Ventas del día, ni por `bd_leer`). Su conteo de cierre es ciego y por billetes y monedas; al confirmarlo queda bloqueado (trigger) y recién ahí ve el Z completo. Solo el dueño reabre (PIN y motivo).
 - Cierre Z (`src/lib/caja/reporteZ.ts`): formas de pago, efectivo (esperado = fondo + contado + entradas − salidas − vueltos), descuentos, anulaciones, aperturas sin venta, cortes, ventas por usuario, por departamento, detalle de tarjeta/SINPE/transferencia, movimientos, conteo y firmas. Casillas al cerrar: detalle completo y un tiquete por departamento (valores por defecto en Administración → Caja y cierre). El reparto por departamento es exacto (`src-tauri/src/desglose.rs`); si algo no cuadra, no se imprime. PDF carta con logo para el dueño. Reimprimir = COPIA con PIN del dueño.
+- Fecha de negocio del turno (`caja_turnos.dia`): se decide una vez al abrir (`apertura_para` + `decidir_dia` en `src-tauri/src/caja.rs`). Primera caja del día → hoy; después de un cierre de hoy, desde `caja_hora_cierre` → mañana (cliente tardío; al otro día se sigue sin cerrarla); antes de esa hora → se pregunta hoy o mañana. Las ventas guardan su fecha real y su día de negocio sale del turno (`ventas::DIA_NEGOCIO`). Detalle en CONTEXTO.md.
 - Corte (dueño): acumulado sin cerrar y, si quiere, retiro con PIN. Queda en la bitácora y en el Z.
 - Gaveta: solo con una venta en efectivo (una vez), una "No venta" con motivo o una orden del dueño con PIN. Ningún trabajo de impresión puede abrirla (lista blanca ESC/POS en `src-tauri/src/escpos.rs`).
 

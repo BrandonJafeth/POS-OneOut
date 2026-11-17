@@ -18,13 +18,18 @@ import {
   necesitaNota,
   registrarMovimiento,
   CONTEO_VACIO,
+  diaConNombre,
+  ELEGIR_DIA,
   totalConteo,
+  type Turno,
   type ConteoEntrada,
   type EstadoCaja,
   type PagoElectronico,
   type ResultadoCierre,
 } from "../../db/caja";
 import { leerMontoEntero, plural } from "../../lib/texto";
+import { puede } from "../../lib/permisos";
+import { useSesion } from "../../app/sesion";
 import { monto } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Button from "../../ui/Button";
@@ -39,9 +44,53 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
   const [conteo, setConteo] = useState<ConteoEntrada>(CONTEO_VACIO);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // La fecha la decide Rust; aquí solo se avisa o se pregunta. Si Rust pide elegir (pasó la hora mientras contaba), se pregunta.
+  const [duda, setDuda] = useState(p.estado.apertura?.caso === "duda");
+  const [eleccion, setEleccion] = useState<"hoy" | "manana" | null>(null);
+  // Conteo ciego: el resultado de la comparación se ve solo después de confirmar.
+  const [abierta, setAbierta] = useState<Turno | null>(null);
+  const ap = p.estado.apertura;
+  const admin = puede(useSesion().actor.rol, "caja.admin");
+
+  if (abierta) {
+    return (
+      <Modal titulo="Caja abierta" onCerrar={p.onAbierta} ancho={520}>
+        {abierta.aperturaCuadra ? (
+          <Alert tono="ok">Cuadra con lo que quedó en el cierre anterior.</Alert>
+        ) : (
+          <Alert tono="aviso">
+            Diferencia con lo que quedó en el cierre anterior{admin && abierta.diferenciaApertura !== null ? `: ${monto(abierta.diferenciaApertura)}` : ""}. Queda anotado para el dueño; puede seguir vendiendo.
+          </Alert>
+        )}
+        <div className="fila-botones">
+          <span className="separador" />
+          <Button variante="primario" tamano="lg" autoFocus onClick={p.onAbierta}>
+            Listo
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal titulo="Abrir caja" onCerrar={p.onCerrar} ancho={720}>
-      <p className="muted">Cuente el dinero con que empieza el día (el fondo para dar vuelto).</p>
+      <p className="muted">Cuente el dinero con que empieza (el fondo para dar vuelto).</p>
+      {ap?.caso === "tarde" && !duda && (
+        <Alert tono="aviso">La caja de hoy ya se cerró: esta caja cuenta para mañana ({diaConNombre(ap.manana)}). Mañana se sigue vendiendo en ella sin cerrarla.</Alert>
+      )}
+      {duda && ap && (
+        <fieldset className="eleccion-dia">
+          <legend>La caja ya se cerró hoy. ¿Esta caja es para hoy o para mañana?</legend>
+          <div className="fila-botones">
+            <Button tamano="xl" variante={eleccion === "hoy" ? "primario" : "normal"} aria-pressed={eleccion === "hoy"} onClick={() => setEleccion("hoy")}>
+              Hoy
+            </Button>
+            <Button tamano="xl" variante={eleccion === "manana" ? "primario" : "normal"} aria-pressed={eleccion === "manana"} onClick={() => setEleccion("manana")}>
+              Mañana, {diaConNombre(ap.manana)}
+            </Button>
+          </div>
+        </fieldset>
+      )}
       <ConteoDinero denominaciones={p.estado.denominaciones} valor={conteo} onCambio={setConteo} etiquetaTotal="Fondo inicial" />
       {totalConteo(conteo) === 0 && <Alert tono="aviso">Sin fondo: no habrá efectivo para dar vuelto en las primeras ventas.</Alert>}
       {error && <Alert tono="error">{error}</Alert>}
@@ -52,15 +101,18 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
           variante="primario"
           tamano="lg"
           icono={LockOpen}
-          disabled={ocupado}
+          disabled={ocupado || (duda && !eleccion)}
           onClick={async () => {
             setOcupado(true);
             setError("");
             try {
-              await abrirCaja(conteo);
-              p.onAbierta();
+              const t = await abrirCaja(conteo, duda ? (eleccion ?? undefined) : undefined);
+              if (t.aperturaCuadra === null) p.onAbierta();
+              else setAbierta(t);
             } catch (e) {
-              setError(textoError(e));
+              const m = textoError(e);
+              if (String(e).includes(ELEGIR_DIA)) setDuda(true);
+              else setError(m);
               setOcupado(false);
             }
           }}

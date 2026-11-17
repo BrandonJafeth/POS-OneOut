@@ -55,6 +55,26 @@ pub struct Turno {
     pub nota_cierre: Option<String>,
     pub revisada_por: Option<String>,
     pub reimpresiones: i64,
+    /// Cómo se decidió la fecha de negocio (`dia`): primera, tarde, hoy o manana. None en turnos viejos.
+    pub apertura_caso: Option<String>,
+    /// Lo que quedó en la gaveta al cerrar la caja anterior y fondo contado − eso. Al cajero no le
+    /// llegan los montos: solo `apertura_cuadra`.
+    pub apertura_esperada: Option<i64>,
+    pub diferencia_apertura: Option<i64>,
+    pub apertura_cuadra: Option<bool>,
+    /// Lo que se dejó en la gaveta para la próxima caja (contado − esto = retiro de cierre).
+    pub queda_en_gaveta: Option<i64>,
+}
+
+impl Turno {
+    /// Para el cajero: la apertura dice solo si cuadró, sin montos.
+    pub fn para(mut self, a: &Actor) -> Turno {
+        if !puede(a.rol, "caja.admin") {
+            self.apertura_esperada = None;
+            self.diferencia_apertura = None;
+        }
+        self
+    }
 }
 
 const SELECT_TURNO: &str = "SELECT t.*, ua.nombre AS u_apertura, uc.nombre AS u_cierre, c.nombre AS caja_nombre FROM caja_turnos t
@@ -86,6 +106,11 @@ fn a_turno(f: &sqlx::sqlite::SqliteRow) -> Turno {
         nota_cierre: f.get("nota_cierre"),
         revisada_por: f.get("diferencia_revisada_por"),
         reimpresiones: f.get("reimpresiones"),
+        apertura_caso: f.get("apertura_caso"),
+        apertura_esperada: f.get("apertura_esperada"),
+        diferencia_apertura: f.get("diferencia_apertura"),
+        apertura_cuadra: f.get::<Option<i64>, _>("diferencia_apertura").map(|d| d == 0),
+        queda_en_gaveta: f.get("queda_en_gaveta"),
     }
 }
 
@@ -125,8 +150,13 @@ pub fn puede_operar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
 }
 
 /// Cierra el turno quien lo abrió, cualquiera con permiso de caja si el turno es compartido, o el dueño.
+/// Turno por cajero: el turno de otro que quedó abierto desde un día anterior (caja tardía) lo puede
+/// cerrar el cajero que llega, con su conteo ciego, para abrir el suyo.
 pub fn puede_cerrar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
     if puede(a.rol, "caja.admin") {
+        return Ok(());
+    }
+    if puede(a.rol, "caja") && dia_de(&t.abierto_en) < dia_local() {
         return Ok(());
     }
     puede_operar(a, t, compartido).map_err(|_| format!("Esta caja la abrió {}: la cierra {} con su conteo, o el dueño.", t.usuario_apertura, t.usuario_apertura))
@@ -211,6 +241,10 @@ pub struct EstadoCaja {
     pub turno: Option<Turno>,
     /// Hay un turno abierto de un día anterior: hay que cerrarlo antes de vender.
     pub de_otro_dia: bool,
+    /// Sin turno abierto: qué pasaría al abrir ahora (avisar "cuenta para mañana" o preguntar).
+    pub apertura: Option<Apertura>,
+    /// Hay un turno de otro cajero abierto desde un día anterior y este usuario lo puede cerrar en su nombre.
+    pub cierra_por_otro: bool,
     /// El turno abierto lo pueden usar otros usuarios (config caja_turno_compartido).
     pub compartido: bool,
     /// Este usuario puede vender y mover efectivo en el turno abierto.
@@ -239,7 +273,7 @@ pub async fn motivos_no_venta(pool: &SqlitePool) -> Vec<String> {
 
 pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCaja> {
     a.exigir("caja", "usar la caja")?;
-    let (t, comp, no_ventas) = {
+    let (t, comp, no_ventas, apertura) = {
         let mut c = pool.acquire().await.map_err(e)?;
         let t = turno_abierto(&mut c, caja_id).await?;
         let comp = compartido(&mut c).await;
@@ -247,13 +281,16 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
             Some(t) => sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?,
             None => 0,
         };
-        (t, comp, n)
+        let apertura = if t.is_none() { Some(apertura_para(&mut c, caja_id).await?) } else { None };
+        (t, comp, n, apertura)
     };
     Ok(EstadoCaja {
+        apertura,
         de_otro_dia: t.as_ref().is_some_and(|t| t.dia < dia_local()),
         puede_usar: t.as_ref().is_some_and(|t| puede_operar(a, t, comp).is_ok()),
         puede_cerrar: t.as_ref().is_some_and(|t| puede_cerrar(a, t, comp).is_ok()),
-        turno: t,
+        cierra_por_otro: t.as_ref().is_some_and(|t| t.usuario_apertura_id != a.id && puede_operar(a, t, comp).is_err() && puede_cerrar(a, t, comp).is_ok()),
+        turno: t.map(|t| t.para(a)),
         compartido: comp,
         denominaciones: denominaciones(pool).await,
         motivos: config::valor(pool, "caja_motivos").await.unwrap_or(json!({"salida": [], "entrada": []})),
@@ -293,41 +330,87 @@ pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
 /// Un cierre antes de esta hora es de la noche anterior (se cerró tarde, pasada la medianoche).
 const MADRUGADA: u32 = 5;
 
-/// ¿El turno que se abre cuenta para mañana? Solo si la caja de hoy ya se cerró (cliente que llega
-/// después del cierre). Con varios turnos al día, además hace falta que sea desde la hora de corte:
-/// antes de esa hora es el turno de la tarde y cuenta para hoy.
-fn cuenta_para_manana(cerrada_hoy: bool, varios_turnos: bool, hora: u32, hora_corte: u32) -> bool {
-    cerrada_hoy && (!varios_turnos || hora >= hora_corte)
+/// Cómo se decide la fecha de negocio del turno que se abre (igual en turno compartido y por cajero):
+/// - Primera: la caja no se ha cerrado hoy → hoy.
+/// - Tarde: ya se cerró hoy y es la hora de cierre del negocio o más tarde (cliente que llega después
+///   del cierre) → mañana. Ese turno sigue abierto y se usa al otro día sin cerrarlo.
+/// - Duda: ya se cerró hoy, antes de la hora de cierre (cambio de turno, o cierre temprano) → quien
+///   abre elige hoy o mañana.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum CasoApertura {
+    Primera,
+    Tarde,
+    Duda,
 }
 
-/// Jornada del turno que se abre: hoy, o mañana (ver `cuenta_para_manana`). El turno de mañana se
-/// puede usar desde ya y al otro día se sigue vendiendo en él sin cerrarlo.
-async fn dia_para_abrir(c: &mut SqliteConnection, caja_id: &str) -> Res<String> {
-    use chrono::{Datelike, Timelike};
+pub fn caso_apertura(cerrada_hoy: bool, hora: u32, hora_cierre: u32) -> CasoApertura {
+    match (cerrada_hoy, hora >= hora_cierre) {
+        (false, _) => CasoApertura::Primera,
+        (true, true) => CasoApertura::Tarde,
+        (true, false) => CasoApertura::Duda,
+    }
+}
+
+/// Lo que pasaría al abrir la caja ahora (para avisar o preguntar en la pantalla).
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Apertura {
+    pub caso: CasoApertura,
+    pub hoy: String,
+    pub manana: String,
+}
+
+/// Hora de cierre del negocio para hoy: la del día de la semana si tiene, si no la general.
+async fn hora_cierre(c: &mut SqliteConnection) -> u32 {
+    use chrono::Datelike;
+    let general = config::entero_con(c, "caja_hora_cierre", 18).await;
+    let dia = chrono::Local::now().weekday().num_days_from_monday() as usize;
+    let propia = config::valor_con(c, "caja_hora_cierre_dia").await.and_then(|v| v.get(dia).and_then(|h| h.as_i64()));
+    propia.unwrap_or(general).clamp(0, 23) as u32
+}
+
+/// Único lugar donde se calcula la fecha de negocio de un turno nuevo.
+async fn apertura_para(c: &mut SqliteConnection, caja_id: &str) -> Res<Apertura> {
+    use chrono::Timelike;
     let ahora = chrono::Local::now();
     let hoy = dia_local();
-    // Se mira cuándo se cerró, no cuándo se abrió: el turno de mañana cerrado esta noche no adelanta
-    // otro día; y un cierre de madrugada cuenta como de la noche anterior.
+    // Se mira cuándo se cerró (cualquier turno de esta caja), no de qué día era: un cierre de
+    // madrugada cuenta como de la noche anterior.
     let cerrada_hoy: bool = sqlx::query_scalar(&format!(
-        "SELECT EXISTS(SELECT 1 FROM caja_turnos WHERE caja_id = ? AND dia = ? AND estado = 'cerrado' AND eliminado_en IS NULL
+        "SELECT EXISTS(SELECT 1 FROM caja_turnos WHERE caja_id = ? AND estado = 'cerrado' AND eliminado_en IS NULL
            AND date(cerrado_en, 'localtime', '-{MADRUGADA} hours') = ?)"
     ))
     .bind(caja_id)
     .bind(&hoy)
-    .bind(&hoy)
     .fetch_one(&mut *c)
     .await
     .map_err(e)?;
-    let varios = config::booleano_con(c, "caja_varios_turnos", false).await;
-    // Una hora por día de la semana, de lunes a domingo (p. ej. el sábado se cierra antes).
-    let corte = config::valor_con(c, "caja_hora_corte")
-        .await
-        .and_then(|v| v.get(ahora.weekday().num_days_from_monday() as usize).and_then(|h| h.as_u64()))
-        .unwrap_or(18) as u32;
-    Ok(if cuenta_para_manana(cerrada_hoy, varios, ahora.hour(), corte) { (ahora + chrono::Duration::days(1)).format("%Y-%m-%d").to_string() } else { hoy })
+    let caso = caso_apertura(cerrada_hoy, ahora.hour(), hora_cierre(c).await);
+    Ok(Apertura { caso, hoy, manana: (ahora + chrono::Duration::days(1)).format("%Y-%m-%d").to_string() })
 }
 
+/// Fecha y caso que quedan en el turno. En la duda, sin elección no se abre.
+pub fn decidir_dia(ap: &Apertura, eleccion: Option<&str>) -> Res<(String, &'static str)> {
+    match (ap.caso, eleccion) {
+        (CasoApertura::Primera, _) => Ok((ap.hoy.clone(), "primera")),
+        (CasoApertura::Tarde, _) => Ok((ap.manana.clone(), "tarde")),
+        (CasoApertura::Duda, Some("hoy")) => Ok((ap.hoy.clone(), "hoy")),
+        (CasoApertura::Duda, Some("manana")) => Ok((ap.manana.clone(), "manana")),
+        (CasoApertura::Duda, _) => Err(format!("{ELEGIR_DIA}: la caja ya se cerró hoy. ¿Esta caja es para hoy o para mañana?")),
+    }
+}
+
+/// Error de abrir sin elegir el día cuando hace falta: la pantalla pregunta "¿hoy o mañana?".
+pub const ELEGIR_DIA: &str = "ELEGIR_DIA";
+
+#[cfg(test)]
 pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo) -> Res<Turno> {
+    abrir_eligiendo(pool, a, caja_id, conteo, None).await
+}
+
+/// Abre la caja. `eleccion` ("hoy" | "manana") solo cuenta cuando la fecha está en duda (ver `CasoApertura`).
+pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo, eleccion: Option<&str>) -> Res<Turno> {
     a.exigir("caja", "abrir la caja")?;
     let (fondo, detalle) = total_conteo(conteo, &denominaciones(pool).await)?;
     let id = ulid();
@@ -346,10 +429,22 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
         });
     }
     reloj_atrasado(&mut tx, "abrir la caja").await?;
-    let dia = dia_para_abrir(&mut tx, caja_id).await?;
+    let ap = apertura_para(&mut tx, caja_id).await?;
+    let (dia, caso) = decidir_dia(&ap, eleccion)?;
+    // Se compara con lo que quedó en la gaveta al cerrar la caja anterior (si se anotó).
+    let esperada: Option<i64> = sqlx::query_scalar(
+        "SELECT queda_en_gaveta FROM caja_turnos WHERE caja_id = ? AND estado = 'cerrado' AND eliminado_en IS NULL ORDER BY cerrado_en DESC LIMIT 1",
+    )
+    .bind(caja_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(e)?
+    .flatten();
+    let diferencia = esperada.map(|q| fondo - q);
     sqlx::query(
-        "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en)
-         SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
+        "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en,
+           apertura_caso, apertura_esperada, diferencia_apertura)
+         SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
     )
     .bind(&id)
     .bind(&a.id)
@@ -359,14 +454,83 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
     .bind(detalle.to_string())
     .bind(&ahora)
     .bind(&ahora)
+    .bind(caso)
+    .bind(esperada)
+    .bind(diferencia)
     .bind(caja_id)
     .execute(&mut *tx)
     .await
     .map_err(|err| if e(&err).contains("UNIQUE") { "La caja ya está abierta".to_string() } else { e(err) })?;
-    bitacora::registrar(&mut tx, Some(&a.id), "caja.abrir", "caja_turno", Some(&id), &json!({"fondo": fondo, "conteo": detalle})).await?;
+    bitacora::registrar(
+        &mut tx,
+        Some(&a.id),
+        "caja.abrir",
+        "caja_turno",
+        Some(&id),
+        &json!({"fondo": fondo, "conteo": detalle, "dia": dia, "caso": caso, "esperada": esperada, "diferenciaApertura": diferencia}),
+    )
+    .await?;
+    if diferencia.is_some_and(|d| d != 0) {
+        bitacora::registrar(&mut tx, Some(&a.id), "caja.diferencia_apertura", "caja_turno", Some(&id), &json!({"esperada": esperada, "contado": fondo, "diferencia": diferencia})).await?;
+    }
     let t = turno(&mut tx, &id).await?.ok_or("La caja no existe")?;
     tx.commit().await.map_err(e)?;
-    Ok(t)
+    Ok(t.para(a))
+}
+
+/// Al cerrar, después del conteo: cuánto se deja en la gaveta para la próxima caja (una sola vez).
+/// Lo contado menos esto es el retiro de cierre.
+pub async fn queda_en_gaveta(pool: &SqlitePool, a: &Actor, turno_id: &str, monto: i64) -> Res<()> {
+    a.exigir("caja", "cerrar la caja")?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
+    if t.estado != "cerrado" || t.queda_en_gaveta.is_some() {
+        return Err("Lo que queda en la gaveta ya se anotó.".into());
+    }
+    if t.usuario_cierre_id.as_deref() != Some(a.id.as_str()) && !puede(a.rol, "caja.admin") {
+        return Err(sin_permiso("anotar el cierre de otra persona"));
+    }
+    let contado = t.contado.unwrap_or(0);
+    if !(0..=contado).contains(&monto) {
+        return Err(format!("Lo que queda no puede pasar de lo contado ({}).", colones(contado)));
+    }
+    sqlx::query("UPDATE caja_turnos SET queda_en_gaveta = ?, actualizado_en = ? WHERE id = ?").bind(monto).bind(ahora_iso()).bind(turno_id).execute(&mut *tx).await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "caja.queda", "caja_turno", Some(turno_id), &json!({"queda": monto, "retiro": contado - monto})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
+}
+
+/// El dueño corrige la fecha de negocio de un turno (quedó mal al abrir), con PIN y motivo: mientras
+/// esté abierto o el mismo día en que se cerró. Solo a hoy o mañana.
+pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &str, pin: &str, motivo: &str) -> Res<()> {
+    let motivo = texto(motivo, 300, "motivo", true)?;
+    if motivo.chars().count() < 5 {
+        return Err("Escriba el motivo (al menos 5 letras)".into());
+    }
+    let dueno = usuarios::confirmar_dueno(pool, a, pin, "corregir el día de la caja").await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
+    let hoy = dia_local();
+    let manana = (chrono::Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let cerrado_hoy = t.cerrado_en.as_deref().is_some_and(|c| dia_de(c) == hoy);
+    if t.estado != "abierto" && !cerrado_hoy {
+        return Err("Solo se corrige el día de una caja abierta o cerrada hoy.".into());
+    }
+    if dia != hoy && dia != manana {
+        return Err("El día de la caja solo puede ser hoy o mañana.".into());
+    }
+    if dia == t.dia {
+        return Err("La caja ya es de ese día.".into());
+    }
+    sqlx::query("UPDATE caja_turnos SET dia = ?, actualizado_en = ? WHERE id = ?").bind(dia).bind(ahora_iso()).bind(turno_id).execute(&mut *tx).await.map_err(e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "caja.corregir_dia", "caja_turno", Some(turno_id), &json!({"antes": t.dia, "despues": dia, "motivo": motivo, "autorizadoPor": dueno})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(())
+}
+
+/// Día local ("AAAA-MM-DD") de un instante ISO.
+fn dia_de(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
 // ─────────── Movimientos de efectivo ───────────
@@ -591,7 +755,22 @@ pub struct Resumen {
     pub estadisticas: Estadisticas,
     /// Quién firma como supervisor en el Z: el dueño que cerró o, si cerró un cajero, los dueños activos.
     pub supervisor: String,
+    /// Ventas hechas antes del día de negocio del turno (caja abierta después del cierre, que cuenta
+    /// para mañana): fecha y hora real, tiquete, usuario y monto. Vacío en cierres viejos.
+    pub despues_del_cierre: Vec<VentaTardia>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VentaTardia {
+    pub fecha: String,
+    pub numero: String,
+    pub usuario: String,
+    pub total: i64,
+}
+
+/// Una venta es "después del cierre" si su fecha real es anterior al día de negocio de su turno.
+pub const VENTA_TARDIA: &str = "date(v.fecha, 'localtime') < t.dia";
 
 /// Una diferencia de caja pide nota y revisión si NO es cero y llega al umbral
 /// (con umbral 0, cualquier diferencia; un cierre que cuadra nunca).
@@ -802,6 +981,15 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         .iter()
         .map(|f| CorteResumen { id: f.get("id"), fecha: f.get("fecha"), usuario: f.get("usuario"), ventas: f.get("ventas"), total: f.get("total"), efectivo_esperado: f.get("efectivo_esperado"), retiro: f.get("retiro") })
         .collect();
+    let tardias = sqlx::query(&format!(
+        "SELECT v.fecha, v.numero, u.nombre AS usuario, v.total FROM ventas v JOIN caja_turnos t ON t.id = v.turno_id JOIN usuarios u ON u.id = v.usuario_id
+         WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL AND {VENTA_TARDIA} ORDER BY v.consecutivo"
+    ))
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    r.despues_del_cierre = tardias.iter().map(|f| VentaTardia { fecha: f.get("fecha"), numero: f.get("numero"), usuario: f.get("usuario"), total: f.get("total") }).collect();
     r.desglose = desglose::calcular(c, &t.id).await?;
     r.estadisticas = estadisticas::calcular(c, t).await?;
     r.supervisor = sqlx::query_scalar("SELECT COALESCE(group_concat(nombre, ' / '), '') FROM (SELECT nombre FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL ORDER BY nombre)")
@@ -893,7 +1081,7 @@ pub async fn detalle(pool: &SqlitePool, a: &Actor, turno_id: &str) -> Res<Detall
         _ => (resumen(&mut c, &t).await?, None),
     };
     let ve = ve_totales(a, &t);
-    Ok(Detalle { resumen: if ve { r } else { sin_totales(&r) }, turno: t, ve_totales: ve, bitacora_ok })
+    Ok(Detalle { resumen: if ve { r } else { sin_totales(&r) }, turno: t.para(a), ve_totales: ve, bitacora_ok })
 }
 
 // ─────────── Cierre ───────────
@@ -978,7 +1166,8 @@ pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo
         "caja.cerrar",
         "caja_turno",
         Some(&t.id),
-        &json!({"esperado": r.efectivo_esperado, "contado": contado, "diferencia": diferencia, "ventas": r.ventas, "total": r.total_ventas, "nota": nota, "esperasAbiertas": esperas, "abrio": t.usuario_apertura_id, "cuadra": r.cuadra}),
+        &json!({"esperado": r.efectivo_esperado, "contado": contado, "diferencia": diferencia, "ventas": r.ventas, "total": r.total_ventas, "nota": nota, "esperasAbiertas": esperas, "abrio": t.usuario_apertura_id, "cuadra": r.cuadra,
+               "enNombreDe": (t.usuario_apertura_id != a.id).then_some(&t.usuario_apertura)}),
     )
     .await?;
     if requiere_revision {
@@ -1044,7 +1233,7 @@ pub async fn reabrir(pool: &SqlitePool, a: &Actor, turno_id: &str, pin: &str, mo
     let antes = json!({"cerradoEn": t.cerrado_en, "cerro": t.usuario_cierre_id, "esperado": t.esperado, "contado": t.contado, "diferencia": t.diferencia, "conteo": t.conteo_final, "nota": t.nota_cierre});
     sqlx::query(
         "UPDATE caja_turnos SET estado = 'abierto', cerrado_en = NULL, usuario_cierre_id = NULL, monto_esperado = NULL, monto_contado = NULL,
-           conteo_final = NULL, diferencia = NULL, totales = NULL, nota_cierre = NULL, diferencia_revisada_por = NULL, reimpresiones = 0,
+           conteo_final = NULL, diferencia = NULL, totales = NULL, nota_cierre = NULL, diferencia_revisada_por = NULL, reimpresiones = 0, queda_en_gaveta = NULL,
            actualizado_en = ? WHERE id = ?",
     )
     .bind(ahora_iso())
@@ -1221,6 +1410,8 @@ pub struct TurnoFila {
     pub no_ventas: i64,
     /// Más aperturas sin venta que el umbral configurado.
     pub alerta_no_ventas: bool,
+    /// Ventas hechas antes del día de negocio del turno (caja abierta después del cierre).
+    pub ventas_despues_del_cierre: i64,
 }
 
 /// Historial: el dueño ve todos; el cajero, el abierto que usa y los cerrados en que participó.
@@ -1260,9 +1451,24 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
             .await
             .map_err(e)?;
         let nv: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?;
+        let tardias: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM ventas v JOIN caja_turnos t ON t.id = v.turno_id WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL AND {VENTA_TARDIA}"
+        ))
+        .bind(&t.id)
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
         let pendiente = t.revisada_por.is_none() && t.diferencia.is_some_and(|d| fuera_de_umbral(d, umbral));
         let ve = ve_totales(a, &t);
-        out.push(TurnoFila { ventas: ve.then_some(n), total: ve.then_some(total), pendiente_revision: pendiente && admin, no_ventas: nv, alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv, turno: t });
+        out.push(TurnoFila {
+            ventas: ve.then_some(n),
+            total: ve.then_some(total),
+            pendiente_revision: pendiente && admin,
+            no_ventas: nv,
+            alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv,
+            ventas_despues_del_cierre: tardias,
+            turno: t.para(a),
+        });
     }
     Ok(out)
 }
@@ -1371,61 +1577,6 @@ pub mod tests {
         // Turno de ayer: no se reabre.
         sqlx::query("UPDATE caja_turnos SET dia = '2000-01-01' WHERE id = ?").bind(&t.id).execute(p).await.unwrap();
         assert!(reabrir(p, &dueno, &t.id, "246813", "Quiero reabrir").await.unwrap_err().contains("mismo día"));
-    }
-
-    #[tokio::test]
-    async fn segunda_apertura_del_dia_cuenta_para_manana() {
-        // De madrugada los cierres de "ahora" son de la noche anterior: la prueba no aplica.
-        if chrono::Timelike::hour(&chrono::Local::now()) < MADRUGADA {
-            return;
-        }
-        let (bd, _, dueno, cajero) = base_con_usuarios().await;
-        let p = &bd.pool;
-        let hoy = dia_local();
-        let un = || conteo(&[(1000, 1)]);
-        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
-        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
-        // Llega un cliente después del cierre: la caja que se abre ya es la de mañana y se puede vender.
-        let t = abrir(p, &cajero, CAJA_1, &un()).await.unwrap();
-        assert!(t.dia > hoy);
-        let mut c = p.acquire().await.unwrap();
-        assert_eq!(turno_para_vender(&mut c, CAJA_1, &cajero).await.unwrap().id, t.id);
-        drop(c);
-        assert!(!estado(p, &cajero, CAJA_1).await.unwrap().de_otro_dia);
-        // Se ve en el historial "hasta hoy" (para imprimir su Z esta noche).
-        assert!(listar(p, &dueno, CAJA_1, &hoy, &hoy).await.unwrap().iter().any(|f| f.turno.id == t.id));
-        // Se cierra esta noche y llega otro cliente: sigue siendo mañana, no pasado mañana.
-        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
-        let t2 = abrir(p, &cajero, CAJA_1, &un()).await.unwrap();
-        assert_eq!(t2.dia, t.dia);
-        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
-        // "Mañana en la mañana": los turnos de mañana se cerraron la noche anterior → la caja es la del día.
-        sqlx::query("UPDATE caja_turnos SET dia = ?, cerrado_en = '2000-01-01T12:00:00.000Z'").bind(&hoy).execute(p).await.unwrap();
-        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
-        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
-        // Ese turno se quedó abierto toda la noche y se cerró de madrugada (2 a. m.): no es el cierre
-        // del día, la caja que se abre en la mañana sigue siendo de hoy.
-        let madrugada = chrono::Local::now().date_naive().and_hms_opt(2, 0, 0).unwrap().and_local_timezone(chrono::Local).unwrap();
-        let madrugada = madrugada.with_timezone(&chrono::Utc).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-        sqlx::query("UPDATE caja_turnos SET cerrado_en = ?").bind(&madrugada).execute(p).await.unwrap();
-        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
-        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
-        // Varios turnos al día, ya pasada la hora de corte (0 = siempre): el cliente tardío cuenta para mañana.
-        crate::config::guardar(p, &dueno, "caja_varios_turnos", &json!(true)).await.unwrap();
-        crate::config::guardar(p, &dueno, "caja_hora_corte", &json!([0, 0, 0, 0, 0, 0, 0])).await.unwrap();
-        assert!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia > hoy);
-    }
-
-    #[test]
-    fn manana_segun_turnos_y_hora_de_corte() {
-        // Un turno al día: tras el cierre, siempre mañana; sin cierre, hoy.
-        assert!(cuenta_para_manana(true, false, 10, 18));
-        assert!(!cuenta_para_manana(false, false, 21, 18));
-        // Varios turnos: el de la tarde (antes del corte) es de hoy; el cliente de la noche, de mañana.
-        assert!(!cuenta_para_manana(true, true, 13, 18));
-        assert!(cuenta_para_manana(true, true, 18, 18));
-        assert!(cuenta_para_manana(true, true, 21, 18));
-        assert!(!cuenta_para_manana(false, true, 21, 18));
     }
 
     #[test]

@@ -16,6 +16,8 @@ mod impresoras;
 #[cfg(test)]
 mod invariantes;
 #[cfg(test)]
+mod fechas_caja;
+#[cfg(test)]
 mod casos_raros;
 #[cfg(test)]
 mod tabla_permisos;
@@ -322,9 +324,21 @@ async fn caja_estado(st: St<'_>) -> Res<caja::EstadoCaja> {
 }
 
 #[tauri::command]
-async fn caja_abrir(st: St<'_>, conteo: caja::Conteo) -> Res<caja::Turno> {
+async fn caja_abrir(st: St<'_>, conteo: caja::Conteo, eleccion: Option<String>) -> Res<caja::Turno> {
     let a = st.actor().await?;
-    caja::abrir(st.pool()?, &a, caja::CAJA_1, &conteo).await
+    caja::abrir_eligiendo(st.pool()?, &a, caja::CAJA_1, &conteo, eleccion.as_deref()).await
+}
+
+#[tauri::command]
+async fn caja_queda(st: St<'_>, turno_id: String, monto: i64) -> Res<()> {
+    let a = st.actor().await?;
+    caja::queda_en_gaveta(st.pool()?, &a, &turno_id, monto).await
+}
+
+#[tauri::command]
+async fn caja_corregir_dia(st: St<'_>, turno_id: String, dia: String, pin: String, motivo: String) -> Res<()> {
+    let a = st.actor().await?;
+    caja::corregir_dia(st.pool()?, &a, &turno_id, &dia, &pin, &motivo).await
 }
 
 #[tauri::command]
@@ -539,6 +553,12 @@ async fn venta_obtener(st: St<'_>, id: String) -> Res<Option<Value>> {
 async fn venta_listar_dia(st: St<'_>, dia: String) -> Res<Vec<ventas::VentaResumen>> {
     let a = st.actor().await?;
     ventas::listar_dia(st.pool()?, &a, caja::CAJA_1, &dia).await
+}
+
+#[tauri::command]
+async fn venta_listar_turno(st: St<'_>, turno_id: String) -> Res<Vec<ventas::VentaResumen>> {
+    let a = st.actor().await?;
+    ventas::listar_turno(st.pool()?, &a, &turno_id).await
 }
 
 /// Tiquete de una venta: el original una vez; después, solo COPIA. Devuelve si fue copia.
@@ -1146,6 +1166,8 @@ pub fn run() {
             bitacora_verificar,
             caja_estado,
             caja_abrir,
+            caja_queda,
+            caja_corregir_dia,
             caja_movimiento,
             caja_detalle,
             caja_necesita_nota,
@@ -1173,6 +1195,7 @@ pub fn run() {
             venta_cobrar,
             venta_obtener,
             venta_listar_dia,
+            venta_listar_turno,
             venta_imprimir,
             venta_correcciones,
             venta_corregir_pago,

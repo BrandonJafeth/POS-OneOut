@@ -204,10 +204,15 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   l.push({ t: lr("Entradas", "+" + monto(r.entradas), cols) });
   l.push({ t: lr("Salidas", "-" + monto(r.salidas), cols) });
   l.push({ t: lr("Vueltos", "-" + monto(r.vueltos), cols) });
-  l.push({ t: lr("Efectivo esperado", monto(r.efectivoEsperado), cols), b: true });
+  l.push({ t: lr("Efectivo en caja", monto(r.efectivoEsperado), cols), b: true });
   if (t.contado != null) l.push({ t: lr("Efectivo contado", monto(t.contado), cols), b: true });
   if (t.diferencia != null) l.push({ t: lr(t.diferencia === 0 ? "Diferencia: cuadra" : t.diferencia > 0 ? "Sobrante" : "Faltante", signo(t.diferencia), cols), b: true });
   if (t.notaCierre) wrap("Nota: " + t.notaCierre, cols).forEach((x) => l.push({ t: x }));
+  if (t.diferenciaApertura) l.push({ t: lr("Diferencia de apertura", signo(t.diferenciaApertura), cols) });
+  if (t.quedaEnGaveta != null && t.contado != null) {
+    l.push({ t: lr("Queda para la próxima caja", monto(t.quedaEnGaveta), cols) });
+    l.push({ t: lr("Retiro de cierre", monto(t.contado - t.quedaEnGaveta), cols) });
+  }
 
   if (o.completo) {
     titulo(l, "OTROS", cols);
@@ -257,6 +262,16 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   for (const m of r.movimientos) {
     l.push({ t: lr(`${m.tipo === "salida" ? "-" : "+"} ${cortar(m.categoria, cols - 14)}`, monto(m.monto), cols) });
     l.push({ t: `  ${hora(m.fecha)} ${cortar([m.usuario, m.motivo].filter(Boolean).join(" · "), cols - 8)}` });
+  }
+
+  // Control: ventas de la caja abierta después del cierre (cuentan para el día siguiente). Siempre en el papel.
+  const tardias = r.despuesDelCierre ?? [];
+  if (tardias.length) {
+    titulo(l, "VENTAS DESPUÉS DEL CIERRE", cols);
+    for (const v of tardias) {
+      l.push({ t: lr(`${fechaHora(new Date(v.fecha)).slice(0, 5)} ${hora(v.fecha)} ${v.numero}`, monto(v.total), cols) });
+      l.push({ t: `  ${cortar(v.usuario, cols - 2)}` });
+    }
   }
 
   if (o.completo && r.noVentas.length) {
@@ -380,7 +395,7 @@ export function lineasCorte(n: Negocio, k: Corte, cols: number): LineaDoc[] {
   if (!r.porForma.length) l.push({ t: "  Sin ventas" });
   l.push({ t: lr(`TOTAL VENTAS (${r.ventas})`, monto(r.totalVentas), cols), b: true });
   titulo(l, "EFECTIVO", cols);
-  l.push({ t: lr("Efectivo esperado", monto(r.efectivoEsperado), cols) });
+  l.push({ t: lr("Efectivo en caja", monto(r.efectivoEsperado), cols) });
   if (k.retiro) l.push({ t: lr("Retiro", "-" + monto(k.retiro), cols) });
   l.push({ t: lr("Queda en la caja", monto(k.efectivoDespues), cols), b: true });
   if (k.retiro) l.push({ t: sep2(cols) }, { t: "" }, { t: "Retira:" }, { t: "" }, { t: "_".repeat(Math.min(cols, 32)) });

@@ -9,6 +9,7 @@ import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
+import { diaConNombre } from "../db/caja";
 import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
 import { conMiles, diaLocal, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
@@ -30,9 +31,18 @@ import { useEnvio } from "../ui/useEnvio";
 
 const POR_PAGINA = 50;
 
+/** Venta cobrada otro día que su día de negocio (caja abierta después del cierre): "Venta del lunes 16, cuenta para el martes 17". */
+function otroDia(v: VentaResumen): string {
+  const real = diaLocal(new Date(v.fecha));
+  return real === v.diaNegocio ? "" : `Venta del ${diaConNombre(real)}, cuenta para el ${diaConNombre(v.diaNegocio)}`;
+}
+
 export default function VentasHoy() {
   const { caja, irA, puede } = useSesion();
-  const [dia, setDia] = useState(diaLocal());
+  // Por defecto, el día de negocio de la caja abierta: la caja abierta después del cierre ya es de mañana.
+  const diaCaja = caja?.turno?.dia ?? diaLocal();
+  const maxDia = diaCaja > diaLocal() ? diaCaja : diaLocal();
+  const [dia, setDia] = useState(diaCaja);
   const [lista, setLista] = useState<VentaResumen[]>([]);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -64,7 +74,7 @@ export default function VentasHoy() {
         <h1>Ventas del día</h1>
         <div className="row arriba">
           <Field label="Día">
-            <input type="date" value={dia} max={diaLocal()} onChange={(e) => e.target.value && setDia(e.target.value)} />
+            <input type="date" value={dia} max={maxDia} onChange={(e) => e.target.value && setDia(e.target.value)} />
           </Field>
         </div>
       </div>
@@ -148,7 +158,10 @@ export default function VentasHoy() {
           <tbody>
             {visibles.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((v) => (
               <FilaClic key={v.id} etiqueta={`Abrir tiquete ${v.numero}`} className={v.estado === "anulada" ? "inactivo" : ""} onAbrir={() => setAbierta(v.id)}>
-                <td className="hora">{horaDe(v.fecha)}</td>
+                <td className="hora">
+                  {horaDe(v.fecha)}
+                  {otroDia(v) && <span className="muted"> · {otroDia(v)}</span>}
+                </td>
                 <td className="mono">{v.numero}</td>
                 <td className="productos-venta" title={v.productos}>
                   <span className="muted">{plural(v.articulos, "art.", "art.")} · </span>

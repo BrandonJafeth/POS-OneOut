@@ -38,12 +38,32 @@ export interface Turno {
   notaCierre: string | null;
   revisadaPor: string | null;
   reimpresiones: number;
+  /** Cómo se decidió el día (`dia` = fecha de negocio): primera, tarde, hoy, manana. null en turnos viejos. */
+  aperturaCaso: "primera" | "tarde" | "hoy" | "manana" | null;
+  /** Lo que quedó en la gaveta al cerrar la caja anterior y la diferencia con el fondo contado (al cajero no le llegan). */
+  aperturaEsperada: number | null;
+  diferenciaApertura: number | null;
+  /** null: sin comparación (primera apertura o cierre anterior sin anotar lo que quedó). */
+  aperturaCuadra: boolean | null;
+  /** Lo que se dejó en la gaveta para la próxima caja; contado − esto = retiro de cierre. */
+  quedaEnGaveta: number | null;
+}
+
+/** Qué pasaría al abrir la caja ahora (lo decide Rust). */
+export interface Apertura {
+  caso: "primera" | "tarde" | "duda";
+  hoy: string;
+  manana: string;
 }
 
 export interface EstadoCaja {
   turno: Turno | null;
   /** Quedó abierta la caja de un día anterior: hay que cerrarla antes de vender. */
   deOtroDia: boolean;
+  /** Sin turno abierto: qué pasaría al abrirla ahora (avisar "cuenta para mañana" o preguntar). */
+  apertura: Apertura | null;
+  /** Turno por cajero: hay uno de otro cajero abierto desde un día anterior y este usuario lo puede cerrar. */
+  cierraPorOtro: boolean;
   /** Otros usuarios pueden vender en el turno abierto (config caja_turno_compartido). */
   compartido: boolean;
   /** Este usuario puede vender y mover efectivo en el turno abierto. */
@@ -195,6 +215,8 @@ export interface Resumen {
   estadisticas: Estadisticas;
   /** Dueño que firma como supervisor (el que cerró, o los dueños activos). Vacío en cierres viejos. */
   supervisor: string;
+  /** Ventas cobradas antes del día de negocio del turno (caja abierta después del cierre). Vacío en cierres viejos. */
+  despuesDelCierre?: { fecha: string; numero: string; usuario: string; total: number }[];
 }
 
 /** Lectura del día (estadisticas.rs). */
@@ -260,6 +282,8 @@ export interface TurnoFila extends Turno {
   pendienteRevision: boolean;
   noVentas: number;
   alertaNoVentas: boolean;
+  /** Ventas cobradas antes del día de negocio del turno (para revisarlas). */
+  ventasDespuesDelCierre: number;
 }
 
 /** Cierre con diferencia sobre el umbral y sin nota: Rust lo rechaza con este prefijo. */
@@ -284,8 +308,41 @@ export function estadoCaja(): Promise<EstadoCaja> {
   return invocar<EstadoCaja>("caja_estado");
 }
 
-export function abrirCaja(conteo: ConteoEntrada): Promise<Turno> {
-  return invocar<Turno>("caja_abrir", { conteo: aRust(conteo) });
+/** Rust rechaza con este prefijo si la caja ya se cerró hoy, es antes de la hora de cierre y no se eligió el día. */
+export const ELEGIR_DIA = "ELEGIR_DIA";
+
+/** `eleccion`: solo cuando la apertura está en duda (después de un cierre, antes de la hora de cierre). */
+export function abrirCaja(conteo: ConteoEntrada, eleccion?: "hoy" | "manana"): Promise<Turno> {
+  return invocar<Turno>("caja_abrir", { conteo: aRust(conteo), eleccion: eleccion ?? null });
+}
+
+/** Al cerrar, después del conteo: cuánto se deja en la gaveta para la próxima caja (una vez). */
+export async function quedaEnGaveta(turnoId: string, monto: number): Promise<void> {
+  await invocar("caja_queda", { turnoId, monto });
+}
+
+/** El dueño corrige el día de negocio de un turno abierto o cerrado hoy (PIN y motivo). */
+export async function corregirDiaCaja(turnoId: string, dia: string, pin: string, motivo: string): Promise<void> {
+  await invocar("caja_corregir_dia", { turnoId, dia, pin, motivo });
+}
+
+/** "martes 17" a partir de "AAAA-MM-DD". */
+export function diaConNombre(dia: string): string {
+  return new Date(`${dia}T12:00:00`).toLocaleDateString("es-CR", { weekday: "long", day: "numeric" });
+}
+
+/** Turnos agrupados por día de negocio, con el total de ventas del día (los fondos nunca se suman). */
+export function turnosPorDia<T extends { dia: string; total: number | null; ventasDespuesDelCierre: number }>(filas: T[]): { dia: string; total: number | null; tardias: number; turnos: T[] }[] {
+  const g = new Map<string, T[]>();
+  for (const f of filas) g.set(f.dia, [...(g.get(f.dia) ?? []), f]);
+  return [...g.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([dia, turnos]) => ({
+      dia,
+      total: turnos.some((t) => t.total === null) ? null : turnos.reduce((s, t) => s + (t.total ?? 0), 0),
+      tardias: turnos.reduce((s, t) => s + t.ventasDespuesDelCierre, 0),
+      turnos,
+    }));
 }
 
 export function registrarMovimiento(m: { tipo: "entrada" | "salida"; monto: number; categoria: string; nota: string }, pinDueno?: string): Promise<string> {

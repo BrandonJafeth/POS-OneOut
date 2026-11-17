@@ -35,6 +35,8 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("bitacora_listar / verificar", false, true, true),
     ("caja_estado", true, true, false),
     ("caja_abrir", true, true, false),
+    ("caja_queda", true, true, false),
+    ("caja_corregir_dia", false, true, false),
     ("caja_movimiento", true, true, false),
     ("caja_detalle", true, true, false),
     ("caja_necesita_nota", true, true, false),
@@ -60,6 +62,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("venta_cobrar", true, true, false),
     ("venta_obtener", true, true, false),
     ("venta_listar_dia", true, true, false),
+    ("venta_listar_turno", true, true, false),
     ("venta_imprimir", true, true, false),
     ("venta_correcciones", true, true, false),
     ("venta_corregir_pago", false, true, false),
@@ -123,6 +126,8 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("bitacora_listar / verificar", lib("reportes"));
     s("caja_estado", denegado(caja::estado(p, a, CAJA_1).await));
     s("caja_abrir", denegado(caja::abrir(p, a, CAJA_1, &conteo(&[(1000, 1)])).await));
+    s("caja_queda", denegado(caja::queda_en_gaveta(p, a, x, 0).await));
+    s("caja_corregir_dia", denegado(caja::corregir_dia(p, a, x, "2026-01-01", "000000", "motivo largo").await));
     s("caja_movimiento", denegado(caja::movimiento(p, a, CAJA_1, &de(json!({"tipo": "entrada", "monto": 100, "categoria": "Ingreso de cambio"})), None).await));
     s("caja_detalle", denegado(caja::detalle(p, a, x).await));
     s("caja_necesita_nota", denegado(caja::necesita_nota(p, a, CAJA_1, &conteo(&[])).await));
@@ -148,6 +153,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("venta_cobrar", denegado(ventas::cobrar_con(p, a, CAJA_1, x, &de(json!({"lineas": [], "descuentoTotal": 0, "requiereFactura": false})), &[], None).await));
     s("venta_obtener", denegado(ventas::obtener(p, a, x).await));
     s("venta_listar_dia", denegado(ventas::listar_dia(p, a, CAJA_1, "2026-01-01").await));
+    s("venta_listar_turno", denegado(ventas::listar_turno(p, a, x).await));
     s("venta_imprimir", denegado(ventas::imprimir_tiquete(p, a, x, b"x\n").await));
     s("venta_correcciones", denegado(ventas::correcciones_de(p, a, x).await));
     s("venta_corregir_pago", denegado(ventas::corregir_pago(p, a, CAJA_1, x, &de(json!({"formaPagoId": x})), "motivo largo", None).await));

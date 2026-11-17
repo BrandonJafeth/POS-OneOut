@@ -16,6 +16,12 @@ import Consecutivo from "./caja/Consecutivo";
 export const AYUDA_TURNO_COMPARTIDO =
   "Si varias personas usan la misma caja en el mismo turno, el faltante o sobrante es de la caja y no se puede atribuir a una persona. El cierre Z dice qué vendió cada uno, pero el efectivo es uno solo. Si quiere controlar el efectivo de cada cajero por separado, desactive esta opción y cada uno abre y cierra su propio turno.";
 
+const HORAS = Array.from({ length: 24 }, (_, h) => (
+  <option key={h} value={h}>
+    {String(h).padStart(2, "0")}:00
+  </option>
+));
+
 export default function ConfigCaja() {
   const { actor, config, recargarConfig } = useSesion();
   const [error, setError] = useState("");
@@ -23,6 +29,7 @@ export default function ConfigCaja() {
   const [motivos, setMotivos] = useState(config.caja_no_venta_motivos.join("\n"));
   const [umbralNv, setUmbralNv] = useState(String(config.caja_no_venta_umbral));
   const [quitar, setQuitar] = useState(conMiles(String(config.caja_quitar_linea_bitacora)));
+  const [porDia, setPorDia] = useState(config.caja_hora_cierre_dia.some((h) => h !== null));
 
   async function guardar(cambios: Record<string, unknown>, ok = "Guardado.") {
     setError("");
@@ -56,37 +63,43 @@ export default function ConfigCaja() {
             <span className="ayuda">{AYUDA_TURNO_COMPARTIDO}</span>
           </span>
         </label>
+        <Field
+          label="Hora de cierre del negocio"
+          ayuda="Si la caja ya se cerró hoy y se abre otra desde esta hora (cliente que llega tarde), cuenta para mañana. Si se abre antes, se pregunta si es para hoy (cambio de turno) o para mañana."
+        >
+          <select value={config.caja_hora_cierre} onChange={(e) => void guardar({ caja_hora_cierre: Number(e.target.value) })}>
+            {HORAS}
+          </select>
+        </Field>
         <label className="opcion">
-          <input type="checkbox" checked={config.caja_varios_turnos} onChange={(e) => void guardar({ caja_varios_turnos: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={porDia}
+            onChange={(e) => {
+              setPorDia(e.target.checked);
+              // Al volver a una sola hora, todos los días usan la general.
+              if (!e.target.checked) void guardar({ caja_hora_cierre_dia: Array(7).fill(null) });
+            }}
+          />
           <span>
-            <strong>Hay varios turnos al día (por ejemplo mañana y tarde)</strong>
-            <span className="ayuda">
-              Si después de cerrar la caja llega un cliente y se vuelve a abrir, esa caja ya cuenta para mañana: al otro día se sigue vendiendo en ella sin cerrarla. Con varios turnos, eso pasa solo desde la hora de corte; antes, la caja que se abre es el turno siguiente de hoy.
-            </span>
+            <strong>Distinta según el día</strong>
+            <span className="ayuda">Por ejemplo, si el sábado o el domingo se cierra más temprano.</span>
           </span>
         </label>
-        {config.caja_varios_turnos && (
-          <>
-            <p className="muted">
-              Hora de corte de cada día: después de un cierre, la caja que se abre desde esa hora cuenta para mañana. Póngala después de la hora en que abre el último turno de ese día.
-            </p>
-            <div className="row">
-              {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d, i) => (
-                <Field key={d} label={d}>
-                  <select
-                    value={config.caja_hora_corte[i] ?? 18}
-                    onChange={(e) => void guardar({ caja_hora_corte: config.caja_hora_corte.map((h, j) => (j === i ? Number(e.target.value) : h)) })}
-                  >
-                    {Array.from({ length: 24 }, (_, h) => (
-                      <option key={h} value={h}>
-                        {String(h).padStart(2, "0")}:00
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              ))}
-            </div>
-          </>
+        {porDia && (
+          <div className="row">
+            {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d, i) => (
+              <Field key={d} label={d}>
+                <select
+                  value={config.caja_hora_cierre_dia[i] ?? ""}
+                  onChange={(e) => void guardar({ caja_hora_cierre_dia: config.caja_hora_cierre_dia.map((h, j) => (j === i ? (e.target.value === "" ? null : Number(e.target.value)) : h)) })}
+                >
+                  <option value="">General</option>
+                  {HORAS}
+                </select>
+              </Field>
+            ))}
+          </div>
         )}
       </section>
 

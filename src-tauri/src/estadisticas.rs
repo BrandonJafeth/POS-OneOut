@@ -157,7 +157,12 @@ pub async fn calcular(c: &mut SqliteConnection, t: &Turno) -> Res<Estadisticas> 
 }
 
 async fn dia(c: &mut SqliteConnection, caja_id: &str, dia: &str, hasta: &str) -> Res<Dia> {
-    let f = sqlx::query("SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total FROM ventas WHERE caja_id = ? AND dia = ? AND fecha <= ? AND estado = 'completada' AND eliminado_en IS NULL")
+    // Por día de negocio (el del turno de cada venta), como Ventas del día.
+    let f = sqlx::query(&format!(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(v.total), 0) AS total FROM ventas v LEFT JOIN caja_turnos t ON t.id = v.turno_id
+         WHERE v.caja_id = ? AND {} = ? AND v.fecha <= ? AND v.estado = 'completada' AND v.eliminado_en IS NULL",
+        crate::ventas::DIA_NEGOCIO
+    ))
         .bind(caja_id)
         .bind(dia)
         .bind(hasta)

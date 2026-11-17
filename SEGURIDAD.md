@@ -171,6 +171,8 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `bitacora_listar / verificar` | — | ✔ | ✔ |
 | `caja_estado` | ✔ | ✔ | — |
 | `caja_abrir` | ✔ | ✔ | — |
+| `caja_queda` | ✔ | ✔ | — |
+| `caja_corregir_dia` | — | ✔ | — |
 | `caja_movimiento` | ✔ | ✔ | — |
 | `caja_detalle` | ✔ | ✔ | — |
 | `caja_necesita_nota` | ✔ | ✔ | — |
@@ -196,6 +198,7 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `venta_cobrar` | ✔ | ✔ | — |
 | `venta_obtener` | ✔ | ✔ | — |
 | `venta_listar_dia` | ✔ | ✔ | — |
+| `venta_listar_turno` | ✔ | ✔ | — |
 | `venta_imprimir` | ✔ | ✔ | — |
 | `venta_correcciones` | ✔ | ✔ | — |
 | `venta_corregir_pago` | — | ✔ | — |

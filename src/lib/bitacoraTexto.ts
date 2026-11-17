@@ -50,12 +50,22 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
 
   switch (e.accion as string) {
     // ── Caja y dinero
-    case "caja.abrir":
-      return f("dinero", `Abrió la caja con un fondo de ${plata(d.fondo)}.`);
+    case "caja.abrir": {
+      // Después de un cierre del mismo día: cómo se decidió para qué día cuenta.
+      const tras = { tarde: " después del cierre: cuenta para el día siguiente", hoy: " después de un cierre: eligió que cuenta para hoy", manana: " después de un cierre: eligió que cuenta para mañana" }[String(d.caso)] ?? "";
+      return f("dinero", `Abrió la caja${tras} con un fondo de ${plata(d.fondo)}${txt(d.dia) ? ` (día ${txt(d.dia)})` : ""}.`, !!tras);
+    }
+    case "caja.diferencia_apertura":
+      return f("dinero", `Al abrir, el fondo contado (${plata(d.contado)}) no coincide con lo que quedó en el cierre anterior (${plata(d.esperada)}): diferencia de ${plata(d.diferencia)}.`, true);
+    case "caja.queda":
+      return f("dinero", `Al cerrar dejó ${plata(d.queda)} en la gaveta para la próxima caja; retiro de cierre ${plata(d.retiro)}.`);
+    case "caja.corregir_dia":
+      return f("dinero", `Corrigió el día de una caja: del ${txt(d.antes)} al ${txt(d.despues)}${motivo(d)}${autorizo}.`, true);
     case "caja.cerrar": {
       const dif = num(d.diferencia) ?? 0;
       const cuadre = dif === 0 ? "Cuadró." : dif < 0 ? `Faltaron ${monto(-dif)}.` : `Sobraron ${monto(dif)}.`;
-      return f("dinero", `Cerró la caja: ${num(d.ventas) ?? 0} ventas por ${plata(d.total)}. Esperado ${plata(d.esperado)}, contado ${plata(d.contado)}. ${cuadre}`, dif !== 0);
+      const otro = txt(d.enNombreDe) ? ` en nombre de ${txt(d.enNombreDe)}` : "";
+      return f("dinero", `Cerró la caja${otro}: ${num(d.ventas) ?? 0} ventas por ${plata(d.total)}. Debía haber en caja ${plata(d.esperado)}, se contó ${plata(d.contado)}. ${cuadre}`, dif !== 0 || !!otro);
     }
     case "caja.diferencia":
       return f("dinero", `El cierre quedó con una diferencia de ${plata(d.diferencia)}, más de lo permitido: hay que revisarlo.`, true);
@@ -239,8 +249,8 @@ const CONFIG: Record<string, string> = {
   departamentos_color: "colores de los departamentos",
   color_fondo: "color de fondo",
   caja_turno_compartido: "turno compartido",
-  caja_varios_turnos: "varios turnos al día",
-  caja_hora_corte: "hora de corte de la caja",
+  caja_hora_cierre: "hora de cierre del negocio",
+  caja_hora_cierre_dia: "hora de cierre por día",
   caja_umbral_diferencia: "diferencia permitida al cerrar",
   caja_salida_max_sin_pin: "salida máxima sin PIN",
   permitir_vender_sin_existencia: "vender sin existencia",
