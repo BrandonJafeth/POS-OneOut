@@ -56,6 +56,38 @@ export default function ConfigCaja() {
             <span className="ayuda">{AYUDA_TURNO_COMPARTIDO}</span>
           </span>
         </label>
+        <label className="opcion">
+          <input type="checkbox" checked={config.caja_varios_turnos} onChange={(e) => void guardar({ caja_varios_turnos: e.target.checked })} />
+          <span>
+            <strong>Hay varios turnos al día (por ejemplo mañana y tarde)</strong>
+            <span className="ayuda">
+              Si después de cerrar la caja llega un cliente y se vuelve a abrir, esa caja ya cuenta para mañana: al otro día se sigue vendiendo en ella sin cerrarla. Con varios turnos, eso pasa solo desde la hora de corte; antes, la caja que se abre es el turno siguiente de hoy.
+            </span>
+          </span>
+        </label>
+        {config.caja_varios_turnos && (
+          <>
+            <p className="muted">
+              Hora de corte de cada día: después de un cierre, la caja que se abre desde esa hora cuenta para mañana. Póngala después de la hora en que abre el último turno de ese día.
+            </p>
+            <div className="row">
+              {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d, i) => (
+                <Field key={d} label={d}>
+                  <select
+                    value={config.caja_hora_corte[i] ?? 18}
+                    onChange={(e) => void guardar({ caja_hora_corte: config.caja_hora_corte.map((h, j) => (j === i ? Number(e.target.value) : h)) })}
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, "0")}:00
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card">

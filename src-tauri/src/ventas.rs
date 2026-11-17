@@ -748,7 +748,7 @@ const SIN_EFECTIVO: &str = "En la caja ya no queda ese efectivo (salió en retir
 async fn turno_para_ajuste(c: &mut SqliteConnection, caja_id: &str) -> Res<Turno> {
     match caja::turno_abierto(c, caja_id).await? {
         None => Err("Esa venta es de una caja ya cerrada: el ajuste queda en la caja de hoy, así que primero ábrala.".into()),
-        Some(t) if t.dia != dia_local() => Err(format!("Quedó abierta la caja del {}: ciérrela y abra la de hoy para registrar el ajuste.", t.dia)),
+        Some(t) if t.dia < dia_local() => Err(format!("Quedó abierta la caja del {}: ciérrela y abra la de hoy para registrar el ajuste.", t.dia)),
         Some(t) => Ok(t),
     }
 }

@@ -55,7 +55,7 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     // Sin efectivo el monto ya es el total exacto: el cursor va directo al primer dato que falta
-    // (nombre de quien paga, banco, referencia); con efectivo, a lo recibido.
+    // (referencia, banco, nombre de quien paga); con efectivo, a lo recibido.
     const falta = [...(extrasRef.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select") ?? [])].find((x) => !x.value);
     if (falta && !forma(filas[0]?.formaPagoId ?? "")?.daVuelto) return falta.focus();
     primerMonto.current?.focus();
@@ -176,9 +176,9 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
     const fp = forma(f.formaPagoId);
     return (
       <>
-        {fp?.tipo === "sinpe" && (
-          <Field label="Nombre de quien paga" ayuda={!(f.pagador ?? "").trim() ? "Obligatorio." : undefined}>
-            <input autoComplete="off" maxLength={60} value={f.pagador ?? ""} onChange={(e) => set(f.clave, { pagador: e.target.value })} />
+        {fp?.requiereReferencia && (
+          <Field label="N.º de referencia" ayuda={!(f.referencia ?? "").trim() ? "Obligatorio." : undefined}>
+            <input autoComplete="off" value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
           </Field>
         )}
         {fp?.requiereBanco && (
@@ -193,9 +193,9 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
             </select>
           </Field>
         )}
-        {fp?.requiereReferencia && (
-          <Field label="N.º de referencia" ayuda={!(f.referencia ?? "").trim() ? "Obligatorio." : undefined}>
-            <input autoComplete="off" value={f.referencia ?? ""} onChange={(e) => set(f.clave, { referencia: e.target.value })} />
+        {fp?.tipo === "sinpe" && (
+          <Field label="Nombre de quien paga" ayuda={!(f.pagador ?? "").trim() ? "Obligatorio." : undefined}>
+            <input autoComplete="off" maxLength={60} value={f.pagador ?? ""} onChange={(e) => set(f.clave, { pagador: e.target.value })} />
           </Field>
         )}
         {fp?.pideUltimos4 && (

@@ -239,6 +239,8 @@ const CONFIG: Record<string, string> = {
   departamentos_color: "colores de los departamentos",
   color_fondo: "color de fondo",
   caja_turno_compartido: "turno compartido",
+  caja_varios_turnos: "varios turnos al día",
+  caja_hora_corte: "hora de corte de la caja",
   caja_umbral_diferencia: "diferencia permitida al cerrar",
   caja_salida_max_sin_pin: "salida máxima sin PIN",
   permitir_vender_sin_existencia: "vender sin existencia",

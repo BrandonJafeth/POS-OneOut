@@ -141,7 +141,7 @@ pub async fn turno_para_vender(c: &mut SqliteConnection, caja_id: &str, a: &Acto
     let comp = compartido(c).await;
     match turno_abierto(c, caja_id).await? {
         None => Err("La caja está cerrada: ábrala para vender".into()),
-        Some(t) if t.dia != dia_local() => Err(format!("Quedó abierta la caja del {} ({}): hay que cerrarla con su conteo antes de vender hoy.", t.dia, t.usuario_apertura)),
+        Some(t) if t.dia < dia_local() => Err(format!("Quedó abierta la caja del {} ({}): hay que cerrarla con su conteo antes de vender hoy.", t.dia, t.usuario_apertura)),
         Some(t) => {
             puede_operar(a, &t, comp)?;
             Ok(t)
@@ -250,7 +250,7 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
         (t, comp, n)
     };
     Ok(EstadoCaja {
-        de_otro_dia: t.as_ref().is_some_and(|t| t.dia != dia_local()),
+        de_otro_dia: t.as_ref().is_some_and(|t| t.dia < dia_local()),
         puede_usar: t.as_ref().is_some_and(|t| puede_operar(a, t, comp).is_ok()),
         puede_cerrar: t.as_ref().is_some_and(|t| puede_cerrar(a, t, comp).is_ok()),
         turno: t,
@@ -290,6 +290,43 @@ pub async fn reloj_atrasado(c: &mut SqliteConnection, para: &str) -> Res<()> {
     Ok(())
 }
 
+/// Un cierre antes de esta hora es de la noche anterior (se cerró tarde, pasada la medianoche).
+const MADRUGADA: u32 = 5;
+
+/// ¿El turno que se abre cuenta para mañana? Solo si la caja de hoy ya se cerró (cliente que llega
+/// después del cierre). Con varios turnos al día, además hace falta que sea desde la hora de corte:
+/// antes de esa hora es el turno de la tarde y cuenta para hoy.
+fn cuenta_para_manana(cerrada_hoy: bool, varios_turnos: bool, hora: u32, hora_corte: u32) -> bool {
+    cerrada_hoy && (!varios_turnos || hora >= hora_corte)
+}
+
+/// Jornada del turno que se abre: hoy, o mañana (ver `cuenta_para_manana`). El turno de mañana se
+/// puede usar desde ya y al otro día se sigue vendiendo en él sin cerrarlo.
+async fn dia_para_abrir(c: &mut SqliteConnection, caja_id: &str) -> Res<String> {
+    use chrono::{Datelike, Timelike};
+    let ahora = chrono::Local::now();
+    let hoy = dia_local();
+    // Se mira cuándo se cerró, no cuándo se abrió: el turno de mañana cerrado esta noche no adelanta
+    // otro día; y un cierre de madrugada cuenta como de la noche anterior.
+    let cerrada_hoy: bool = sqlx::query_scalar(&format!(
+        "SELECT EXISTS(SELECT 1 FROM caja_turnos WHERE caja_id = ? AND dia = ? AND estado = 'cerrado' AND eliminado_en IS NULL
+           AND date(cerrado_en, 'localtime', '-{MADRUGADA} hours') = ?)"
+    ))
+    .bind(caja_id)
+    .bind(&hoy)
+    .bind(&hoy)
+    .fetch_one(&mut *c)
+    .await
+    .map_err(e)?;
+    let varios = config::booleano_con(c, "caja_varios_turnos", false).await;
+    // Una hora por día de la semana, de lunes a domingo (p. ej. el sábado se cierra antes).
+    let corte = config::valor_con(c, "caja_hora_corte")
+        .await
+        .and_then(|v| v.get(ahora.weekday().num_days_from_monday() as usize).and_then(|h| h.as_u64()))
+        .unwrap_or(18) as u32;
+    Ok(if cuenta_para_manana(cerrada_hoy, varios, ahora.hour(), corte) { (ahora + chrono::Duration::days(1)).format("%Y-%m-%d").to_string() } else { hoy })
+}
+
 pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo) -> Res<Turno> {
     a.exigir("caja", "abrir la caja")?;
     let (fondo, detalle) = total_conteo(conteo, &denominaciones(pool).await)?;
@@ -298,7 +335,7 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     if let Some(t) = turno_abierto(&mut tx, caja_id).await? {
         let comp = compartido(&mut tx).await;
-        return Err(if t.dia != dia_local() {
+        return Err(if t.dia < dia_local() {
             format!("Quedó abierta la caja del {} ({}): ciérrela primero con su conteo.", t.dia, t.usuario_apertura)
         } else if t.usuario_apertura_id == a.id {
             "Su caja ya está abierta.".into()
@@ -309,6 +346,7 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
         });
     }
     reloj_atrasado(&mut tx, "abrir la caja").await?;
+    let dia = dia_para_abrir(&mut tx, caja_id).await?;
     sqlx::query(
         "INSERT INTO caja_turnos (id, sucursal_id, caja_id, usuario_apertura_id, abierto_en, monto_inicial, estado, dia, conteo_inicial, creado_en, actualizado_en)
          SELECT ?, sucursal_id, id, ?, ?, ?, 'abierto', ?, ?, ?, ? FROM cajas WHERE id = ? AND eliminado_en IS NULL",
@@ -317,7 +355,7 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
     .bind(&a.id)
     .bind(&ahora)
     .bind(fondo)
-    .bind(dia_local())
+    .bind(&dia)
     .bind(detalle.to_string())
     .bind(&ahora)
     .bind(&ahora)
@@ -988,7 +1026,7 @@ pub async fn reabrir(pool: &SqlitePool, a: &Actor, turno_id: &str, pin: &str, mo
     if t.estado != "cerrado" {
         return Err("Esa caja ya está abierta: no hace falta reabrirla.".into());
     }
-    if t.dia != dia_local() {
+    if t.dia < dia_local() {
         return Err("Solo se puede reabrir la caja del mismo día. Lo de días anteriores se corrige con un ajuste del dueño en la caja de hoy.".into());
     }
     if turno_abierto(&mut tx, &t.caja_id).await?.is_some() {
@@ -1203,7 +1241,8 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
     ))
     .bind(caja_id)
     .bind(desde)
-    .bind(hasta)
+    // Hasta hoy incluye el turno abierto tras el cierre, que ya cuenta para mañana.
+    .bind(if hasta >= dia_local().as_str() { "9999-12-31" } else { hasta })
     .bind(admin as i64)
     .bind(&a.id)
     .fetch_all(&mut *c)
@@ -1332,6 +1371,61 @@ pub mod tests {
         // Turno de ayer: no se reabre.
         sqlx::query("UPDATE caja_turnos SET dia = '2000-01-01' WHERE id = ?").bind(&t.id).execute(p).await.unwrap();
         assert!(reabrir(p, &dueno, &t.id, "246813", "Quiero reabrir").await.unwrap_err().contains("mismo día"));
+    }
+
+    #[tokio::test]
+    async fn segunda_apertura_del_dia_cuenta_para_manana() {
+        // De madrugada los cierres de "ahora" son de la noche anterior: la prueba no aplica.
+        if chrono::Timelike::hour(&chrono::Local::now()) < MADRUGADA {
+            return;
+        }
+        let (bd, _, dueno, cajero) = base_con_usuarios().await;
+        let p = &bd.pool;
+        let hoy = dia_local();
+        let un = || conteo(&[(1000, 1)]);
+        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
+        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
+        // Llega un cliente después del cierre: la caja que se abre ya es la de mañana y se puede vender.
+        let t = abrir(p, &cajero, CAJA_1, &un()).await.unwrap();
+        assert!(t.dia > hoy);
+        let mut c = p.acquire().await.unwrap();
+        assert_eq!(turno_para_vender(&mut c, CAJA_1, &cajero).await.unwrap().id, t.id);
+        drop(c);
+        assert!(!estado(p, &cajero, CAJA_1).await.unwrap().de_otro_dia);
+        // Se ve en el historial "hasta hoy" (para imprimir su Z esta noche).
+        assert!(listar(p, &dueno, CAJA_1, &hoy, &hoy).await.unwrap().iter().any(|f| f.turno.id == t.id));
+        // Se cierra esta noche y llega otro cliente: sigue siendo mañana, no pasado mañana.
+        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
+        let t2 = abrir(p, &cajero, CAJA_1, &un()).await.unwrap();
+        assert_eq!(t2.dia, t.dia);
+        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
+        // "Mañana en la mañana": los turnos de mañana se cerraron la noche anterior → la caja es la del día.
+        sqlx::query("UPDATE caja_turnos SET dia = ?, cerrado_en = '2000-01-01T12:00:00.000Z'").bind(&hoy).execute(p).await.unwrap();
+        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
+        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
+        // Ese turno se quedó abierto toda la noche y se cerró de madrugada (2 a. m.): no es el cierre
+        // del día, la caja que se abre en la mañana sigue siendo de hoy.
+        let madrugada = chrono::Local::now().date_naive().and_hms_opt(2, 0, 0).unwrap().and_local_timezone(chrono::Local).unwrap();
+        let madrugada = madrugada.with_timezone(&chrono::Utc).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        sqlx::query("UPDATE caja_turnos SET cerrado_en = ?").bind(&madrugada).execute(p).await.unwrap();
+        assert_eq!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia, hoy);
+        cerrar(p, &cajero, CAJA_1, &un(), "").await.unwrap();
+        // Varios turnos al día, ya pasada la hora de corte (0 = siempre): el cliente tardío cuenta para mañana.
+        crate::config::guardar(p, &dueno, "caja_varios_turnos", &json!(true)).await.unwrap();
+        crate::config::guardar(p, &dueno, "caja_hora_corte", &json!([0, 0, 0, 0, 0, 0, 0])).await.unwrap();
+        assert!(abrir(p, &cajero, CAJA_1, &un()).await.unwrap().dia > hoy);
+    }
+
+    #[test]
+    fn manana_segun_turnos_y_hora_de_corte() {
+        // Un turno al día: tras el cierre, siempre mañana; sin cierre, hoy.
+        assert!(cuenta_para_manana(true, false, 10, 18));
+        assert!(!cuenta_para_manana(false, false, 21, 18));
+        // Varios turnos: el de la tarde (antes del corte) es de hoy; el cliente de la noche, de mañana.
+        assert!(!cuenta_para_manana(true, true, 13, 18));
+        assert!(cuenta_para_manana(true, true, 18, 18));
+        assert!(cuenta_para_manana(true, true, 21, 18));
+        assert!(!cuenta_para_manana(false, true, 21, 18));
     }
 
     #[test]

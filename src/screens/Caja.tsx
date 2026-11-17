@@ -148,7 +148,7 @@ export default function Caja() {
             <div className="caja-cabeza">
               <div>
                 <h2>
-                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : "Hoy"}</Badge>
+                  Caja abierta <Badge tono={caja.deOtroDia ? "aviso" : "ok"}>{caja.deOtroDia ? `Desde el ${turno.dia}` : turno.dia > diaLocal() ? `Cuenta para el ${turno.dia}` : "Hoy"}</Badge>
                 </h2>
                 <p className="muted">
                   Abrió {turno.usuarioApertura} a las {hora(turno.abiertoEn)} con {monto(turno.fondo)}
@@ -737,7 +737,7 @@ function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void
                 {t.estado === "cerrado" && d.veTotales && <BotonVerPapel d={d} opciones={opciones} denominaciones={p.estado.denominaciones} />}
                 {t.estado === "cerrado" && <BotonPdf d={d} denominaciones={p.estado.denominaciones} />}
                 <span className="separador" />
-                {admin && t.estado === "cerrado" && t.dia === diaLocal() && (
+                {admin && t.estado === "cerrado" && t.dia >= diaLocal() && (
                   <Button icono={RotateCcw} onClick={() => setReabrir(true)}>
                     Reabrir
                   </Button>

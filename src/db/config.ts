@@ -46,6 +46,10 @@ export interface ConfigApp {
   caja_salida_max_sin_pin: number;
   /** Otros usuarios pueden vender en el turno abierto por otra persona (el turno es de la caja). */
   caja_turno_compartido: boolean;
+  /** Varios turnos al día (mañana/tarde). No: lo que se abre después del cierre del día cuenta para mañana. */
+  caja_varios_turnos: boolean;
+  /** Con varios turnos: hora (0-23) de lunes a domingo desde la que una caja abierta tras un cierre cuenta para mañana. */
+  caja_hora_corte: number[];
   /** Casillas del cierre Z marcadas por defecto. */
   caja_z_detalle_completo: boolean;
   caja_z_por_departamento: boolean;
@@ -99,6 +103,8 @@ export const CONFIG_DEFECTO: ConfigApp = {
   caja_umbral_diferencia: 1000,
   caja_salida_max_sin_pin: 20000,
   caja_turno_compartido: true,
+  caja_varios_turnos: false,
+  caja_hora_corte: [18, 18, 18, 18, 18, 18, 18],
   caja_z_detalle_completo: false,
   caja_z_por_departamento: false,
   caja_no_venta_motivos: ["Cambio de billetes", "Devolución", "Otro"],

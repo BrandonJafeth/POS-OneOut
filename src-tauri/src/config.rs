@@ -73,6 +73,10 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         },
         "caja_umbral_diferencia" | "caja_salida_max_sin_pin" | "caja_quitar_linea_bitacora" => entero(0, 100_000_000),
         "caja_no_venta_umbral" => entero(0, 1000),
+        "caja_hora_corte" => match v.as_array() {
+            Some(l) if l.len() == 7 && l.iter().all(|h| h.as_u64().is_some_and(|h| h <= 23)) => Ok(()),
+            _ => Err("«caja_hora_corte»: siete horas de 0 a 23, de lunes a domingo".into()),
+        },
         "pin_min_dueno" | "pin_min_cajero" => entero(4, 12),
         "sesion_inactividad_min" => entero(1, 240),
         "permitir_vender_sin_existencia" | "venta_mostrar_existencia" | "importacion_codigos_internos" => si_no(),
@@ -100,7 +104,7 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
             Some(t) if t.is_empty() || chrono::DateTime::parse_from_rfc3339(t).is_ok() => Ok(()),
             _ => Err("«reloj_ignorar_hasta»: vacío o una fecha como \"2027-01-31T18:00:00.000Z\"".into()),
         },
-        "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
+        "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_varios_turnos" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
         _ => Ok(()),
     }
 }
@@ -155,6 +159,8 @@ mod tests {
         // Turno compartido, casillas del Z y "no venta": dueño y técnico, nunca el cajero.
         for (clave, v1, v2) in [
             ("caja_turno_compartido", json!(true), json!(false)),
+            ("caja_varios_turnos", json!(true), json!(false)),
+            ("caja_hora_corte", json!([20, 20, 20, 20, 20, 13, 18]), json!([18, 18, 18, 18, 18, 18, 18])),
             ("caja_z_detalle_completo", json!(true), json!(false)),
             ("caja_z_por_departamento", json!(true), json!(false)),
             ("caja_no_venta_umbral", json!(3), json!(0)),
@@ -180,6 +186,8 @@ mod tests {
             ("caja_umbral_diferencia", json!(-5)),
             ("caja_denominaciones", json!([])),
             ("caja_turno_compartido", json!("si")),
+            ("caja_hora_corte", json!(18)),
+            ("caja_hora_corte", json!([18, 18, 18, 18, 18, 18, 24])),
         ] {
             assert!(guardar(&bd.pool, &tec, clave, &malo).await.is_err(), "{clave} = {malo}");
         }
