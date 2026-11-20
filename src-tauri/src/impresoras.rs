@@ -44,6 +44,8 @@ pub struct Impresora {
     pub sin_modo_chino: bool,
     pub barras: String,
     pub cortador: bool,
+    /// CODE128 con el número en el comprobante de apartado (apagado hasta probarlo en la impresora).
+    pub code128: bool,
     pub gaveta: bool,
     pub baudios: i64,
     /// Documentos asignados a esta impresora.
@@ -62,6 +64,7 @@ fn a_impresora(f: &sqlx::sqlite::SqliteRow) -> Impresora {
         sin_modo_chino: f.get::<i64, _>("sin_modo_chino") == 1,
         barras: f.get("barras"),
         cortador: f.get::<i64, _>("cortador") == 1,
+        code128: f.get::<i64, _>("code128") == 1,
         gaveta: f.get::<i64, _>("gaveta") == 1,
         baudios: f.get("baudios"),
         documentos: f.get::<Option<String>, _>("documentos").map(|s| s.split(',').map(String::from).collect()).unwrap_or_default(),
@@ -97,6 +100,8 @@ pub struct Datos {
     pub sin_modo_chino: bool,
     pub barras: String,
     pub cortador: bool,
+    #[serde(default)]
+    pub code128: bool,
     pub gaveta: bool,
     #[serde(default = "baudios_defecto")]
     pub baudios: i64,
@@ -153,11 +158,12 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, d: &Datos) -> 
         sqlx::query("UPDATE impresoras SET gaveta = 0, actualizado_en = ? WHERE caja_id = ? AND id <> ? AND gaveta = 1").bind(&ahora).bind(caja_id).bind(&id).execute(&mut *tx).await.map_err(e)?;
     }
     sqlx::query(
-        "INSERT INTO impresoras (id, sucursal_id, caja_id, nombre, conexion, destino, ancho_mm, columnas, code_page, sin_modo_chino, barras, cortador, gaveta, baudios, creado_en, actualizado_en)
-         SELECT ?1, c.sucursal_id, c.id, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14 FROM cajas c WHERE c.id = ?2
+        "INSERT INTO impresoras (id, sucursal_id, caja_id, nombre, conexion, destino, ancho_mm, columnas, code_page, sin_modo_chino, barras, cortador, gaveta, baudios, creado_en, actualizado_en, code128)
+         SELECT ?1, c.sucursal_id, c.id, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15 FROM cajas c WHERE c.id = ?2
          ON CONFLICT (id) DO UPDATE SET nombre = excluded.nombre, conexion = excluded.conexion, destino = excluded.destino, ancho_mm = excluded.ancho_mm,
            columnas = excluded.columnas, code_page = excluded.code_page, sin_modo_chino = excluded.sin_modo_chino, barras = excluded.barras,
-           cortador = excluded.cortador, gaveta = excluded.gaveta, baudios = excluded.baudios, actualizado_en = excluded.actualizado_en",
+           cortador = excluded.cortador, gaveta = excluded.gaveta, baudios = excluded.baudios, actualizado_en = excluded.actualizado_en,
+           code128 = excluded.code128",
     )
     .bind(&id)
     .bind(caja_id)
@@ -173,6 +179,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, d: &Datos) -> 
     .bind(d.gaveta as i64)
     .bind(d.baudios)
     .bind(&ahora)
+    .bind(d.code128 as i64)
     .execute(&mut *tx)
     .await
     .map_err(|err| if e(&err).contains("UNIQUE") { "Ya hay otra impresora con ese nombre".to_string() } else { e(err) })?;
@@ -242,6 +249,7 @@ pub struct Ajustes {
     pub sin_modo_chino: bool,
     pub barras: String,
     pub cortador: bool,
+    pub code128: bool,
 }
 
 async fn fila_documento(c: &mut SqliteConnection, caja_id: &str, documento: &str) -> Res<Option<Impresora>> {
@@ -268,6 +276,7 @@ pub async fn ajustes(pool: &SqlitePool, caja_id: &str, documento: &str) -> Res<O
         sin_modo_chino: i.sin_modo_chino,
         barras: i.barras,
         cortador: i.cortador,
+        code128: i.code128,
     }))
 }
 
@@ -380,7 +389,7 @@ pub mod tests {
     use crate::usuarios::tests::base_con_usuarios;
 
     pub fn datos(nombre: &str, destino: &str, gaveta: bool) -> Datos {
-        Datos { id: None, nombre: nombre.into(), conexion: "windows".into(), destino: destino.into(), ancho_mm: 58, columnas: 32, code_page: 19, sin_modo_chino: true, barras: "B".into(), cortador: false, gaveta, baudios: 9600 }
+        Datos { id: None, nombre: nombre.into(), conexion: "windows".into(), destino: destino.into(), ancho_mm: 58, columnas: 32, code_page: 19, sin_modo_chino: true, barras: "B".into(), cortador: false, code128: false, gaveta, baudios: 9600 }
     }
 
     /// Dos impresoras: tiquetes (con gaveta) y etiquetas. Devuelve sus destinos simulados.

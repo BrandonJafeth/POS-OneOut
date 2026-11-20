@@ -165,6 +165,14 @@ mod tests {
     use super::*;
     use crate::usuarios::tests::base_con_usuarios;
 
+    /// "Saldo a favor" está diseñado pero no implementado: no se puede elegir ni por el editor de claves.
+    #[test]
+    fn saldo_a_favor_no_se_puede_elegir() {
+        assert!(validar("apartado_cancelacion", &serde_json::json!("saldo_favor")).is_err());
+        assert!(validar("apartado_cancelacion", &serde_json::json!("devolver")).is_ok());
+        assert!(validar("apartado_cancelacion", &serde_json::json!("retener")).is_ok());
+    }
+
     #[tokio::test]
     async fn permisos_por_clave() {
         let (bd, tec, dueno, cajero) = base_con_usuarios().await;

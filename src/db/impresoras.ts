@@ -27,6 +27,8 @@ export interface Impresora {
   sinModoChino: boolean;
   barras: "A" | "B";
   cortador: boolean;
+  /** CODE128 con el número en el comprobante de apartado. */
+  code128: boolean;
   gaveta: boolean;
   baudios: number;
   documentos: Documento[];
@@ -51,10 +53,11 @@ export interface AjustesImpresora {
   sinModoChino: boolean;
   barras: "A" | "B";
   cortador: boolean;
+  code128?: boolean;
 }
 
-export function aSettings(a: Pick<AjustesImpresora, "codePage" | "sinModoChino" | "barras" | "cortador" | "columnas">): TicketSettings {
-  return { codePage: a.codePage, sinModoChino: a.sinModoChino, barras: a.barras === "A" ? "A" : "B", cortador: a.cortador, columnas: a.columnas };
+export function aSettings(a: Pick<AjustesImpresora, "codePage" | "sinModoChino" | "barras" | "cortador" | "columnas" | "code128">): TicketSettings {
+  return { codePage: a.codePage, sinModoChino: a.sinModoChino, barras: a.barras === "A" ? "A" : "B", cortador: a.cortador, columnas: a.columnas, code128: !!a.code128 };
 }
 
 export const NOMBRE_DOCUMENTO: Record<Documento, string> = {

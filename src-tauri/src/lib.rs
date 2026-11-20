@@ -562,9 +562,9 @@ async fn cuentas_reglas(st: St<'_>) -> Res<cuentas::Reglas> {
 }
 
 #[tauri::command]
-async fn cuenta_crear_apartado(st: St<'_>, espera_id: String, estado: calculo::Estado, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String) -> Res<cuentas::ResultadoAbono> {
+async fn cuenta_crear_apartado(st: St<'_>, espera_id: String, estado: calculo::Estado, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String, descripcion: Option<String>) -> Res<cuentas::ResultadoAbono> {
     let a = st.actor().await?;
-    cuentas::crear_apartado(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, monto, &pagos, &operacion_id).await
+    cuentas::crear_apartado_con(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, monto, &pagos, &operacion_id, descripcion.as_deref()).await
 }
 
 #[tauri::command]

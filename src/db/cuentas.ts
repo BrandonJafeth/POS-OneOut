@@ -17,8 +17,8 @@ export const reglasCuentas = () => invocar<Reglas>("cuentas_reglas");
 export const nuevaOperacion = () => ulid();
 
 /** La venta en espera pasa a ser un apartado con su primer abono (`monto`, pagado con `pagos`). */
-export const crearApartado = (esperaId: string, estado: EstadoEspera, monto: number, pagos: PagoEntrada[], operacionId: string) =>
-  invocar<ResultadoAbono>("cuenta_crear_apartado", { esperaId, estado, monto, pagos, operacionId });
+export const crearApartado = (esperaId: string, estado: EstadoEspera, monto: number, pagos: PagoEntrada[], operacionId: string, descripcion: string) =>
+  invocar<ResultadoAbono>("cuenta_crear_apartado", { esperaId, estado, monto, pagos, operacionId, descripcion: descripcion.trim() || null });
 
 /** Abono; si deja el saldo en 0, el apartado se liquida (se crea la venta) y, con `entregar`, se entrega. */
 export const abonar = (cuentaId: string, monto: number, pagos: PagoEntrada[], operacionId: string, entregar: boolean) =>

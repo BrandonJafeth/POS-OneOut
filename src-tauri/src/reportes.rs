@@ -68,6 +68,12 @@ pub fn periodo_anterior(desde: NaiveDate, hasta: NaiveDate) -> (NaiveDate, Naive
     (desde - chrono::Duration::days(n), desde - chrono::Duration::days(1))
 }
 
+/// Las mismas fechas del año pasado (19 nov → 19 nov). Un 29 de febrero pasa al 28.
+pub fn mismo_periodo_anio_pasado(desde: NaiveDate, hasta: NaiveDate) -> (NaiveDate, NaiveDate) {
+    let atras = |d: NaiveDate| d.checked_sub_months(chrono::Months::new(12)).unwrap_or(d);
+    (atras(desde), atras(hasta))
+}
+
 // ─────────── Tipos ───────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -227,6 +233,12 @@ pub struct Reporte {
     pub turnos: i64,
     pub totales: Totales,
     pub anterior: Totales,
+    /// Las mismas fechas del año pasado.
+    pub anio_desde: String,
+    pub anio_hasta: String,
+    pub anio: Totales,
+    /// Ventas por día del año pasado (solo día, tiquetes y ventas), para comparar día con día.
+    pub por_dia_anio: Vec<PorDia>,
     pub por_dia: Vec<PorDia>,
     pub por_departamento: Vec<Fila>,
     pub por_producto: Vec<Fila>,
@@ -241,6 +253,9 @@ pub struct Reporte {
     pub despues_del_cierre: Vec<Tardia>,
     pub diferencias: Vec<Diferencia>,
     pub por_cobrar: Vec<PorCobrar>,
+    /// Apartados abiertos hoy y lo que los clientes ya abonaron en ellos (dinero recibido que todavía no es venta).
+    pub apartados_abiertos: i64,
+    pub abonado_en_apartados: i64,
     pub utilidad: Vec<Utilidad>,
     /// Productos vendidos sin costo: no entran en la utilidad.
     pub sin_costo: Vec<String>,
@@ -264,6 +279,17 @@ fn ventas_sql(cols: &str) -> String {
 }
 
 async fn totales(c: &mut SqliteConnection, desde: &str, hasta: &str) -> Res<Totales> {
+    // Todo lo que suma sale de turnos cerrados de esas fechas: sin turnos, todo es cero (y no se
+    // recorren las líneas de venta; pasa siempre con "el año pasado" antes del primer año de uso).
+    let hay: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM caja_turnos WHERE estado = 'cerrado' AND dia BETWEEN ?1 AND ?2)")
+        .bind(desde)
+        .bind(hasta)
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
+    if !hay {
+        return Ok(Totales::default());
+    }
     let f = sqlx::query(&ventas_sql("COUNT(*) AS n, COALESCE(SUM(v.total), 0) AS total, COALESCE(SUM(v.descuento), 0) AS d"))
         .bind(desde)
         .bind(hasta)
@@ -320,6 +346,18 @@ pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> R
     let mut r = Reporte { desde: desde.into(), hasta: hasta.into(), anterior_desde: p0.to_string(), anterior_hasta: p1.to_string(), ..Default::default() };
     r.totales = totales(&mut c, desde, hasta).await?;
     r.anterior = totales(&mut c, &r.anterior_desde, &r.anterior_hasta).await?;
+    let (a0, a1) = mismo_periodo_anio_pasado(d0, d1);
+    (r.anio_desde, r.anio_hasta) = (a0.to_string(), a1.to_string());
+    r.anio = totales(&mut c, &r.anio_desde, &r.anio_hasta).await?;
+    r.por_dia_anio = sqlx::query_as::<_, (String, i64, i64)>(&(ventas_sql("t.dia, COUNT(*), SUM(v.total)") + " GROUP BY t.dia ORDER BY t.dia"))
+        .bind(&r.anio_desde)
+        .bind(&r.anio_hasta)
+        .fetch_all(&mut *c)
+        .await
+        .map_err(e)?
+        .into_iter()
+        .map(|(dia, tiquetes, ventas)| PorDia { dia, tiquetes, ventas, ..Default::default() })
+        .collect();
 
     // Turnos cerrados del rango: control contra su Z congelado (misma regla) y diferencias de caja.
     let turnos = sqlx::query(
@@ -638,6 +676,13 @@ pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> R
         PorCobrar { numero: f.get::<Option<String>, _>("numero").unwrap_or_default(), tipo: f.get("tipo"), cliente: f.get("nombre"), fecha_limite: limite, saldo: f.get("saldo"), dias_atraso: atraso }
     })
     .collect();
+
+    (r.apartados_abiertos, r.abonado_en_apartados) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(total - saldo - condonado), 0) FROM cuentas WHERE tipo = 'apartado' AND estado = 'abierta' AND eliminado_en IS NULL",
+    )
+    .fetch_one(&mut *c)
+    .await
+    .map_err(e)?;
 
     // Turnos abiertos: aparte, "en curso" (no suman al rango).
     r.en_curso = sqlx::query(

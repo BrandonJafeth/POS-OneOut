@@ -87,6 +87,20 @@ export class EscPos {
   }
 
   /**
+   * GS k 73 — CODE128 (juego B) con el texto debajo. Solo ASCII imprimible (ej. "A-0012").
+   * Rust lo deja pasar solo si empieza con {A, {B o {C (escpos.rs).
+   */
+  barcode128(texto: string): this {
+    if (!/^[\x20-\x7e]{1,40}$/.test(texto)) throw new Error("CODE128: solo letras, números y signos simples (hasta 40)");
+    const datos = Array.from(`{B${texto}`, (c) => c.charCodeAt(0));
+    this.raw(GS, 0x68, 60); // alto 60 puntos
+    this.raw(GS, 0x77, 2); // módulo 2: "A-0012" mide ~200 de 384 puntos
+    this.raw(GS, 0x48, 2); // texto debajo
+    this.raw(GS, 0x6b, 73, datos.length, ...datos);
+    return this.raw(LF);
+  }
+
+  /**
    * GS v 0 — imagen de 1 bit (MSB = punto de la izquierda), respeta ESC a.
    * Se manda en franjas: algunas POS-58 tienen poco búfer y se traban con imágenes grandes.
    */

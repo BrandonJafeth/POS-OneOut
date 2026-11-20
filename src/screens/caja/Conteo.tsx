@@ -48,7 +48,8 @@ export default function ConteoDinero(p: { denominaciones: number[]; valor: Conte
   return (
     <div className="conteo">
       <div className="segmento" role="group" aria-label="Forma de contar">
-        <button type="button" aria-pressed={porTotal} onClick={() => p.onCambio({ cantidades: {}, total: totalConteo(p.valor) })}>
+        {/* Si ya estaba en "total", tocarlo igual deja el cursor en el monto (si no, lo escrito se perdía). */}
+        <button type="button" aria-pressed={porTotal} onClick={() => (p.onCambio({ cantidades: {}, total: totalConteo(p.valor) }), totalRef.current?.focus())}>
           Escribir el total
         </button>
         <button type="button" aria-pressed={!porTotal} onClick={() => p.onCambio({ cantidades: {}, total: null })}>

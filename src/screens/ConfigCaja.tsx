@@ -1,6 +1,6 @@
 // Caja y cierre (dueño y técnico): turno compartido, casillas del cierre Z por defecto, "no venta"
 // y umbrales. Las claves caja_* solo las cambian el dueño y el técnico (lo revisa Rust).
-import { Save } from "lucide-react";
+import { CopyCheck, Save } from "lucide-react";
 import { useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
@@ -25,6 +25,10 @@ export default function ConfigCaja() {
   const [motivos, setMotivos] = useState(config.caja_no_venta_motivos.join("\n"));
   const [umbralNv, setUmbralNv] = useState(String(config.caja_no_venta_umbral));
   const [quitar, setQuitar] = useState(conMiles(String(config.caja_quitar_linea_bitacora)));
+  // La hora que más se repite: punto de partida para "misma hora para todos".
+  const horas = config.caja_horario.filter((x): x is string => x !== null);
+  const cuenta = (h: string) => horas.filter((x) => x === h).length;
+  const [todos, setTodos] = useState([...horas].sort((a, b) => cuenta(b) - cuenta(a))[0] ?? "18:30");
 
   async function guardar(cambios: Record<string, unknown>, ok = "Guardado.") {
     setError("");
@@ -60,9 +64,20 @@ export default function ConfigCaja() {
         </label>
         <h3>Días de trabajo y hora de cierre</h3>
         <p className="ayuda">
-          Ponga una hora un poco antes de la hora real de cierre, para que un cliente que llega justo al cerrar cuente para el siguiente día de trabajo sin
-          preguntar.
+          Ponga la hora real en que cierra el negocio. Mientras la caja siga abierta se vende normal, aunque ya pasó la hora.
         </p>
+        <div className="row horario-todos">
+          <Field label="Misma hora para todos los días de trabajo" ayuda="Después cambie solo el día que sea distinto." className="sin-margen">
+            <input type="time" step={60} value={todos} onChange={(e) => e.target.value && setTodos(e.target.value)} />
+          </Field>
+          <Button
+            icono={CopyCheck}
+            disabled={horas.every((h) => h === todos)}
+            onClick={() => void guardar({ caja_horario: config.caja_horario.map((x) => (x === null ? null : todos)) }, "Hora aplicada a todos los días de trabajo.")}
+          >
+            Aplicar a todos
+          </Button>
+        </div>
         <table className="tbl tbl-compacta horario">
           <tbody>
             {DIAS.map((d, i) => {
@@ -77,7 +92,7 @@ export default function ConfigCaja() {
                   <th scope="row">{d}</th>
                   <td>
                     <label className="opcion sin-margen">
-                      <input type="checkbox" checked={h !== null} onChange={(e) => cambiar(e.target.checked ? "18:30" : null)} />
+                      <input type="checkbox" checked={h !== null} onChange={(e) => cambiar(e.target.checked ? todos : null)} />
                       <span>Se trabaja</span>
                     </label>
                   </td>
@@ -97,9 +112,9 @@ export default function ConfigCaja() {
           </tbody>
         </table>
         <p className="ayuda">
-          Si la caja ya se cerró y se abre otra desde la hora de cierre (cliente que llega tarde), cuenta para el siguiente día de trabajo. Si se abre antes,
-          se pregunta si es para hoy o para el siguiente día de trabajo. En un día que no se trabaja, abrir la caja pide confirmar. Cambiar el horario no mueve
-          las cajas ya abiertas o cerradas.
+          Si ya cerró la caja y llega un cliente: abierta otra vez antes de la hora de cierre, se pregunta si cuenta para hoy o para el siguiente día de
+          trabajo; abierta después, cuenta para el siguiente día. En un día que no se trabaja, abrir la caja pide confirmar. Cambiar el horario no mueve las
+          cajas ya abiertas o cerradas.
         </p>
       </section>
 
