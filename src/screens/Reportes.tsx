@@ -65,6 +65,8 @@ const GRUPOS: { titulo: string; tabs: [Tab, string][] }[] = [
 /** Reportes que no dependen del rango de fechas de ventas. */
 const SIN_RANGO: Tab[] = ["inventario", "precios"];
 type Compara = "anterior" | "anio";
+/** Filas de "formas de pago" que no son dinero recibido (las arma reportes.rs). */
+const NO_ES_DINERO = ["Pagadas con abonos", "A crédito (por cobrar)"];
 
 /** Tabla de una pestaña: se ve, se ordena y se exporta con la misma definición. */
 interface Tabla<T = any> {
@@ -447,6 +449,11 @@ function armar(tab: Exclude<Tab, "cierres" | "inventario" | "precios">, r: Repor
       // Sin ventas registradas en esas fechas del año pasado: se dice, sin barras ni porcentajes vacíos.
       const sinAnio = anio && r.anio.tiquetes === 0 && r.anio.ventas === 0;
       const datos = serie(r, sinAnio ? "anterior" : compara);
+      const dinero = r.porForma
+        .filter((f) => !NO_ES_DINERO.includes(f.forma))
+        .map((f) => ({ nombre: f.forma, monto: f.ventas + f.abonos }))
+        .filter((f) => f.monto > 0)
+        .sort((a, b) => b.monto - a.monto);
       return {
         titulo: "Resumen de ventas",
         resumen: resumenDe(r.totales, anio ? r.anio : r.anterior, cuando, conCuentas, sinAnio ? "Sin datos del año pasado" : undefined),
@@ -465,7 +472,8 @@ function armar(tab: Exclude<Tab, "cierres" | "inventario" | "precios">, r: Repor
             <div className="tops">
               <Top titulo="Departamentos" filas={r.porDepartamento.map((d) => ({ nombre: d.nombre, monto: d.monto }))} total={total} onVer={() => irA("departamentos")} />
               <Top titulo="Productos más vendidos" filas={r.porProducto.map((d) => ({ nombre: d.nombre, monto: d.monto }))} total={total} onVer={() => irA("productos")} />
-              <Top titulo="Formas de pago" filas={r.porForma.filter((f) => f.ventas > 0).map((f) => ({ nombre: f.forma, monto: f.ventas }))} total={total} onVer={() => irA("formas")} />
+              {/* Dinero que entró por cada forma (ventas + abonos). "Pagadas con abonos" y "A crédito" no son dinero de hoy. */}
+              <Top titulo="Dinero por forma de pago" filas={dinero} total={suma(dinero, (f) => f.monto)} onVer={() => irA("formas")} />
             </div>
             <p className="muted">
               {r.turnos} {r.turnos === 1 ? "cierre" : "cierres"} de caja en estas fechas. Los fondos de caja no se suman.

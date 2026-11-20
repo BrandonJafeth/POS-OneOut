@@ -87,7 +87,8 @@ export default function Apartar(p: {
           <CampoMonto ref={campo} grande autoFocus valor={texto} onCambio={(t) => (setTexto(t), setIntento(false))} />
         </Field>
         <Field label="Qué se aparta (opcional)" ayuda="Sale en el comprobante y sirve para buscarlo al abonar.">
-          <input value={detalle} maxLength={200} placeholder="Ej.: retablo de graduada, marco dorado" onChange={(e) => setDetalle(e.target.value)} />
+          {/* data-opcional: Enter en el monto cobra directo (F9 → Enter → Enter); aquí se llega con Tab o ↓. */}
+          <input data-opcional value={detalle} maxLength={200} placeholder="Ej.: retablo de graduada, marco dorado" onChange={(e) => setDetalle(e.target.value)} />
         </Field>
         {p.reglas.condiciones.trim() && (
           <Alert tono="info" titulo="Condiciones">

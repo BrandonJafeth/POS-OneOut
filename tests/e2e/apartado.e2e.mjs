@@ -4,25 +4,43 @@
 // compilación de desarrollo) y una carpeta de datos nueva (POS_DATOS) con la semilla POS_E2E.
 //
 //   npm run e2e          (compila la app de desarrollo y corre esto)
-// Requisitos: `cargo install tauri-driver` y msedgedriver de la MISMA versión que WebView2
-// (variable MSEDGEDRIVER o %TEMP%\edgedriver157\msedgedriver.exe).
-import { spawn } from "node:child_process";
+// Requisitos: tests/e2e/LEEME.md (tauri-driver y msedgedriver en tools\msedgedriver\).
+// Sin esperas fijas: cada paso espera a que aparezca lo que busca.
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { remote } from "webdriverio";
 
 const app = resolve("src-tauri/target/debug/pos.exe");
-const driver = process.env.MSEDGEDRIVER ?? join(tmpdir(), "edgedriver157", "msedgedriver.exe");
+const driver = process.env.MSEDGEDRIVER ?? resolve("tools/msedgedriver/msedgedriver.exe");
 const tauriDriver = join(homedir(), ".cargo", "bin", "tauri-driver.exe");
-for (const [que, ruta] of [["app (npm run e2e:build)", app], ["msedgedriver", driver], ["tauri-driver", tauriDriver]]) {
+for (const [que, ruta] of [["app (npm run e2e:build)", app], ["msedgedriver (ver tests/e2e/LEEME.md)", driver], ["tauri-driver", tauriDriver]]) {
   if (!existsSync(ruta)) throw new Error(`Falta ${que}: ${ruta}`);
 }
 
 const datos = mkdtempSync(join(tmpdir(), "pos-e2e-"));
 const env = { ...process.env, POS_DATOS: datos, POS_E2E: "1", POS_RELOJ_PRUEBA: "2026-11-18T10:00:00-06:00" };
 const td = spawn(tauriDriver, ["--native-driver", driver], { env, stdio: ["ignore", "inherit", "inherit"] });
-await new Promise((r) => setTimeout(r, 1500));
+const terminado = new Promise((r) => td.once("exit", r));
+
+/** Reintenta `fn` hasta que devuelva algo verdadero (sin pausas fijas largas: 100 ms entre intentos). */
+async function hasta(fn, ms, que) {
+  const fin = Date.now() + ms;
+  for (;;) {
+    const r = await fn().catch(() => false);
+    if (r) return r;
+    if (Date.now() > fin) throw new Error(`Se agotó el tiempo esperando ${que}`);
+    await new Promise((x) => setTimeout(x, 100));
+  }
+}
+// La app es de instancia única: si quedó una cerrándose (vuelta anterior), la nueva se cerraría sola y
+// el login fallaría. Se espera a que no haya ninguna.
+const appViva = () =>
+  execFileSync("powershell", ["-NoProfile", "-Command", `@(Get-Process pos -ErrorAction SilentlyContinue | Where-Object Path -eq '${app}').Count`], { encoding: "utf8" }).trim() !== "0";
+await hasta(async () => !appViva(), 20000, "a que se cierre la app de la vuelta anterior");
+// tauri-driver listo = contesta /status (en vez de esperar 1,5 s y rogar).
+await hasta(async () => (await fetch("http://127.0.0.1:4444/status")).ok, 15000, "a tauri-driver");
 
 let b;
 const paso = (t) => console.log(`· ${t}`);
@@ -103,6 +121,7 @@ try {
   await b.keys(["2", "0", "0", "0", "0"]);
   await boton("Listo, revisar el conteo");
   await boton("Confirmar y cerrar");
+  await ver("Dinero recibido");
   await ver("Apartados y crédito");
   await ver("Ventas pagadas con abonos");
   await ver("Total abonos (dinero)");
@@ -117,22 +136,67 @@ try {
   await entrar("Ana", "246813");
   await boton("Reportes", true);
   await boton("Hoy");
-  await ver("Abonos (dinero)");
+  await ver("Abonos recibidos (dinero)");
   await ver("¢20.000");
   await captura("5-reporte-resumen");
-  for (const [t, n] of [["Por día", "6-reporte-dias"], ["Departamentos", "7-reporte-departamentos"], ["Formas de pago", "8-reporte-formas"], ["Cierres de caja", "9-reporte-cierres"]]) {
+  // Cada reporte se espera por su título (no por tiempo).
+  for (const [t, titulo, n] of [
+    ["Por día", "Ventas por día", "6-reporte-dias"],
+    ["Departamentos", "Ventas por departamento", "7-reporte-departamentos"],
+    ["Formas de pago", "Ventas y abonos por forma de pago", "8-reporte-formas"],
+    ["Cierres de caja", "Recibido", "9-reporte-cierres"],
+  ]) {
     await boton(t);
-    await new Promise((r) => setTimeout(r, 600));
+    await ver(titulo);
     await captura(n);
   }
   await boton("Apartados", true);
   await boton("Entregados y cancelados");
-  await new Promise((r) => setTimeout(r, 600));
+  await (await b.$("tr*=A-0001")).waitForClickable({ timeout: 10000 });
   await captura("10-apartados-dueno");
   await (await b.$("tr*=A-0001")).click();
   await ver("Historial");
   await captura("11-apartado-detalle");
+  await b.keys(["Escape"]);
   console.log("OK: apartado → abono → liquidación → Z → reporte");
+
+  // REVISION=1 (con CAPTURAS): las pantallas clave en tema claro y oscuro, a 1024, 1366 y 1920 px,
+  // y un aviso (toast) encima de un diálogo abierto, que se tiene que poder tocar.
+  if (process.env.REVISION && process.env.CAPTURAS) {
+    paso("revisión visual: temas y anchos");
+    for (const tema of ["claro", "oscuro"]) {
+      const actual = (await b.$("html").getAttribute("data-tema")) ?? "claro";
+      if (actual !== tema) await (await b.$("button[title^='Tema']")).click();
+      await b.waitUntil(async () => (await b.$("html").getAttribute("data-tema")) === tema, { timeout: 5000, timeoutMsg: `No cambió al tema ${tema}` });
+      for (const [w, h] of [[1024, 768], [1366, 768], [1920, 1080]]) {
+        await b.setWindowSize(w, h);
+        const n = (x) => `r-${tema}-${w}-${x}`;
+        await boton("Reportes", true);
+        await boton("Resumen");
+        await boton("Hoy");
+        await ver("Resumen de ventas");
+        await captura(n("1-resumen"));
+        await boton("Cierres de caja");
+        await ver("Resumen del día");
+        await captura(n("2-cierres"));
+        await (await b.$("tr.clic")).click();
+        await ver("Dinero recibido");
+        await captura(n("3-z"));
+        // Aviso encima del diálogo del Z: exportar el PDF muestra "PDF guardado" con «Copiar ruta».
+        await boton("Exportar PDF", true);
+        const cerrar = await b.$(".toast-cerrar");
+        await cerrar.waitForClickable({ timeout: 10000 }); // no inerte: se puede tocar
+        await captura(n("4-aviso-sobre-dialogo"));
+        await cerrar.click();
+        await cerrar.waitForExist({ reverse: true, timeout: 5000 });
+        await b.keys(["Escape"]);
+        await boton("Apartados", true);
+        await ver("¿Qué es un abono?").catch(() => undefined);
+        await captura(n("5-apartados"));
+      }
+    }
+    console.log("OK: revisión visual");
+  }
 } catch (e) {
   if (b) await b.saveScreenshot(join(tmpdir(), "pos-e2e-fallo.png")).catch(() => undefined);
   if (b)
@@ -155,6 +219,9 @@ try {
 } finally {
   await b?.deleteSession().catch(() => undefined);
   td.kill();
-  await new Promise((r) => setTimeout(r, 500));
-  rmSync(datos, { recursive: true, force: true });
+  await terminado;
+  // Que la app termine de cerrarse (suelta la base y deja libre la instancia única para la próxima vuelta).
+  await hasta(async () => !appViva(), 20000, "a que se cierre la app").catch(() => undefined);
+  // La app puede tardar un poco en cerrar la base después de tauri-driver: se reintenta el borrado.
+  await hasta(async () => (rmSync(datos, { recursive: true, force: true }), true), 10000, "borrar los datos de prueba").catch(() => undefined);
 }

@@ -13,7 +13,7 @@
 use crate::util::{e, Res};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Reparte `total` en partes enteras proporcionales a `pesos` (≥ 0) que suman exactamente `total`.
 pub fn repartir(total: i64, pesos: &[i64]) -> Vec<i64> {
@@ -141,9 +141,19 @@ pub fn armar(ventas: &[Venta], lineas: &[Linea], pagos: &[Pago]) -> Desglose {
     type Acumulado = (Departamento, BTreeMap<ClaveFila, Fila>, BTreeMap<(i64, String), FormaMonto>);
     let mut deps: BTreeMap<ClaveDep, Acumulado> = BTreeMap::new();
     let mut out = Desglose::default();
+    // Líneas y pagos agrupados por venta una sola vez (en su orden original): buscarlos venta por
+    // venta recorría todo cada vez (un mes de ventas tardaba más de un segundo).
+    let mut lineas_de: HashMap<&str, Vec<&Linea>> = HashMap::new();
+    for l in lineas {
+        lineas_de.entry(l.venta_id.as_str()).or_default().push(l);
+    }
+    let mut pagos_de: HashMap<&str, Vec<&Pago>> = HashMap::new();
+    for p in pagos.iter().filter(|p| p.monto > 0) {
+        pagos_de.entry(p.venta_id.as_str()).or_default().push(p);
+    }
     for v in ventas {
-        let ls: Vec<&Linea> = lineas.iter().filter(|l| l.venta_id == v.id).collect();
-        let mut ps: Vec<&Pago> = pagos.iter().filter(|p| p.venta_id == v.id && p.monto > 0).collect();
+        let ls: Vec<&Linea> = lineas_de.get(v.id.as_str()).cloned().unwrap_or_default();
+        let mut ps: Vec<&Pago> = pagos_de.get(v.id.as_str()).cloned().unwrap_or_default();
         // El efectivo al final: recibe los restos del reparto.
         ps.sort_by_key(|p| p.da_vuelto);
         if ls.is_empty() {

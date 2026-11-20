@@ -2220,6 +2220,8 @@ mark {
   display: flex;
   align-items: center;
   gap: var(--e1);
+  /* Mismo alto con o sin el ícono de ayuda: las dos cifras quedan a la misma altura. */
+  min-height: 28px;
   color: var(--text);
   font-weight: 600;
 }
@@ -2227,6 +2229,11 @@ mark {
 .z-dinero .principal > dd:not(.nota) {
   font-size: 26px;
   font-weight: 750;
+}
+
+/* Montos del Z en pantalla: el signo y la cifra no se separan en dos líneas. */
+.vista-z td.num {
+  white-space: nowrap;
 }
 
 .caja-cifras dd.nota {
@@ -2242,9 +2249,11 @@ mark {
 }
 
 /* Ayuda con ícono de información (<details>): el texto se abre debajo, en una caja chica. */
-.ayuda-info {
+.ayuda-info,
+.modal-cuerpo .ayuda-info {
   display: inline-block;
   position: relative;
+  margin: 0;
   font-size: 14px;
   font-weight: 400;
 }
@@ -3301,6 +3310,8 @@ textarea::placeholder {
   margin-top: 2px;
   color: var(--muted);
   font-size: 14px;
+  /* Una ruta larga sin espacios (PDF guardado) baja de línea en vez de meterse bajo «Copiar ruta». */
+  overflow-wrap: anywhere;
 }
 
 button.toast-accion {
