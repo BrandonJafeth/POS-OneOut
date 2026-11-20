@@ -3,7 +3,8 @@
 import { ChevronDown } from "lucide-react";
 import { Fragment } from "react";
 import { hayApartados, type Detalle, type Resumen } from "../../db/caja";
-import { DENOMINACIONES, descuadres, horaCierre, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
+import { AYUDA_ABONOS, DENOMINACIONES, descuadres, dineroDelTurno, horaCierre, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
+import AyudaInfo from "../../ui/AyudaInfo";
 import { fechaHora, monto, montoConSigno as signo } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
 import Badge from "../../ui/Badge";
@@ -14,6 +15,7 @@ const hora = (iso: string) => fechaHora(new Date(iso)).slice(11, 16);
 export default function VistaZ({ d, denominaciones }: { d: Detalle; denominaciones?: number[] }) {
   const { turno: t, resumen: r } = d;
   const malos = descuadres(r);
+  const dinero = dineroDelTurno(r);
   const conteo = t.conteoFinal;
   const lista = (denominaciones?.length ? denominaciones : DENOMINACIONES).slice().sort((a, b) => b - a);
   return (
@@ -23,6 +25,26 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
           {malos.join("; ")}. El Z no se imprime hasta revisarlo: avise al técnico.
         </Alert>
       )}
+      {/* Lo primero que mira el dueño: cuánto se vendió y cuánto dinero entró (no son lo mismo con apartados). */}
+      <dl className="caja-cifras z-dinero">
+        <div className="principal">
+          <dt>Vendido ({r.ventas})</dt>
+          <dd>{monto(dinero.vendido)}</dd>
+          {dinero.aplicados > 0 && <dd className="nota">{monto(dinero.aplicados)} ya estaba pagado con abonos</dd>}
+          {dinero.credito > 0 && <dd className="nota">{monto(dinero.credito)} quedó a crédito</dd>}
+        </div>
+        <div className="principal">
+          <dt>
+            Dinero recibido {(dinero.abonos > 0 || dinero.aplicados > 0) && <AyudaInfo texto={AYUDA_ABONOS} etiqueta="¿Qué es un abono?" />}
+          </dt>
+          <dd>{monto(dinero.recibido)}</dd>
+          {dinero.abonos > 0 && (
+            <dd className="nota">
+              Ventas cobradas {monto(dinero.cobradas)} + abonos de apartados {monto(dinero.abonos)}
+            </dd>
+          )}
+        </div>
+      </dl>
       <dl className="caja-cifras">
         <div>
           <dt>Abrió</dt>
@@ -40,10 +62,6 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
             <dd>{r.supervisor}</dd>
           </div>
         )}
-        <div>
-          <dt>Ventas ({r.ventas})</dt>
-          <dd>{monto(r.totalVentas)}</dd>
-        </div>
         <div>
           <dt>Efectivo que debe haber</dt>
           <dd>{monto(r.efectivoEsperado)}</dd>

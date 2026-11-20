@@ -25,7 +25,7 @@ export default function Apartar(p: {
   dia: string;
   formas: FormaPago[];
   bancos: Banco[];
-  onApartar(monto: number, pagos: PagoEntrada[]): Promise<void>;
+  onApartar(monto: number, pagos: PagoEntrada[], descripcion: string): Promise<void>;
   onCerrar(): void;
 }) {
   const { config } = useSesion();
@@ -33,6 +33,7 @@ export default function Apartar(p: {
   const [texto, setTexto] = useState(conMiles(String(minimo)));
   const [cobrando, setCobrando] = useState<number | null>(null);
   const [intento, setIntento] = useState(false);
+  const [detalle, setDetalle] = useState("");
   const campo = useRef<HTMLInputElement>(null);
   const abono = leerMontoEntero(texto) ?? 0;
   const limite = fechaLimite(p.dia, p.reglas.plazoDias, p.reglas.plazoTipo, config.caja_horario);
@@ -47,7 +48,7 @@ export default function Apartar(p: {
         pagador={p.cliente}
         formas={p.formas}
         bancos={p.bancos}
-        onCobrar={(pagos) => p.onApartar(cobrando, pagos)}
+        onCobrar={(pagos) => p.onApartar(cobrando, pagos, detalle)}
         onCerrar={() => setCobrando(null)}
       />
     );
@@ -84,6 +85,10 @@ export default function Apartar(p: {
         </dl>
         <Field label="Abona hoy" error={intento ? error : undefined} ayuda={!intento || !error ? `Queda debiendo ${monto(Math.max(0, p.total - abono))}.` : undefined}>
           <CampoMonto ref={campo} grande autoFocus valor={texto} onCambio={(t) => (setTexto(t), setIntento(false))} />
+        </Field>
+        <Field label="Qué se aparta (opcional)" ayuda="Sale en el comprobante y sirve para buscarlo al abonar.">
+          {/* data-opcional: Enter en el monto cobra directo (F9 → Enter → Enter); aquí se llega con Tab o ↓. */}
+          <input data-opcional value={detalle} maxLength={200} placeholder="Ej.: retablo de graduada, marco dorado" onChange={(e) => setDetalle(e.target.value)} />
         </Field>
         {p.reglas.condiciones.trim() && (
           <Alert tono="info" titulo="Condiciones">

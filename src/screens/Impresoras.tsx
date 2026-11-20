@@ -31,7 +31,7 @@ import { useToast } from "../ui/Toast";
 import { useSesion } from "../app/sesion";
 import { useEnvio } from "../ui/useEnvio";
 
-const NUEVA: DatosImpresora = { nombre: "", conexion: "windows", destino: "", anchoMm: 58, columnas: 32, codePage: 19, sinModoChino: true, barras: "B", cortador: false, gaveta: false, baudios: 9600 };
+const NUEVA: DatosImpresora = { nombre: "", conexion: "windows", destino: "", anchoMm: 58, columnas: 32, codePage: 19, sinModoChino: true, barras: "B", cortador: false, code128: false, gaveta: false, baudios: 9600 };
 const BAUDIOS = [2400, 4800, 9600, 19200, 38400, 57600, 115200];
 
 function opcionesDestino(d: Detectadas | null, conexion: Conexion): { valor: string; texto: string }[] {
@@ -293,6 +293,10 @@ function EditarImpresora(p: { datos: DatosImpresora; detectadas: Detectadas | nu
           </label>
           <label>
             <input type="checkbox" checked={d.gaveta} onChange={(e) => set({ gaveta: e.target.checked })} /> La gaveta está conectada a esta impresora
+          </label>
+          <label>
+            <input type="checkbox" checked={d.code128} onChange={(e) => set({ code128: e.target.checked })} /> Código de barras (CODE128) en los comprobantes de apartado
+            <span className="ayuda">Actívelo solo después de que «Probar CODE128» (Herramientas de hardware) salga bien y el lector lo lea.</span>
           </label>
         </div>
         {d.gaveta && p.otraConGaveta && <Alert tono="aviso">La gaveta deja de estar en «{p.otraConGaveta}»: solo puede haber una.</Alert>}

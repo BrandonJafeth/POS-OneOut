@@ -244,7 +244,33 @@ function Movimientos(p: { onError(m: string): void }) {
           </select>
         </Field>
       </div>
-      <p className="muted">{filas.length} movimiento(s).</p>
+      <p className="muted">
+        {filas.length} movimiento(s){filas.length > 300 ? "; aquí se ven los primeros 300, el archivo los lleva todos" : ""}.
+      </p>
+      {filas.length > 0 && (
+        <table className="tbl">
+          <thead>
+            <tr>
+              {CABECERA_KARDEX.map((c, i) => (
+                <th key={c} className={i >= 3 && i <= 5 ? "num" : undefined}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filas.slice(0, 300).map((f, k) => (
+              <tr key={k}>
+                {filaKardex(f).map((v, i) => (
+                  <td key={i} className={i >= 3 && i <= 5 ? "num" : undefined}>
+                    {i === 5 && typeof v === "number" ? monto(v) : v}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <Exportar
         nombre={`inventario-movimientos-${desde}-${hasta}`}
         titulo="Movimientos de inventario"

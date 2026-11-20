@@ -23,7 +23,9 @@ import {
   type Reglas,
 } from "../db/cuentas";
 import { guardarConfig } from "../db/config";
+import { AYUDA_ABONOS } from "../lib/caja/reporteZ";
 import { imprimirComprobante } from "../lib/cuentas/imprimir";
+import AyudaInfo from "../ui/AyudaInfo";
 import { conMiles, leerMontoEntero } from "../lib/texto";
 import { fechaHora, monto } from "../lib/tickets";
 import Button from "../ui/Button";
@@ -66,7 +68,10 @@ export default function Apartados() {
 
   return (
     <div className="screen">
-      <h1>Apartados{config.usa_credito ? " y crédito" : ""}</h1>
+      <div className="titulo-con-ayuda">
+        <h1>Apartados{config.usa_credito ? " y crédito" : ""}</h1>
+        <AyudaInfo texto={AYUDA_ABONOS} etiqueta="¿Qué es un abono?" />
+      </div>
       <div className="tabs" role="tablist" aria-label="Apartados" onKeyDown={flechasPestanas}>
         {tabs.map(([id, t]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab active" : "tab"} onClick={() => setTab(id)}>
@@ -116,7 +121,10 @@ export default function Apartados() {
               {lista.map((k) => (
                 <FilaClic key={k.id} etiqueta={`${k.numero}, ${k.cliente}, saldo ${monto(k.saldo)}`} onAbrir={() => setAbierta(k.id)}>
                   <td className="mono">{k.numero}</td>
-                  <td>{k.cliente}</td>
+                  <td>
+                    {k.cliente}
+                    {k.descripcion && <div className="muted">{k.descripcion}</div>}
+                  </td>
                   <td>{fecha(k.fecha)}</td>
                   <td>{fecha(k.fechaLimite)}</td>
                   <td className="num">{monto(k.total)}</td>
@@ -159,6 +167,7 @@ function Detalle(p: { id: string; reglas: Reglas; onCerrar(): void }) {
             Creado el {fecha(k.fecha)} por {d.usuario}
             {d.ventaNumero ? ` · venta ${d.ventaNumero}` : ""}
           </div>
+          {k.descripcion && <p className="apartado-detalle">{k.descripcion}</p>}
         </div>
         <EstadoCuenta k={k} />
       </div>

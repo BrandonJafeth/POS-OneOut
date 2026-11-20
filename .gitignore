@@ -42,3 +42,6 @@ pos.clave
 
 # Capturas del manual de pruebas (pesan ~10 MB; se regeneran)
 manual/capturas/
+
+# Herramientas que se descargan aparte (ver tests/e2e/LEEME.md): msedgedriver
+tools/

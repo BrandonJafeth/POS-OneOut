@@ -6,7 +6,8 @@
 //   toast.ok("Producto guardado");
 //   toast.mostrar({ tono: "info", titulo: "Venta 2 descartada", accion: { texto: "Deshacer", onClick } });
 import { X } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { copiar } from "../lib/copiar";
 import { ICONO_TONO, type Tono } from "./Badge";
 
@@ -30,6 +31,18 @@ interface Api {
   cerrar(): void;
 }
 
+/** El último <dialog> modal abierto (el de más arriba), o null. */
+export function dialogoDeArriba(): HTMLDialogElement | null {
+  const modales = [...document.querySelectorAll<HTMLDialogElement>("dialog[open]")].filter((d) => {
+    try {
+      return d.matches(":modal");
+    } catch {
+      return true; // sin :modal, todo diálogo abierto con showModal cuenta
+    }
+  });
+  return modales[modales.length - 1] ?? null;
+}
+
 const Ctx = createContext<Api>({ mostrar: () => {}, ok: () => {}, info: () => {}, error: () => {}, guardado: () => {}, cerrar: () => {} });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -50,9 +63,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }),
     [mostrar, cerrar],
   );
-  // La zona es un popover manual siempre abierto: así queda en la capa superior, también sobre un
-  // diálogo nativo. Cada aviso nuevo la vuelve a abrir para quedar encima del último diálogo.
+  // La zona es un popover manual: así queda en la capa superior, también sobre un <dialog> modal.
+  // Pero un diálogo modal deja INERTE todo lo que no está dentro de él (no se puede tocar ni enfocar):
+  // por eso la zona se monta dentro del diálogo modal de más arriba, si hay uno abierto, y vuelve al
+  // body cuando ese diálogo se cierra. Cada aviso nuevo la vuelve a abrir para quedar encima.
   const zona = useRef<HTMLDivElement>(null);
+  const [destino, setDestino] = useState<HTMLElement>(() => document.body);
+  useLayoutEffect(() => {
+    if (!actual) return;
+    const elegir = () => setDestino(dialogoDeArriba() ?? document.body);
+    elegir();
+    // Mientras se ve el aviso, si se abre o se cierra un diálogo, el aviso lo sigue.
+    const obs = new MutationObserver(elegir);
+    obs.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
+    return () => obs.disconnect();
+  }, [actual?.id]);
   useEffect(() => {
     const z = zona.current;
     if (!z?.showPopover) return;
@@ -62,7 +87,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     } catch {
       // Sin soporte de popover: queda como antes (z-index).
     }
-  }, [actual?.id]);
+  }, [actual?.id, destino]);
   const tono = actual?.tono ?? "ok";
   const Icono = ICONO_TONO[tono];
   // Tiempo para leerlo: mínimo 4 s (7 s con acción o error) y más si el texto es largo.
@@ -73,36 +98,49 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={api}>
       {children}
       {/* La zona existe siempre: así el lector de pantalla anuncia lo que entra. */}
-      <div ref={zona} popover="manual" className="toast-zona" role="status" aria-live="polite">
-        {actual && (
-          <div key={actual.id} className={`toast toast-${tono}`} role={tono === "error" ? "alert" : undefined}>
-            <span className="toast-icono" aria-hidden>
-              <Icono size={18} strokeWidth={2.25} />
-            </span>
-            <div className="toast-cuerpo">
-              <strong>{actual.titulo}</strong>
-              {actual.texto && <span className="toast-texto">{actual.texto}</span>}
-            </div>
-            {actual.accion && (
-              <button
-                type="button"
-                className="toast-accion"
-                onClick={() => {
-                  actual.accion!.onClick();
-                  cerrar();
-                }}
-              >
-                {actual.accion.texto}
+      {createPortal(
+        // Esc sobre el aviso lo cierra a él, no al diálogo de abajo.
+        <div
+          ref={zona}
+          popover="manual"
+          className="toast-zona"
+          role="status"
+          aria-live="polite"
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && actual) (e.preventDefault(), e.stopPropagation(), cerrar());
+          }}
+        >
+          {actual && (
+            <div key={actual.id} className={`toast toast-${tono}`} role={tono === "error" ? "alert" : undefined}>
+              <span className="toast-icono" aria-hidden>
+                <Icono size={18} strokeWidth={2.25} />
+              </span>
+              <div className="toast-cuerpo">
+                <strong>{actual.titulo}</strong>
+                {actual.texto && <span className="toast-texto">{actual.texto}</span>}
+              </div>
+              {actual.accion && (
+                <button
+                  type="button"
+                  className="toast-accion"
+                  onClick={() => {
+                    actual.accion!.onClick();
+                    cerrar();
+                  }}
+                >
+                  {actual.accion.texto}
+                </button>
+              )}
+              <button type="button" className="toast-cerrar" aria-label="Cerrar aviso" onClick={cerrar}>
+                <X size={16} aria-hidden />
               </button>
-            )}
-            <button type="button" className="toast-cerrar" aria-label="Cerrar aviso" onClick={cerrar}>
-              <X size={16} aria-hidden />
-            </button>
-            {/* Tiempo restante: al terminar la animación se cierra; con mouse o foco se pausa. */}
-            <span className="toast-tiempo" aria-hidden style={{ animationDuration: `${duracion}ms` }} onAnimationEnd={cerrar} />
-          </div>
-        )}
-      </div>
+              {/* Tiempo restante: al terminar la animación se cierra; con mouse o foco se pausa. */}
+              <span className="toast-tiempo" aria-hidden style={{ animationDuration: `${duracion}ms` }} onAnimationEnd={cerrar} />
+            </div>
+          )}
+        </div>,
+      destino,
+      )}
     </Ctx.Provider>
   );
 }

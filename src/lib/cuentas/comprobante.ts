@@ -30,9 +30,13 @@ export function comprobanteCuenta(n: Negocio, d: CuentaDetalle, s: TicketSetting
   p.line(sep2(c));
   if (o.copia) p.align("center").bold(true).line("*** COPIA ***").bold(false).align("left");
   const titulo = o.tipo === "cancelacion" ? "APARTADO CANCELADO" : o.tipo === "abono" ? "ABONO" : credito ? "CRÉDITO" : "APARTADO";
-  p.align("center").bold(true).size(true, true).line(k.numero).size(false, false).line(titulo).bold(false).align("left");
+  p.align("center").bold(true).size(true, true).line(k.numero).size(false, false).line(titulo).bold(false);
+  // El número grande es la forma principal de buscarlo; el CODE128 solo si la impresora lo tiene probado.
+  if (s.code128 && k.numero) p.barcode128(k.numero);
+  p.align("left");
   p.line(lr("Fecha:", fechaHora(new Date()), c));
   wrap("Cliente: " + k.cliente, c).forEach((l) => p.line(l));
+  if (k.descripcion) wrap("Detalle: " + k.descripcion, c).forEach((l) => p.line(l));
   p.line(sep(c));
   if (o.tipo === "apartado") {
     for (const l of d.lineas) {

@@ -77,6 +77,35 @@ export function descuadres(r: Resumen): string[] {
   return [...new Set(d)];
 }
 
+/**
+ * Lo vendido y el dinero que entró en el turno. Una liquidación de apartado se vende por su total,
+ * pero ese dinero ya entró como abonos (hoy o antes): por eso
+ * vendido − abonos aplicados − a crédito + abonos recibidos = dinero recibido.
+ * El dinero recibido es la suma de lo pagado hoy por cualquier forma (sin vueltos).
+ */
+export function dineroDelTurno(r: Resumen) {
+  const cobradas = r.porForma.reduce((s, f) => s + f.monto, 0);
+  const abonos = r.abonosTotal ?? 0;
+  return { vendido: r.totalVentas, aplicados: r.ventasConAbonos ?? 0, credito: r.ventasACredito ?? 0, cobradas, abonos, recibido: cobradas + abonos };
+}
+
+export const AYUDA_ABONOS = "Un abono es dinero que entra a la caja, pero todavía no es una venta. Se vuelve venta cuando el cliente paga todo y se lleva el producto.";
+
+/** Arriba del Z: "Vendido" y "Dinero recibido", con la cuenta entre los dos si hubo apartados o crédito. */
+function lineasDinero(r: Resumen, cols: number): LineaDoc[] {
+  const x = dineroDelTurno(r);
+  const l: LineaDoc[] = [{ t: lr("VENDIDO", monto(x.vendido), cols), b: true }];
+  if (x.aplicados || x.credito || x.abonos) {
+    if (x.aplicados) l.push({ t: lr("- Pagado con abonos", "-" + monto(x.aplicados), cols) });
+    if (x.credito) l.push({ t: lr("- Quedó a crédito", "-" + monto(x.credito), cols) });
+    l.push({ t: lr("= Ventas cobradas", monto(x.cobradas), cols) });
+    if (x.abonos) l.push({ t: lr("+ Abonos de apartados", "+" + monto(x.abonos), cols) });
+  }
+  l.push({ t: lr("DINERO RECIBIDO", monto(x.recibido), cols), b: true });
+  if (x.aplicados || x.abonos) wrap(AYUDA_ABONOS, cols).forEach((t) => l.push({ t }));
+  return l;
+}
+
 export function exigirCuadre(r: Resumen): void {
   const d = descuadres(r);
   if (d.length) throw new Error(`Los totales del cierre no cuadran (${d.join("; ")}). No se imprime para no dar números inconsistentes: avise al técnico.`);
@@ -193,6 +222,8 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   const l: LineaDoc[] = [{ t: sep2(cols) }, { t: "CIERRE DE CAJA (Z)", b: true, centro: true }];
   if (o.copia) l.push({ t: "*** COPIA ***", b: true, centro: true });
   l.push(...cabeceraTurno(d, cols, nombreSiHayLogo(n)));
+  titulo(l, "RESUMEN", cols);
+  l.push(...lineasDinero(r, cols));
 
   titulo(l, "VENTAS POR FORMA DE PAGO", cols);
   for (const f of r.porForma) l.push({ t: fila(`${f.codigo} ${f.nombre}`, ` (${f.pagos})`, monto(f.monto), cols) });

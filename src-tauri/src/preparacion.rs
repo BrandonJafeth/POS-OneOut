@@ -13,6 +13,8 @@ pub struct Punto {
     pub listo: bool,
     /// Qué falta o qué hay, y dónde se arregla.
     pub detalle: String,
+    /// Sin esto no se entrega (condiciones del apartado, WebView2, horario de cierre).
+    pub obligatorio: bool,
 }
 
 /// Versión mínima de WebView2 que se soporta (CONTEXTO.md): <dialog>, :has(), popover, Intl.
@@ -30,34 +32,49 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
         titulo: "Datos del negocio",
         listo: !negocio.0.trim().is_empty() && !negocio.1.trim().is_empty(),
         detalle: "Nombre comercial y cédula (salen en el tiquete). Administración → Datos del negocio.".into(),
+        obligatorio: false,
     });
     let duenos = n(bd, "SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Usuario del dueño", listo: duenos > 0, detalle: format!("{duenos} dueño(s) activo(s). Al entrar por primera vez cada uno cambia su PIN. Administración → Usuarios.") });
+    v.push(Punto { titulo: "Usuario del dueño", listo: duenos > 0, detalle: format!("{duenos} dueño(s) activo(s). Al entrar por primera vez cada uno cambia su PIN. Administración → Usuarios."), obligatorio: false });
     let prueba = n(bd, "SELECT COUNT(*) FROM usuarios WHERE eliminado_en IS NULL AND (lower(nombre) LIKE '%prueba%' OR lower(nombre) LIKE '%test%' OR lower(nombre) LIKE '%demo%')").await?;
-    v.push(Punto { titulo: "Sin usuarios de prueba", listo: prueba == 0, detalle: if prueba == 0 { "Ninguno.".into() } else { format!("Hay {prueba} usuario(s) con nombre de prueba: elimínelos en Administración → Usuarios.") } });
+    v.push(Punto { titulo: "Sin usuarios de prueba", listo: prueba == 0, detalle: if prueba == 0 { "Ninguno.".into() } else { format!("Hay {prueba} usuario(s) con nombre de prueba: elimínelos en Administración → Usuarios.") }, obligatorio: false });
     let efectivo = n(bd, "SELECT COUNT(*) FROM formas_pago WHERE activo = 1 AND eliminado_en IS NULL AND da_vuelto = 1").await?;
     let formas = n(bd, "SELECT COUNT(*) FROM formas_pago WHERE activo = 1 AND eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Formas de pago", listo: efectivo > 0, detalle: format!("{formas} activa(s), {efectivo} con vuelto (efectivo). Técnico → Formas de pago.") });
+    v.push(Punto { titulo: "Formas de pago", listo: efectivo > 0, detalle: format!("{formas} activa(s), {efectivo} con vuelto (efectivo). Técnico → Formas de pago."), obligatorio: false });
     let deps = n(bd, "SELECT COUNT(*) FROM departamentos WHERE activo = 1 AND eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Departamentos", listo: deps > 0, detalle: format!("{deps} activo(s). Administración → Departamentos.") });
+    v.push(Punto { titulo: "Departamentos", listo: deps > 0, detalle: format!("{deps} activo(s). Administración → Departamentos."), obligatorio: false });
     let asignados = n(bd, "SELECT COUNT(*) FROM impresora_destinos d JOIN impresoras i ON i.id = d.impresora_id WHERE i.eliminado_en IS NULL AND d.documento IN ('tiquete', 'cierre')").await?;
-    v.push(Punto { titulo: "Impresoras", listo: asignados >= 2, detalle: "Tiquete y cierre con impresora asignada (y «Imprimir prueba»). Administración → Impresoras.".into() });
+    v.push(Punto { titulo: "Impresoras", listo: asignados >= 2, detalle: "Tiquete y cierre con impresora asignada (y «Imprimir prueba»). Administración → Impresoras.".into(), obligatorio: false });
     let gaveta = n(bd, "SELECT COUNT(*) FROM impresoras WHERE gaveta = 1 AND eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Gaveta", listo: gaveta > 0, detalle: "Marcada en la impresora de tiquetes. Administración → Impresoras.".into() });
+    v.push(Punto { titulo: "Gaveta", listo: gaveta > 0, detalle: "Marcada en la impresora de tiquetes. Administración → Impresoras.".into(), obligatorio: false });
     let productos = n(bd, "SELECT COUNT(*) FROM productos WHERE eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Productos", listo: productos > 0, detalle: format!("{productos} en el catálogo. Productos → Importar productos.") });
-    // Días de trabajo y hora de cierre (fecha de negocio de la caja). Chaguí: lun–vie 18:30, sáb 17:30, dom no.
+    v.push(Punto { titulo: "Productos", listo: productos > 0, detalle: format!("{productos} en el catálogo. Productos → Importar productos."), obligatorio: false });
+    // Días de trabajo y hora de cierre (fecha de negocio de la caja). OBLIGATORIO: el valor de fábrica
+    // (lun–vie 18:30, sáb 17:30) no cuenta; el dueño tiene que poner y guardar el horario real
+    // (Chaguí: lun–vie 19:00, sáb 18:00, dom no se trabaja).
     let mut c = bd.pool.acquire().await.map_err(e)?;
     let horario = crate::caja::leer_horario(crate::config::valor_con(&mut c, "caja_horario").await.as_ref());
     drop(c);
-    v.push(Punto { titulo: "Días de trabajo y hora de cierre", listo: horario.iter().any(|h| h.is_some()), detalle: format!("{}. Administración → Caja y cierre.", crate::caja::horario_texto(&horario)) });
+    let guardado = n(bd, "SELECT COUNT(*) FROM bitacora WHERE accion = 'config.cambiar' AND entidad = 'config' AND entidad_id = 'caja_horario'").await? > 0;
+    let confirmado = horario.iter().any(|h| h.is_some()) && (guardado || horario != crate::caja::HORARIO_INICIAL);
+    v.push(Punto {
+        titulo: "Días de trabajo y hora de cierre",
+        listo: confirmado,
+        detalle: format!(
+            "{}. {}Administración → Caja y cierre.",
+            crate::caja::horario_texto(&horario),
+            if confirmado { "" } else { "Es el horario de fábrica: ponga y guarde el real del negocio. " }
+        ),
+        obligatorio: true,
+    });
     let siguiente = n(bd, "SELECT MIN(consecutivo_siguiente) FROM cajas WHERE eliminado_en IS NULL").await?;
-    v.push(Punto { titulo: "Número del próximo tiquete", listo: true, detalle: format!("{siguiente}. Si venía de otro sistema, que siga al último tiquete entregado. Administración → Caja y cierre.") });
+    v.push(Punto { titulo: "Número del próximo tiquete", listo: true, detalle: format!("{siguiente}. Si venía de otro sistema, que siga al último tiquete entregado. Administración → Caja y cierre."), obligatorio: false });
     let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
     v.push(Punto {
         titulo: "Respaldo automático",
         listo: dir.join("respaldo-automatico.clave").exists(),
         detalle: "El dueño elige la contraseña y la anota fuera de la computadora. Administración → Respaldo.".into(),
+        obligatorio: false,
     });
     // Apartados: la política (mínimo, plazo, qué pasa si cancela) va impresa en el comprobante.
     let mut c = bd.pool.acquire().await.map_err(e)?;
@@ -73,8 +90,9 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
                 r.plazo_dias,
                 if r.plazo_tipo == "laborables" { "de trabajo" } else { "calendario" },
                 if r.cancelacion == "retener" { format!("se retiene el {} %", r.retencion_pct) } else { "se devuelve todo".into() },
-                if r.condiciones.trim().is_empty() { "Falta escribir las condiciones del comprobante. " } else { "" }
+                if r.condiciones.trim().is_empty() { "Falta que el dueño escriba las condiciones del comprobante. " } else { "" }
             ),
+            obligatorio: true,
         });
     }
     // WebView2 (el motor de la ventana): la app usa funciones de la versión 120 o más nueva.
@@ -84,6 +102,7 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
         titulo: "WebView2",
         listo: mayor >= WEBVIEW2_MINIMO,
         detalle: if wv.is_empty() { "No se pudo leer la versión. Instale o actualice Microsoft Edge WebView2.".into() } else { format!("Versión {wv} (mínimo {WEBVIEW2_MINIMO}). Se actualiza con Windows Update.") },
+        obligatorio: true,
     });
     let (ventas, turnos, clientes) = (n(bd, "SELECT COUNT(*) FROM ventas").await?, n(bd, "SELECT COUNT(*) FROM caja_turnos").await?, n(bd, "SELECT COUNT(*) FROM clientes").await? + n(bd, "SELECT COUNT(*) FROM cuentas").await?);
     v.push(Punto {
@@ -94,6 +113,7 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
         } else {
             format!("Hay {ventas} venta(s), {turnos} turno(s) y {clientes} cliente(s). Si son de prueba, instale limpio (ver PRUEBAS-MANUALES, «Instalación limpia»).")
         },
+        obligatorio: false,
     });
     Ok(v)
 }
@@ -118,15 +138,30 @@ mod tests {
         let punto = |t: &str| lista.iter().find(|p| p.titulo == t).unwrap().listo;
         assert!(!punto("Usuario del dueño") && !punto("Impresoras") && !punto("Respaldo automático") && !punto("Productos"));
         assert!(punto("Sin datos de prueba") && punto("Sin usuarios de prueba"));
-        // Horario de Chaguí ya cargado en la base limpia.
+        // El horario de fábrica no cuenta: es obligatorio poner y guardar el real.
         let h = lista.iter().find(|p| p.titulo == "Días de trabajo y hora de cierre").unwrap();
-        assert!(h.listo && h.detalle.contains("lun 18:30") && h.detalle.contains("sáb 17:30") && h.detalle.contains("dom no se trabaja"), "{}", h.detalle);
+        assert!(!h.listo && h.obligatorio && h.detalle.contains("lun 18:30") && h.detalle.contains("fábrica"), "{}", h.detalle);
+        let wv = lista.iter().find(|p| p.titulo == "WebView2").unwrap();
+        assert!(wv.obligatorio);
         crate::usuarios::crear(&bd.pool, &tec, "Usuario Prueba", Rol::Cajero, "1593").await.unwrap();
         let lista = revisar(&bd, &tec).await.unwrap();
         assert!(!lista.iter().find(|p| p.titulo == "Sin usuarios de prueba").unwrap().listo);
         // Solo el técnico.
         let d = crate::usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        assert!(revisar(&bd, &Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() }).await.is_err());
+        let ana = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        assert!(revisar(&bd, &ana).await.is_err());
+        // El dueño guarda el horario de Chaguí (lun–vie 19:00, sáb 18:00, dom no): ya está listo.
+        let chagui = serde_json::json!(["19:00", "19:00", "19:00", "19:00", "19:00", "18:00", null]);
+        crate::config::guardar(&bd.pool, &ana, "caja_horario", &chagui).await.unwrap();
+        let lista = revisar(&bd, &tec).await.unwrap();
+        let h = lista.iter().find(|p| p.titulo == "Días de trabajo y hora de cierre").unwrap();
+        assert!(h.listo && h.detalle.contains("lun 19:00") && h.detalle.contains("sáb 18:00") && h.detalle.contains("dom no se trabaja"), "{}", h.detalle);
+        // Con apartados, las condiciones escritas por el dueño son obligatorias.
+        crate::config::guardar(&bd.pool, &tec, "usa_apartados", &serde_json::json!(true)).await.unwrap();
+        let ap = |l: &[Punto]| l.iter().find(|p| p.titulo == "Apartados").map(|p| (p.listo, p.obligatorio));
+        assert_eq!(ap(&revisar(&bd, &tec).await.unwrap()), Some((false, true)));
+        crate::config::guardar(&bd.pool, &ana, "apartado_condiciones", &serde_json::json!("Pasado el plazo se devuelve lo abonado.")).await.unwrap();
+        assert_eq!(ap(&revisar(&bd, &tec).await.unwrap()), Some((true, true)));
         bd.pool.close().await;
         bd.lectura.close().await;
         let _ = std::fs::remove_dir_all(&dir);

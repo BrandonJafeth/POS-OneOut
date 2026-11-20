@@ -3,7 +3,7 @@ import Ajustes from "./Ajustes";
 import { copiar } from "../../lib/copiar";
 import { CODE_PAGES } from "../../lib/codepages";
 import { listPrinters, printRaw } from "../../lib/printerApi";
-import { colon, textoSimple, tiquete, todosCodePages, type Doc, type TicketSettings } from "../../lib/tickets";
+import { code128, colon, textoSimple, tiquete, todosCodePages, type Doc, type TicketSettings } from "../../lib/tickets";
 
 interface LogEntry {
   id: number;
@@ -151,6 +151,9 @@ export default function Impresora({ settings, onSettings }: Props) {
           </button>
           <button disabled={busy} onClick={() => void run(diezSeguidos)}>
             Imprimir 10 tiquetes seguidos
+          </button>
+          <button disabled={busy} onClick={() => void run(() => send("CODE128 (A-0012)", code128(settings)))}>
+            Probar CODE128
           </button>
         </div>
         <p className="note">

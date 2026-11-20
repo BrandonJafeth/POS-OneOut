@@ -3,12 +3,36 @@
 Cada instalador entregado, con su SHA-256. Antes de instalar, compare (PowerShell, en la carpeta del instalador):
 
 ```powershell
-Get-FileHash ".\Punto de Venta_0.9.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\Punto de Venta_0.9.1_x64-setup.exe" -Algorithm SHA256
 ```
+
+Ningún instalador repite número de versión: con el SHA-256 de una versión anotado aquí, `build.rs` no deja
+compilar otro instalador con ese número (hay que subir la versión).
 
 Si el hash no coincide, **no lo instale**: avise al técnico. Los instaladores no están firmados; Windows
 SmartScreen avisa «Windows protegió su PC» → **Más información → Ejecutar de todas formas**. No desactive el
 antivirus.
+
+## 0.9.1 — cierre de apartados y reportes, claridad de abonos (2026-11-20)
+
+| | |
+|---|---|
+| Archivo | `Punto de Venta_0.9.1_x64-setup.exe` (NSIS, por usuario, 4,50 MiB) |
+| SHA-256 | `29278595dea7b629d108f80d24080fd1e4bb2a1588dcbdf56ae71f88945b843b` |
+| Commit | `d065a53` (rama `entrega-0.9.1`) |
+| Migraciones | 1 a 23 |
+| Respaldo | `POSBAK02` (fixture `tests/fixtures/respaldo-v0.9.1-m23.posbak`) |
+| Pruebas | `cargo test --lib` 161 ok (1 ignorada: genera fixture) · `npm test` 209 ok · `tsc` sin errores · e2e 10 de 10 |
+
+Cambios desde 0.9.0:
+- Apartados y crédito (fase 3) y reportes de ventas (fase 5), con detalle «qué se aparta» (migración 22).
+- Z: «Vendido» y «Dinero recibido» arriba; historial «Vendido · Recibido» por día; apartados abiertos en el resumen; ayuda «¿Qué es un abono?».
+- Prueba de que liquidar un apartado no cuenta el dinero dos veces.
+- Reportes rediseñados (menú agrupado, comparación con el año pasado, inventario y lista de precios); cierres de caja más claros.
+- Avisos encima de los diálogos, que se pueden tocar y cerrar con teclado.
+- CODE128 en el comprobante de apartado, apagado hasta probarlo en la impresora (migración 23).
+- «Preparar para el cliente» con puntos obligatorios (condiciones, WebView2, horario real).
+- Correcciones: Enter en Apartar, foco al escribir el total del conteo, rendimiento del desglose del Z.
 
 ## 0.9.0 — versión de prueba en el negocio (2026-11-09)
 
