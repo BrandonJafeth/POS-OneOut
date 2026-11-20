@@ -253,6 +253,9 @@ pub struct Reporte {
     pub despues_del_cierre: Vec<Tardia>,
     pub diferencias: Vec<Diferencia>,
     pub por_cobrar: Vec<PorCobrar>,
+    /// Apartados abiertos hoy y lo que los clientes ya abonaron en ellos (dinero recibido que todavía no es venta).
+    pub apartados_abiertos: i64,
+    pub abonado_en_apartados: i64,
     pub utilidad: Vec<Utilidad>,
     /// Productos vendidos sin costo: no entran en la utilidad.
     pub sin_costo: Vec<String>,
@@ -276,6 +279,17 @@ fn ventas_sql(cols: &str) -> String {
 }
 
 async fn totales(c: &mut SqliteConnection, desde: &str, hasta: &str) -> Res<Totales> {
+    // Todo lo que suma sale de turnos cerrados de esas fechas: sin turnos, todo es cero (y no se
+    // recorren las líneas de venta; pasa siempre con "el año pasado" antes del primer año de uso).
+    let hay: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM caja_turnos WHERE estado = 'cerrado' AND dia BETWEEN ?1 AND ?2)")
+        .bind(desde)
+        .bind(hasta)
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
+    if !hay {
+        return Ok(Totales::default());
+    }
     let f = sqlx::query(&ventas_sql("COUNT(*) AS n, COALESCE(SUM(v.total), 0) AS total, COALESCE(SUM(v.descuento), 0) AS d"))
         .bind(desde)
         .bind(hasta)
@@ -662,6 +676,13 @@ pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> R
         PorCobrar { numero: f.get::<Option<String>, _>("numero").unwrap_or_default(), tipo: f.get("tipo"), cliente: f.get("nombre"), fecha_limite: limite, saldo: f.get("saldo"), dias_atraso: atraso }
     })
     .collect();
+
+    (r.apartados_abiertos, r.abonado_en_apartados) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(total - saldo - condonado), 0) FROM cuentas WHERE tipo = 'apartado' AND estado = 'abierta' AND eliminado_en IS NULL",
+    )
+    .fetch_one(&mut *c)
+    .await
+    .map_err(e)?;
 
     // Turnos abiertos: aparte, "en curso" (no suman al rango).
     r.en_curso = sqlx::query(

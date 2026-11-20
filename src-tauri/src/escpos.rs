@@ -109,6 +109,10 @@ pub fn validar(b: &[u8]) -> Res<()> {
                         } else if (65..=73).contains(&m) {
                             // Formato B: largo y datos.
                             let largo = arg(i + 3)? as usize;
+                            // CODE128 (GS k 73): empieza con el juego de caracteres {A, {B o {C (comprobante de apartado).
+                            if m == 73 && (largo < 3 || arg(i + 4)? != b'{' || !matches!(arg(i + 5)?, b'A' | b'B' | b'C')) {
+                                return Err(malo(i, "CODE128"));
+                            }
                             for j in i + 4..i + 4 + largo {
                                 if !(0x20..=0x7e).contains(&arg(j)?) {
                                     return Err(malo(j, "código de barras"));
@@ -202,6 +206,18 @@ mod tests {
         assert!(validar(&[GS, b'v', b'0', 0, 10, 0, 10, 0, 1, 2, 3]).is_err());
         assert!(validar(&[]).is_err());
         assert!(validar(&pulso_gaveta()).is_err());
+    }
+
+    #[test]
+    fn code128_del_comprobante_de_apartado() {
+        // GS k 73 n {B A-0012
+        let mut v = vec![ESC, b'@', GS, b'h', 60, GS, b'w', 2, GS, b'H', 0, GS, b'k', 73, 8];
+        v.extend_from_slice(b"{BA-0012\n");
+        validar(&v).unwrap();
+        // Sin juego de caracteres, con un byte de control o más corto de lo que declara: no.
+        assert!(validar(&[GS, b'k', 73, 6, b'A', b'-', b'0', b'0', b'1', b'2']).is_err());
+        assert!(validar(&[GS, b'k', 73, 4, b'{', b'B', b'A', 0x10]).is_err());
+        assert!(validar(&[GS, b'k', 73, 9, b'{', b'B', b'A']).is_err());
     }
 
     #[test]

@@ -16,6 +16,8 @@ export interface TicketSettings {
   barras: "A" | "B";
   /** Columnas de texto de la impresora (32 en 58 mm, 48 en 80 mm). Sin dato: 32. */
   columnas?: number;
+  /** CODE128 con el número en el comprobante de apartado. Apagado hasta probarlo en la impresora. */
+  code128?: boolean;
 }
 
 export const DEFAULT_SETTINGS: TicketSettings = { codePage: 19, cortador: false, sinModoChino: true, barras: "B", columnas: COLS };
@@ -39,6 +41,16 @@ function finish(p: EscPos, s: TicketSettings, feedLines = 4): Doc {
   p.feed(feedLines);
   if (s.cortador) p.cut();
   return { bytes: p.bytes(), missing: [...p.missing] };
+}
+
+/** Prueba de CODE128 (GS k 73) con un número de apartado, para confirmarlo antes de activarlo. */
+export function code128(s: TicketSettings): Doc {
+  const p = nuevo(s);
+  p.align("center").bold(true).line("PRUEBA CODE128").bold(false).line("Debe salir el código y debajo A-0012");
+  p.barcode128("A-0012");
+  p.line("Escanéelo: el lector debe escribir A-0012");
+  p.align("left");
+  return finish(p, s);
 }
 
 /** 1.500 (separador de miles con punto, sin decimales). */

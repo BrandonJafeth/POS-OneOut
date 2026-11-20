@@ -1595,6 +1595,9 @@ pub struct TurnoFila {
     /// None para el cajero mientras el turno está abierto.
     pub ventas: Option<i64>,
     pub total: Option<i64>,
+    /// Dinero que entró en el turno por cualquier forma: pagos de ventas + abonos (sin vueltos).
+    /// Difiere de `total` con apartados: la liquidación se vende por su total, pero su dinero entró como abonos.
+    pub recibido: Option<i64>,
     pub pendiente_revision: bool,
     pub no_ventas: i64,
     /// Más aperturas sin venta que el umbral configurado.
@@ -1639,6 +1642,15 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
             .fetch_one(&mut *c)
             .await
             .map_err(e)?;
+        let recibido: i64 = sqlx::query_scalar(&format!(
+            "SELECT COALESCE((SELECT SUM(p.monto) FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id
+                              WHERE v.turno_id = ?1 AND v.estado = 'completada' AND v.eliminado_en IS NULL AND p.eliminado_en IS NULL), 0)
+                  + COALESCE((SELECT SUM(a.monto) FROM abonos a WHERE a.turno_id = ?1 AND {ABONO_EN_SU_Z}), 0)"
+        ))
+        .bind(&t.id)
+        .fetch_one(&mut *c)
+        .await
+        .map_err(e)?;
         let nv: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gaveta_aperturas WHERE turno_id = ? AND causa != 'cierre'").bind(&t.id).fetch_one(&mut *c).await.map_err(e)?;
         let tardias: i64 = sqlx::query_scalar(&format!(
             "SELECT COUNT(*) FROM ventas v JOIN caja_turnos t ON t.id = v.turno_id WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL AND {VENTA_TARDIA}"
@@ -1652,6 +1664,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
         out.push(TurnoFila {
             ventas: ve.then_some(n),
             total: ve.then_some(total),
+            recibido: ve.then_some(recibido),
             pendiente_revision: pendiente && admin,
             no_ventas: nv,
             alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv,

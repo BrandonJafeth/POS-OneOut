@@ -718,6 +718,7 @@ export function Historial(p: { admin: boolean; onVer(id: string): void; onDia?(d
                     {g.tardias > 0 && <Badge tono="aviso">{plural(g.tardias, "venta", "ventas")} después del cierre</Badge>}
                     <span className="fila-dia-total">
                       <span className="muted">Vendido</span> {g.total === null ? "—" : monto(g.total)}
+                      <span className="muted"> · Recibido</span> {g.recibido === null ? "—" : monto(g.recibido)}
                     </span>                    {p.onDia && (
                       <Button icono={BarChart3} onClick={() => p.onDia?.(g.dia)}>
                         Resumen del día

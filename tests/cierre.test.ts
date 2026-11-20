@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { turnosPorDia, type Corte, type Detalle } from "../src/db/caja";
 import { obtenerNegocio } from "../src/db/negocio";
 import { pdfCierre } from "../src/lib/caja/pdfZ";
-import { aEscPos, comprobanteMovimiento, descuadres, documentosCierre, lineasZ, NOTA_USUARIOS, opcionesPorDefecto, reporteCorte, reporteZ } from "../src/lib/caja/reporteZ";
+import { aEscPos, comprobanteMovimiento, descuadres, dineroDelTurno, documentosCierre, lineasZ, NOTA_USUARIOS, opcionesPorDefecto, reporteCorte, reporteZ } from "../src/lib/caja/reporteZ";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS, lr } from "../src/lib/tickets";
 import type { Negocio, Venta } from "../src/tipos";
@@ -113,6 +113,39 @@ function detalle(): Detalle {
 }
 
 const SIN: { copia: boolean; detalleCompleto: boolean; porDepartamento: boolean } = { copia: false, detalleCompleto: false, porDepartamento: false };
+
+describe("vendido y dinero recibido", () => {
+  it("sin apartados: lo vendido es lo recibido (suma de las formas de pago)", async () => {
+    const x = dineroDelTurno(detalle().resumen);
+    expect([x.vendido, x.recibido]).toEqual([10595, 10595]);
+    const t = texto(reporteZ(await obtenerNegocio(), detalle(), DEFAULT_SETTINGS, SIN).bytes);
+    expect(t).toContain(lr("VENDIDO", "¢10.595"));
+    expect(t).toContain(lr("DINERO RECIBIDO", "¢10.595"));
+  });
+
+  it("liquidación con abonos: vendido − aplicados + abonos = recibido, y va arriba del Z", async () => {
+    const d = detalle();
+    // Se suma una liquidación de ¢30.000 pagada con abonos; hoy entró el último abono, ¢10.000 (¢4.000 efectivo + ¢6.000 tarjeta).
+    d.resumen.ventas += 1;
+    d.resumen.totalVentas += 30000;
+    d.resumen.ventasConAbonos = 30000;
+    d.resumen.abonosTotal = 10000;
+    d.resumen.abonosEfectivo = 4000;
+    d.resumen.efectivoEsperado += 4000;
+    d.resumen.desglose.total += 30000;
+    d.resumen.conDesglose = false;
+    const x = dineroDelTurno(d.resumen);
+    expect(x.recibido).toBe(10595 + 10000);
+    expect(x.vendido - x.aplicados - x.credito + x.abonos).toBe(x.recibido);
+    const l = lineasTexto(reporteZ(await obtenerNegocio(), d, DEFAULT_SETTINGS, SIN).bytes);
+    const i = l.indexOf(lr("VENDIDO", "¢40.595"));
+    expect(i).toBeGreaterThan(-1);
+    expect(i).toBeLessThan(l.findIndex((s) => s.includes("VENTAS POR FORMA DE PAGO")));
+    expect(l).toContain(lr("- Pagado con abonos", "-¢30.000"));
+    expect(l).toContain(lr("+ Abonos de apartados", "+¢10.000"));
+    expect(l).toContain(lr("DINERO RECIBIDO", "¢20.595"));
+  });
+});
 
 describe("reporte Z", () => {
   it("el nombre del departamento usa todo el espacio libre (no se corta si cabe)", async () => {

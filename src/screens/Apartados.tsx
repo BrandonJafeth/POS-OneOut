@@ -23,7 +23,9 @@ import {
   type Reglas,
 } from "../db/cuentas";
 import { guardarConfig } from "../db/config";
+import { AYUDA_ABONOS } from "../lib/caja/reporteZ";
 import { imprimirComprobante } from "../lib/cuentas/imprimir";
+import AyudaInfo from "../ui/AyudaInfo";
 import { conMiles, leerMontoEntero } from "../lib/texto";
 import { fechaHora, monto } from "../lib/tickets";
 import Button from "../ui/Button";
@@ -66,7 +68,10 @@ export default function Apartados() {
 
   return (
     <div className="screen">
-      <h1>Apartados{config.usa_credito ? " y crédito" : ""}</h1>
+      <div className="titulo-con-ayuda">
+        <h1>Apartados{config.usa_credito ? " y crédito" : ""}</h1>
+        <AyudaInfo texto={AYUDA_ABONOS} etiqueta="¿Qué es un abono?" />
+      </div>
       <div className="tabs" role="tablist" aria-label="Apartados" onKeyDown={flechasPestanas}>
         {tabs.map(([id, t]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab active" : "tab"} onClick={() => setTab(id)}>

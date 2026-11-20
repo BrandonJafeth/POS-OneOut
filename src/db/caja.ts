@@ -316,6 +316,8 @@ export interface TurnoFila extends Turno {
   /** null para el cajero mientras el turno está abierto. */
   ventas: number | null;
   total: number | null;
+  /** Dinero que entró (pagos de ventas + abonos). Con apartados difiere de `total`. */
+  recibido: number | null;
   pendienteRevision: boolean;
   noVentas: number;
   alertaNoVentas: boolean;
@@ -371,7 +373,9 @@ export function diaConNombre(dia: string): string {
 }
 
 /** Turnos agrupados por día de negocio, con el total de ventas del día (los fondos nunca se suman). */
-export function turnosPorDia<T extends { dia: string; total: number | null; ventasDespuesDelCierre: number }>(filas: T[]): { dia: string; total: number | null; tardias: number; turnos: T[] }[] {
+export function turnosPorDia<T extends { dia: string; total: number | null; recibido?: number | null; ventasDespuesDelCierre: number }>(
+  filas: T[],
+): { dia: string; total: number | null; recibido: number | null; tardias: number; turnos: T[] }[] {
   const g = new Map<string, T[]>();
   for (const f of filas) g.set(f.dia, [...(g.get(f.dia) ?? []), f]);
   return [...g.entries()]
@@ -379,6 +383,8 @@ export function turnosPorDia<T extends { dia: string; total: number | null; vent
     .map(([dia, turnos]) => ({
       dia,
       total: turnos.some((t) => t.total === null) ? null : turnos.reduce((s, t) => s + (t.total ?? 0), 0),
+      // El dinero recibido sí se suma por día (cada pago entra en un solo turno); el efectivo contado no.
+      recibido: turnos.some((t) => t.recibido == null) ? null : turnos.reduce((s, t) => s + (t.recibido ?? 0), 0),
       tardias: turnos.reduce((s, t) => s + t.ventasDespuesDelCierre, 0),
       turnos,
     }));

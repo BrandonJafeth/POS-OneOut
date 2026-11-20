@@ -2211,6 +2211,87 @@ mark {
   font-weight: 600;
 }
 
+/* Vendido y dinero recibido: arriba del Z, más grandes que el resto. */
+.z-dinero {
+  border-top: 0;
+}
+
+.z-dinero .principal dt {
+  display: flex;
+  align-items: center;
+  gap: var(--e1);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.z-dinero .principal > dd:not(.nota) {
+  font-size: 26px;
+  font-weight: 750;
+}
+
+.caja-cifras dd.nota {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.titulo-con-ayuda {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+}
+
+/* Ayuda con ícono de información (<details>): el texto se abre debajo, en una caja chica. */
+.ayuda-info {
+  display: inline-block;
+  position: relative;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.ayuda-info summary {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.ayuda-info summary::-webkit-details-marker {
+  display: none;
+}
+
+.ayuda-info summary:hover,
+.ayuda-info[open] summary {
+  color: var(--text);
+  background: var(--card2);
+}
+
+.ayuda-info summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ayuda-info p {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(320px, 80vw);
+  margin: 0;
+  padding: var(--e3);
+  border: 1px solid var(--line);
+  border-radius: var(--radio);
+  background: var(--card);
+  color: var(--text);
+  line-height: 1.45;
+  text-align: left;
+  box-shadow: 0 4px 14px var(--sombra);
+}
+
 .caja-movs {
   margin: 0;
   padding: 0;
@@ -3956,6 +4037,27 @@ tr.clic:focus-visible .fila-ver {
 .kpis-menores .kpi-valor {
   font-size: 20px;
   font-weight: 700;
+}
+
+/* Apartados abiertos en el resumen: dinero ya recibido que todavía no es venta. */
+.reportes-apartados {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e2) var(--e3);
+  padding: var(--e2) var(--e3) var(--e2) var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card);
+}
+
+.reportes-apartados > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.reportes-apartados > span {
+  flex: 1 1 280px;
 }
 
 /* Vistazo de lo más vendido: lista corta con barra de proporción. */

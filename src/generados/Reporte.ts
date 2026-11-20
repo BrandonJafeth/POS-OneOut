@@ -23,7 +23,11 @@ porDiaAnio: Array<PorDia>, porDia: Array<PorDia>, porDepartamento: Array<Fila>, 
 /**
  * Activos que controlan inventario y no se vendieron en el rango.
  */
-sinVentas: number, porUsuario: Array<PorUsuario>, porForma: Array<PorForma>, porHora: Array<PorHora>, anulaciones: Array<Anulacion>, descuentosAutorizados: number, descuentosCatalogo: number, despuesDelCierre: Array<Tardia>, diferencias: Array<Diferencia>, porCobrar: Array<PorCobrar>, utilidad: Array<Utilidad>, 
+sinVentas: number, porUsuario: Array<PorUsuario>, porForma: Array<PorForma>, porHora: Array<PorHora>, anulaciones: Array<Anulacion>, descuentosAutorizados: number, descuentosCatalogo: number, despuesDelCierre: Array<Tardia>, diferencias: Array<Diferencia>, porCobrar: Array<PorCobrar>, 
+/**
+ * Apartados abiertos hoy y lo que los clientes ya abonaron en ellos (dinero recibido que todavía no es venta).
+ */
+apartadosAbiertos: number, abonadoEnApartados: number, utilidad: Array<Utilidad>, 
 /**
  * Productos vendidos sin costo: no entran en la utilidad.
  */

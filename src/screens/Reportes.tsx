@@ -4,7 +4,7 @@
 // anterior o contra las mismas fechas del año pasado. Cada reporte es una o más tablas ordenables;
 // lo mismo se exporta a CSV y a PDF carta en Documentos\Punto de venta\Reportes\AAAA-MM.
 // Rust calcula todo (reportes.rs); inventario y precios usan lo de Inventario y Productos.
-import { ChevronRight, FileDown, FileSpreadsheet, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { Bookmark, ChevronRight, FileDown, FileSpreadsheet, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
@@ -17,6 +17,8 @@ import { invocar } from "../lib/invocar";
 import { descargar } from "../lib/exportarCliente";
 import { csvReporte, nombreArchivo, pdfReporte, type SeccionExport } from "../lib/reportes/exportar";
 import { diasEntre, haceUnAnio, variacion } from "../lib/reportes/fechas";
+import { AYUDA_ABONOS } from "../lib/caja/reporteZ";
+import AyudaInfo from "../ui/AyudaInfo";
 import { fechaHora, monto, montoConSigno } from "../lib/tickets";
 import type { ProductoLista } from "../tipos";
 import Alert from "../ui/Alert";
@@ -98,7 +100,7 @@ interface Cifra {
 }
 
 export default function Reportes() {
-  const { config, caja, recargarCaja } = useSesion();
+  const { config, caja, recargarCaja, irA } = useSesion();
   const toast = useToast();
   const [rangos, setRangos] = useState<Rangos | null>(null);
   const [desde, setDesde] = useState("");
@@ -266,6 +268,19 @@ export default function Reportes() {
                 </div>
               </div>
               {vista.resumen && <Cifras items={vista.resumen} />}
+              {tab === "resumen" && r && config.usa_apartados && r.apartadosAbiertos > 0 && (
+                <div className="reportes-apartados">
+                  <Bookmark size={18} aria-hidden />
+                  <span>
+                    <strong>Apartados abiertos:</strong> {monto(r.abonadoEnApartados)} abonados a nombre de clientes ({r.apartadosAbiertos}{" "}
+                    {r.apartadosAbiertos === 1 ? "apartado" : "apartados"}). No es venta todavía.
+                  </span>
+                  <AyudaInfo texto={AYUDA_ABONOS} etiqueta="¿Qué es un abono?" />
+                  <Button variante="fantasma" onClick={() => irA("apartados")}>
+                    Ver apartados
+                  </Button>
+                </div>
+              )}
               {vista.extra}
               {vista.tablas.map((t) => (
                 <TablaOrdenable key={t.titulo} titulo={t.titulo} columnas={t.columnas} filas={t.filas} total={t.total?.map((v, i) => (t.columnas[i]?.dinero && typeof v === "number" ? monto(v) : v))} vacio={t.vacio} />
@@ -323,9 +338,11 @@ function Cifras(p: { items: Cifra[] }) {
   );
 }
 
-function resumenDe(t: Totales, a: Totales, cuando: string, conCuentas: boolean): Cifra[] {
+/** `sinBase`: no hay nada con qué comparar (ej. el año pasado sin ventas): ese texto en vez de porcentajes. */
+function resumenDe(t: Totales, a: Totales, cuando: string, conCuentas: boolean, sinBase?: string): Cifra[] {
   const prom = (x: Totales) => (x.tiquetes ? Math.round(x.ventas / x.tiquetes) : 0);
   const con = (etiqueta: string, valor: string, ahora: number, antes: number): Cifra => {
+    if (sinBase) return { etiqueta, valor, nota: sinBase };
     const v = variacion(ahora, antes, cuando);
     return { etiqueta, valor, nota: v?.texto, dir: v?.dir };
   };
@@ -427,10 +444,12 @@ function armar(tab: Exclude<Tab, "cierres" | "inventario" | "precios">, r: Repor
       const unDia = r.desde === r.hasta;
       // Año pasado = mismas fechas: basta el año ("vs. 2025"); un solo día lleva la fecha.
       const cuando = anio ? (unDia ? fechaConAnio(r.anioDesde) : r.anioDesde.slice(0, 4)) : tramo(r.anteriorDesde, r.anteriorHasta);
-      const datos = serie(r, compara);
+      // Sin ventas registradas en esas fechas del año pasado: se dice, sin barras ni porcentajes vacíos.
+      const sinAnio = anio && r.anio.tiquetes === 0 && r.anio.ventas === 0;
+      const datos = serie(r, sinAnio ? "anterior" : compara);
       return {
         titulo: "Resumen de ventas",
-        resumen: resumenDe(r.totales, anio ? r.anio : r.anterior, cuando, conCuentas),
+        resumen: resumenDe(r.totales, anio ? r.anio : r.anterior, cuando, conCuentas, sinAnio ? "Sin datos del año pasado" : undefined),
         extra: (
           <>
             {r.enCurso.length > 0 && (

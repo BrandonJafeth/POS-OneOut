@@ -295,6 +295,139 @@ async fn caja_tardia_del_sabado_el_abono_cuenta_para_el_lunes() {
     assert!(fecha.starts_with("2026-11-21T23:45"), "{fecha}");
 }
 
+// ─────────── Sin doble conteo ───────────
+
+/// Dinero recibido en un turno por cualquier forma de pago: pagos de ventas + abonos (lo aplicado, sin vuelto).
+fn recibido(z: &caja::Resumen) -> i64 {
+    z.por_forma.iter().map(|f| f.monto).sum::<i64>() + z.abonos_total
+}
+
+/// "Vendido − abonos aplicados − a crédito + abonos recibidos = dinero recibido" (lo que dice el Z arriba).
+fn cuadra_vendido_y_recibido(z: &caja::Resumen) {
+    assert_eq!(z.total_ventas - z.ventas_con_abonos - z.ventas_a_credito + z.abonos_total, recibido(z), "vendido y recibido no cuadran: {z:?}");
+}
+
+/// Pagos de ventas que cuentan en el turno + abonos del turno, leídos directo de las tablas.
+async fn pagos_reales(p: &SqlitePool, turno: &str) -> i64 {
+    let ventas: i64 = sqlx::query_scalar(&format!(
+        "SELECT COALESCE(SUM(vp.monto), 0) FROM venta_pagos vp JOIN ventas v ON v.id = vp.venta_id WHERE v.turno_id = ? AND vp.eliminado_en IS NULL AND {}",
+        crate::reportes::VENTA_EN_SU_Z
+    ))
+    .bind(turno)
+    .fetch_one(p)
+    .await
+    .unwrap();
+    let abonos: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(monto), 0) FROM abonos WHERE turno_id = ? AND anulado_en IS NULL").bind(turno).fetch_one(p).await.unwrap();
+    ventas + abonos
+}
+
+fn sinpe(m: i64) -> PagoEntrada {
+    PagoEntrada { forma_pago_id: "0000000000000000000000FP03".into(), monto: m, banco_id: Some("0000000000000000000000BN02".into()), referencia: Some("88112233".into()), ultimos4: None, pagador: Some("Marta Solís".into()) }
+}
+
+/// Un apartado de ¢30.000: abono en efectivo el lunes, abono por SINPE el martes y liquidación mixta
+/// (efectivo + tarjeta) en la caja tardía del sábado, que cuenta para el lunes 23. Cada colón entra
+/// una sola vez: en el Z del turno donde se recibió, en el efectivo esperado y en los reportes.
+#[tokio::test]
+async fn liquidar_no_cuenta_el_dinero_dos_veces() {
+    let (bd, _, ana, luis) = base_con_usuarios().await;
+    let p = &bd.pool;
+    let pid = producto(p, 30000, 1).await;
+    let cl = cliente(p).await;
+
+    // Lunes 16: aparta con ¢15.000 en efectivo.
+    reloj("2026-11-16T10:00:00-06:00");
+    abrir(p, &luis, CAJA_1, &total(10000)).await.unwrap();
+    let r = apartar(p, &luis, &cl, &pid, 30000, 1, 15000).await;
+    let t1 = cerrar_exacto(p, &ana).await;
+    let z1 = z_cerrado(p, &ana, &t1).await;
+    assert_eq!((z1.total_ventas, z1.abonos_total, z1.abonos_efectivo, z1.efectivo_esperado), (0, 15000, 15000, 10000 + 15000));
+    cuadra_vendido_y_recibido(&z1);
+    assert_eq!(recibido(&z1), pagos_reales(p, &t1).await);
+    // Reportes: el abono está "a nombre del cliente" mientras el apartado siga abierto.
+    let r1 = crate::reportes::ventas(p, &ana, "2026-11-16", "2026-11-16").await.unwrap();
+    assert_eq!((r1.apartados_abiertos, r1.abonado_en_apartados, r1.totales.ventas), (1, 15000, 0));
+
+    // Martes 17: abona ¢5.000 por SINPE (no es efectivo).
+    reloj("2026-11-17T10:00:00-06:00");
+    abrir(p, &luis, CAJA_1, &total(z1.efectivo_esperado)).await.unwrap();
+    abonar(p, &luis, CAJA_1, &r.cuenta_id, 5000, &[sinpe(5000)], &ulid(), true).await.unwrap();
+    let t2 = cerrar_exacto(p, &ana).await;
+    let z2 = z_cerrado(p, &ana, &t2).await;
+    assert_eq!((z2.total_ventas, z2.abonos_total, z2.abonos_efectivo, z2.efectivo_esperado), (0, 5000, 0, z1.efectivo_esperado));
+    cuadra_vendido_y_recibido(&z2);
+    assert_eq!(recibido(&z2), pagos_reales(p, &t2).await);
+
+    // Sábado 21 después del cierre (17:30): la caja cuenta para el lunes 23. Liquida ¢10.000 mixto.
+    reloj("2026-11-21T09:00:00-06:00");
+    abrir(p, &luis, CAJA_1, &total(z2.efectivo_esperado)).await.unwrap();
+    cerrar_exacto(p, &ana).await;
+    reloj("2026-11-21T17:45:00-06:00");
+    abrir(p, &luis, CAJA_1, &total(z2.efectivo_esperado)).await.unwrap();
+    let liq = abonar(p, &luis, CAJA_1, &r.cuenta_id, 10000, &[pago(EF, 5000), pago(TJ, 6000)], &ulid(), true).await.unwrap();
+    assert_eq!((liq.saldo, liq.estado.as_str(), liq.vuelto), (0, "entregada", 1000));
+    let t3 = cerrar_exacto(p, &ana).await;
+    let dia: String = sqlx::query_scalar("SELECT dia FROM caja_turnos WHERE id = ?").bind(&t3).fetch_one(p).await.unwrap();
+    assert_eq!(dia, "2026-11-23");
+
+    // La venta de liquidación queda pagada con abonos aplicados: ningún pago propio.
+    let vid = liq.venta_id.unwrap();
+    let (vtotal, npagos): (i64, i64) = sqlx::query_as("SELECT total, (SELECT COUNT(*) FROM venta_pagos WHERE venta_id = v.id) FROM ventas v WHERE id = ?").bind(&vid).fetch_one(p).await.unwrap();
+    assert_eq!((vtotal, npagos), (30000, 0));
+
+    let z3 = z_cerrado(p, &ana, &t3).await;
+    // Vendido ¢30.000, pagado con abonos; dinero de hoy: solo los ¢10.000 de la liquidación.
+    assert_eq!((z3.ventas, z3.total_ventas, z3.ventas_con_abonos), (1, 30000, 30000));
+    assert_eq!(z3.por_forma.iter().map(|f| f.monto).sum::<i64>(), 0);
+    assert_eq!((z3.abonos_total, z3.abonos_efectivo), (10000, 4000));
+    // El efectivo esperado suma solo el efectivo final recibido en este turno (5.000 − 1.000 de vuelto).
+    assert_eq!(z3.efectivo_esperado, z2.efectivo_esperado + 4000);
+    cuadra_vendido_y_recibido(&z3);
+    assert_eq!(recibido(&z3), pagos_reales(p, &t3).await);
+
+    // En todos los turnos juntos entró exactamente el precio del apartado, ni un colón más.
+    assert_eq!(recibido(&z1) + recibido(&z2) + recibido(&z3), 30000);
+    // El historial de cierres dice lo mismo por turno: vendido ¢30.000, recibido ¢10.000 el lunes 23.
+    let hist = caja::listar(p, &ana, CAJA_1, "2026-11-16", "2026-11-23").await.unwrap();
+    let h3 = hist.iter().find(|f| f.turno.id == t3).unwrap();
+    assert_eq!((h3.total, h3.recibido), (Some(30000), Some(10000)));
+    let h1 = hist.iter().find(|f| f.turno.id == t1).unwrap();
+    assert_eq!((h1.total, h1.recibido), (Some(0), Some(15000)));
+
+    // Reportes por forma de pago (lunes 16 a lunes 23): el dinero real suma ¢30.000; la venta
+    // aparece aparte como "Pagadas con abonos", que no es dinero.
+    let rep = crate::reportes::ventas(p, &ana, "2026-11-16", "2026-11-23").await.unwrap();
+    let dinero: i64 = rep.por_forma.iter().filter(|f| f.forma != "Pagadas con abonos").map(|f| f.ventas + f.abonos).sum();
+    assert_eq!(dinero, 30000);
+    let con_abonos: i64 = rep.por_forma.iter().filter(|f| f.forma == "Pagadas con abonos").map(|f| f.ventas).sum();
+    assert_eq!((con_abonos, rep.totales.ventas, rep.totales.abonos), (30000, 30000, 30000));
+    let ef = rep.por_forma.iter().find(|f| f.forma == "Efectivo").unwrap();
+    assert_eq!((ef.ventas, ef.abonos), (0, 15000 + 4000));
+    assert_eq!((rep.apartados_abiertos, rep.abonado_en_apartados), (0, 0));
+}
+
+/// Cancelado con devolución en efectivo: el abono entró y la devolución sale; nunca es venta.
+#[tokio::test]
+async fn cancelar_con_devolucion_no_deja_venta_ni_dinero() {
+    let (bd, _, ana, luis) = base_con_usuarios().await;
+    let p = &bd.pool;
+    reloj("2026-11-16T10:00:00-06:00");
+    let pid = producto(p, 20000, 1).await;
+    let cl = cliente(p).await;
+    abrir(p, &luis, CAJA_1, &total(10000)).await.unwrap();
+    let r = apartar(p, &luis, &cl, &pid, 20000, 1, 10000).await;
+    cancelar(p, &ana, CAJA_1, &r.cuenta_id, PIN, "Ya no lo quiere", 10000, 10000).await.unwrap();
+    let t = cerrar_exacto(p, &ana).await;
+    let z = z_cerrado(p, &ana, &t).await;
+    assert_eq!((z.ventas, z.total_ventas, z.ventas_con_abonos), (0, 0, 0));
+    assert_eq!((z.abonos_total, z.apartados.devuelto), (10000, 10000));
+    // fondo + abono − devolución
+    assert_eq!(z.efectivo_esperado, 10000);
+    cuadra_vendido_y_recibido(&z);
+    let ventas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas").fetch_one(p).await.unwrap();
+    assert_eq!(ventas, 0);
+}
+
 // ─────────── Acciones del dueño ───────────
 
 #[tokio::test]
