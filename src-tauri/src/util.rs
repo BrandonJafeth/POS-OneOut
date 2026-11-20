@@ -175,7 +175,7 @@ pub fn mes_valido(m: &str) -> Res<&str> {
 
 /// Carpetas fijas de documentos exportados: la ventana elige una de la lista, nunca una ruta.
 pub fn carpeta_valida(c: &str) -> Res<&str> {
-    if matches!(c, "Cierres de caja" | "Inventario" | "Clientes") { Ok(c) } else { Err(format!("{TECNICO}Carpeta no válida: {c}")) }
+    if matches!(c, "Cierres de caja" | "Inventario" | "Clientes" | "Reportes") { Ok(c) } else { Err(format!("{TECNICO}Carpeta no válida: {c}")) }
 }
 
 /// Guarda en `dir` un archivo que armó la app (PDF del cierre, CSV) sin pisar uno existente

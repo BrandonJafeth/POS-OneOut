@@ -205,6 +205,45 @@ Como Ana (dueño). Use dos productos con código de barras (A y B) y un servicio
 
 5. **Impresora sin papel.** Quite el papel (o desconecte la USB a medio tiquete) y cobre. → En unos 10 s avisa que la impresora no contestó; la venta queda guardada y la siguiente venta se cobra normal. Con «No venta», si la gaveta no contesta, el aviso dice que quedó registrado.
 
+## T. Apartados y crédito
+
+Antes, como Ana: **Apartados → Opciones**, escriba las condiciones (por ejemplo «Pasado el plazo se devuelve lo abonado») y deje 50 %, 30 días, calendario, «Se le devuelve todo».
+
+1. **Apartar sin cliente.** Como Luis, con la caja abierta, agregue un producto de ¢20.000 y pulse **F9**. → Abre la ventana de cliente.
+   - Cree uno nuevo (nombre, teléfono, casilla del aviso). → Sigue solo a **Apartar**: total, abono mínimo ¢10.000 y «Retirar antes del …» (30 días después; si cae en domingo, el lunes).
+2. **Abono menor al mínimo.** Escriba ¢9.000 y Enter. → «El abono mínimo para apartar es…». Escriba ¢10.000 y Enter → el cobro de siempre → Enter (efectivo).
+   - → Gaveta abierta, comprobante «A-0001 · APARTADO» con productos, total, abonado, saldo ¢10.000, fecha límite, condiciones y (si está activo) el aviso de privacidad. La venta desaparece de las pestañas.
+3. **Lo apartado no se vende.** Si ese producto tenía 1 unidad con control de inventario: véndalo en otra venta. → Pide el PIN del dueño («Está apartado: … (A-0001)»).
+4. **El precio cambia.** Como Ana, cambie el precio del producto a ¢25.000.
+5. **Abonar y liquidar.** Como Luis, **F10** → escriba «Marta» (o «A-1», o el teléfono) → ↓ y Enter. → Saldo ¢10.000. Enter → cobro con tarjeta → Enter.
+   - → «A-0001 liquidado», sale el **tiquete de venta** de ¢20.000 (el precio del apartado, no ¢25.000) con «Pagado con abonos (A-0001)». La existencia baja ahora.
+6. **Doble clic.** En otro apartado, al cobrar un abono pulse Enter dos veces seguidas. → Un solo abono.
+7. **Pagado sin entregar.** Abone el saldo completo de otro apartado **desmarcando** «Se lleva los productos ahora». → Queda «Pagado, sin entregar». Con F10 → **Entregar**.
+8. **Sin caja no hay abono.** Cierre la caja y pruebe F10 → abonar. → «La caja está cerrada…».
+9. **El Z.** Al cerrar: sección **Apartados y crédito** con los abonos por forma de pago (dinero), «Ventas pagadas con abonos», apartados nuevos y liquidados. El efectivo esperado incluye los abonos en efectivo («Abonos en efectivo»). Como cajero con la caja abierta, en Caja no se ve ningún total de abonos.
+10. **Caja tardía.** Un sábado, después de las 17:30, abra la caja que cuenta para el lunes y reciba un abono. → En Reportes, el abono sale el lunes; el comprobante tiene la fecha y hora reales del sábado.
+11. **Cancelar.** Como Ana, **Apartados** → un apartado abierto → **Cancelar apartado**: devuelve ¢8.000 de ¢10.000, todo en efectivo, motivo y PIN. → Estado cancelado, retenido ¢2.000; en Caja, una salida «Devolución apartado»; en el Z, «Cancelados: devuelto ¢8.000 · retenido ¢2.000». La unidad ya se puede vender sin PIN.
+12. **Anular un abono.** En un apartado abierto, **Anular** un abono del turno abierto (sin devolución). → El saldo sube y el efectivo esperado baja. Con un abono de un turno ya cerrado: el Z viejo no cambia y lo devuelto sale como salida hoy.
+13. **Ajustar, condonar, prorrogar.** Ajuste −¢500 (motivo y PIN) → el saldo baja. Condonar → se liquida con ese descuento y sale la venta. Prorrogar a otra fecha → cambia «Vence».
+14. **Vencido.** Ponga la fecha de Windows después de la fecha límite de un apartado abierto. → En el menú, Apartados muestra un contador; la pestaña **Vencidos** lo lista con los días de atraso. No se cancela solo.
+15. **Ley 8968.** En Clientes, intente anonimizar a Marta con un apartado abierto. → Lo rechaza. En la bitácora, `cuenta.abono` y `cuenta.cancelar` no llevan nombre ni teléfono.
+16. **Crédito** (solo en un negocio con `usa_credito`, Técnico → Configuración). Sin límite: cobro → «Dejar ¢… a crédito» → «no alcanza». Como Ana, en Apartados → Crédito → un cliente → **Límite de crédito** ¢50.000 (PIN). Venda con prima de ¢10.000 y deje el resto a crédito → C-0001; abónelo con F10. En el Z: «Ventas a crédito (por cobrar)».
+
+## U. Reportes y cierres de caja
+
+Como Ana, **Reportes**.
+
+1. **Atajos.** Hoy, Ayer, Esta semana (desde el lunes), Este mes, Mes anterior. Con una caja tardía del sábado abierta, «Hoy» es el lunes.
+2. **Suma igual a los Z.** Elija un día con dos cierres. → Resumen «Ventas» = suma de «Total ventas» de los dos Z (Reportes → Cierres de caja). Los fondos no se suman.
+3. **Anulación de otro día.** Anule hoy una venta de ayer. → Ayer sigue igual (como su Z); hoy aparece en «Anulado después» y en «Anulaciones y control» como «Otro día».
+4. **En curso.** Con la caja abierta, el resumen dice «En curso (no se suma)» con lo de ese turno.
+5. **Tablas.** En Productos, pulse el encabezado «Ventas»: ordena de mayor a menor; otra vez, al revés. Con Tab llega a cada encabezado y Enter ordena.
+6. **Por hora.** Las ventas de la caja tardía salen en su hora real.
+7. **Utilidad.** Productos sin costo salen en el aviso «vendidos sin costo»; los vendidos antes de esta versión salen «aprox.».
+8. **Exportar.** CSV y PDF en cada pestaña. → Quedan en `Documentos\Punto de venta\Reportes\AAAA-MM\`. El CSV abre en Excel con tildes y los montos se pueden sumar; un nombre que empieza con «=» queda como texto.
+9. **Cierres de caja.** La lista de turnos (antes en Caja → Turnos) está aquí: abrir un turno, ver el Z, reimprimir (PIN), marcar revisada, reabrir y corregir el día. En Caja ya no aparece el historial.
+10. **Permisos.** Como Luis y como técnico, Reportes no aparece en el menú.
+
 ## P. Actualizar el programa en la PC del cliente
 
 El procedimiento completo (antes, instalar, verificar, volver atrás) está en **ACTUALIZAR.md**. Sígalo paso a paso; no lo repita de memoria.

@@ -688,6 +688,18 @@ pub mod tests {
                 let n: i64 = sqlx::query_scalar(sql).fetch_one(&mem).await.unwrap();
                 assert_eq!(n, esperado, "{ruta:?}: {sql}");
             }
+            // Fixtures desde la migración 21: los apartados (abierto con saldo y cancelado con lo retenido).
+            if ruta.to_string_lossy().split("-m").last().and_then(|x| x.trim_end_matches(".posbak").parse::<i64>().ok()).is_some_and(|m| m >= 21) {
+                for (sql, esperado) in [
+                    ("SELECT COUNT(*) FROM cuentas WHERE tipo = 'apartado' AND estado = 'abierta' AND saldo = 500", 1),
+                    ("SELECT COUNT(*) FROM cuentas WHERE estado = 'cancelada' AND retenido = 500", 1),
+                    ("SELECT COUNT(*) FROM abonos", 2),
+                    ("SELECT COUNT(*) FROM cuenta_eventos", 5),
+                ] {
+                    let n: i64 = sqlx::query_scalar(sql).fetch_one(&mem).await.unwrap();
+                    assert_eq!(n, esperado, "{ruta:?}: {sql}");
+                }
+            }
             let filas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bitacora").fetch_one(&mem).await.unwrap();
             assert!(filas > 3, "{ruta:?}");
             assert!(bitacora::verificar(&mem).await.unwrap().ok, "{ruta:?}");
@@ -727,6 +739,19 @@ pub mod tests {
             let esp = crate::ventas::crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
             let pago = PagoEntrada { forma_pago_id: forma.into(), monto: cant * 1000, banco_id: None, referencia: None, ultimos4: None, pagador: None };
             crate::ventas::cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago]).await.unwrap();
+        }
+        // Desde la migración 21: un apartado abierto y uno cancelado, abonados con tarjeta (no cambian
+        // las ventas ni el efectivo, así las cifras de arriba valen para todos los fixtures).
+        let cliente = crate::calculo::ClienteBasico { id: cli.id.clone(), nombre: "Cliente Prueba".into(), telefono: None, cedula: None };
+        for cancelar in [false, true] {
+            let l = Linea { id: crate::util::ulid(), producto_id: Some("PFIX1".into()), codigo: None, descripcion: "Cuaderno de prueba".into(), departamento_id: "00000000000000000000000D01".into(), cantidad: 1, precio_unitario: 1000, descuento: 0, descuento_catalogo: 0, tasa_iva: 13.0, exento: false };
+            let e = Estado { lineas: vec![l], cliente: Some(cliente.clone()), ..Default::default() };
+            let esp = crate::ventas::crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
+            let pago = PagoEntrada { forma_pago_id: "0000000000000000000000FP02".into(), monto: 500, banco_id: None, referencia: None, ultimos4: None, pagador: None };
+            let r = crate::cuentas::crear_apartado(p, &cajero, CAJA_1, &esp.id, &e, 500, &[pago], &crate::util::ulid()).await.unwrap();
+            if cancelar {
+                crate::cuentas::cancelar(p, &dueno, CAJA_1, &r.cuenta_id, "246813", "Fixture: cancelado", 0, 0).await.unwrap();
+            }
         }
         cerrar(p, &cajero, CAJA_1, &conteo(&[(1000, 12)]), "").await.unwrap();
         bd

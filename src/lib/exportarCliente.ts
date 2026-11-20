@@ -87,7 +87,7 @@ export function pdfCliente(e: ExportacionCliente, n: Pick<Negocio, "nombreComerc
   });
 }
 
-export type Carpeta = "Cierres de caja" | "Inventario" | "Clientes";
+export type Carpeta = "Cierres de caja" | "Inventario" | "Clientes" | "Reportes";
 
 /** Rust lo guarda (sin pisar otro) y devuelve la ruta real, para decírsela al usuario. Con `carpeta`
  *  va a Documentos\Punto de venta\<carpeta>\AAAA-MM (`mes` o el actual); sin ella, a Descargas. */

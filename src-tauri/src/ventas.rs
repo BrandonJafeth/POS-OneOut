@@ -342,7 +342,8 @@ pub(crate) async fn lineas_de_catalogo(tx: &mut SqliteConnection, entrada: &[cal
 
 /// `pin_existencia`: PIN del dueño para vender sin existencia cuando la configuración no lo permite
 /// (la pantalla lo pide al recibir el error SIN_EXISTENCIA y reintenta). También autoriza vender
-/// unidades que están apartadas.
+/// unidades que están apartadas. (La app usa `cobrar_opc`; este atajo queda para las pruebas.)
+#[cfg(test)]
 pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>) -> Res<ResultadoCobro> {
     cobrar_opc(pool, a, caja_id, espera_id, est, pagos, pin_existencia, false).await
 }

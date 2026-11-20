@@ -1,6 +1,6 @@
 # Diseño fase 3: apartados y crédito
 
-_Borrador para aprobar. 2026-11-19. No hay código todavía._
+_Aprobado el 2026-11-19 con las recomendaciones marcadas (→) e implementado el mismo día. Política de cancelación de Chaguí: «devolver» por defecto hasta que el dueño la cambie en Apartados → Opciones._
 
 Cada punto con varias opciones trae la recomendación marcada con **→**. Las preguntas que necesitan respuesta del dueño o del contador están al final (sección 16).
 

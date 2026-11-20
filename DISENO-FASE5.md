@@ -1,6 +1,6 @@
 # Diseño fase 5: reportes de ventas
 
-_Borrador para aprobar. 2026-11-19. No hay código todavía. Depende de la fase 3 (abonos y apartados)._
+_Aprobado el 2026-11-19 con las recomendaciones marcadas (→) e implementado el mismo día. Además, a pedido: el historial de cierres de caja pasó de Caja a Reportes._
 
 Cada punto con varias opciones trae la recomendación marcada con **→**.
 

@@ -402,10 +402,21 @@ function ApartadosDelTurno({ r }: { r: Resumen }) {
       <div className="vista-z-columnas">
         <table className="tbl tbl-compacta">
           <caption className="sr-only">Abonos recibidos por forma de pago</caption>
+          <thead>
+            <tr>
+              <th scope="col">Abonos recibidos</th>
+              <th scope="col" className="num">
+                Pagos
+              </th>
+              <th scope="col" className="num">
+                Monto
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {(r.abonosPorForma ?? []).map((f) => (
               <tr key={f.formaPagoId}>
-                <td>Abonos {f.nombre}</td>
+                <td>{f.nombre}</td>
                 <td className="num">{f.pagos}</td>
                 <td className="num">{monto(f.monto)}</td>
               </tr>

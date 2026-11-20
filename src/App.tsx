@@ -2,6 +2,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import {
   Bookmark,
   Boxes,
+  ChartColumn,
   FileText,
   Info,
   Landmark,
@@ -45,6 +46,7 @@ import Login from "./screens/Login";
 import PendientesFactura from "./screens/PendientesFactura";
 import PrimerArranque from "./screens/PrimerArranque";
 import Productos from "./screens/Productos";
+import Reportes from "./screens/Reportes";
 import Venta from "./screens/Venta";
 import VentasHoy from "./screens/VentasHoy";
 import { ROL_NOMBRE, type Usuario } from "./tipos";
@@ -54,7 +56,7 @@ import { ConfirmarProvider } from "./ui/Confirmar";
 import { ToastProvider } from "./ui/Toast";
 import { aplicarTema } from "./ui/tema";
 
-export type Pagina = "venta" | "caja" | "ventas" | "apartados" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
+export type Pagina = "venta" | "caja" | "ventas" | "apartados" | "reportes" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
 
 interface Seccion {
   id: Pagina;
@@ -71,6 +73,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "apartados", texto: "Apartados", icono: Bookmark, permisos: ["cuentas.admin"] },
   { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
   { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario"] },
+  { id: "reportes", texto: "Reportes", icono: ChartColumn, permisos: ["reportes.ventas"] },
   { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes"] },
   { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas"] },
 ];
@@ -294,6 +297,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     caja: <Caja />,
     ventas: <VentasHoy />,
     apartados: <Apartados />,
+    reportes: <Reportes />,
     productos: <Productos />,
     inventario: <Inventario />,
     clientes: <Clientes />,

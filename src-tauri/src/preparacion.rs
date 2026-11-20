@@ -15,6 +15,9 @@ pub struct Punto {
     pub detalle: String,
 }
 
+/// Versión mínima de WebView2 que se soporta (CONTEXTO.md): <dialog>, :has(), popover, Intl.
+pub const WEBVIEW2_MINIMO: u32 = 120;
+
 async fn n(bd: &Bd, sql: &str) -> Res<i64> {
     sqlx::query_scalar(sql).fetch_one(&bd.pool).await.map_err(e)
 }
@@ -56,7 +59,33 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
         listo: dir.join("respaldo-automatico.clave").exists(),
         detalle: "El dueño elige la contraseña y la anota fuera de la computadora. Administración → Respaldo.".into(),
     });
-    let (ventas, turnos, clientes) = (n(bd, "SELECT COUNT(*) FROM ventas").await?, n(bd, "SELECT COUNT(*) FROM caja_turnos").await?, n(bd, "SELECT COUNT(*) FROM clientes").await?);
+    // Apartados: la política (mínimo, plazo, qué pasa si cancela) va impresa en el comprobante.
+    let mut c = bd.pool.acquire().await.map_err(e)?;
+    let r = crate::cuentas::reglas_con(&mut c).await;
+    drop(c);
+    if r.usa_apartados {
+        v.push(Punto {
+            titulo: "Apartados",
+            listo: !r.condiciones.trim().is_empty(),
+            detalle: format!(
+                "Abono mínimo {} %, {} días {}, si cancela: {}. {}Apartados → Opciones.",
+                r.abono_minimo_pct,
+                r.plazo_dias,
+                if r.plazo_tipo == "laborables" { "de trabajo" } else { "calendario" },
+                if r.cancelacion == "retener" { format!("se retiene el {} %", r.retencion_pct) } else { "se devuelve todo".into() },
+                if r.condiciones.trim().is_empty() { "Falta escribir las condiciones del comprobante. " } else { "" }
+            ),
+        });
+    }
+    // WebView2 (el motor de la ventana): la app usa funciones de la versión 120 o más nueva.
+    let wv = tauri::webview_version().unwrap_or_default();
+    let mayor: u32 = wv.split('.').next().and_then(|x| x.parse().ok()).unwrap_or(0);
+    v.push(Punto {
+        titulo: "WebView2",
+        listo: mayor >= WEBVIEW2_MINIMO,
+        detalle: if wv.is_empty() { "No se pudo leer la versión. Instale o actualice Microsoft Edge WebView2.".into() } else { format!("Versión {wv} (mínimo {WEBVIEW2_MINIMO}). Se actualiza con Windows Update.") },
+    });
+    let (ventas, turnos, clientes) = (n(bd, "SELECT COUNT(*) FROM ventas").await?, n(bd, "SELECT COUNT(*) FROM caja_turnos").await?, n(bd, "SELECT COUNT(*) FROM clientes").await? + n(bd, "SELECT COUNT(*) FROM cuentas").await?);
     v.push(Punto {
         titulo: "Sin datos de prueba",
         listo: ventas == 0 && turnos == 0 && clientes == 0,

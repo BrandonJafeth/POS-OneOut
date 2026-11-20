@@ -3637,3 +3637,177 @@ td.linea-producto {
   font-weight: 650;
   color: var(--texto, inherit);
 }
+
+/* ─── Reportes (fase 5) ─── */
+.reportes-filtro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--e3) var(--e4);
+  margin-bottom: var(--e4);
+}
+
+.reportes-filtro .chips {
+  flex: 1 1 100%;
+}
+
+.reportes-filtro .campo {
+  margin: 0;
+}
+
+.reportes-cuerpo {
+  display: grid;
+  gap: var(--e4);
+  margin-top: var(--e4);
+  transition: opacity 150ms ease-out;
+}
+
+.reportes-cuerpo.cargando {
+  opacity: 0.6;
+}
+
+.reportes-cabeza {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e3);
+}
+
+.reportes-cabeza h2 {
+  font-size: 19px;
+}
+
+.reportes-cifras {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.reportes-cifras > div,
+.reportes-cifras > div:nth-child(odd) {
+  border-right: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+}
+
+/* Cifras dentro de un diálogo: aire antes de lo que sigue (campo, tabla). */
+.modal-cuerpo .cifras {
+  margin-block: var(--e3) var(--e4);
+}
+
+.cifras dd.nota {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Tabla ordenable: el botón llena la celda del encabezado (guía sortable-table). */
+.tabla-ordenable caption {
+  text-align: left;
+  font-weight: 650;
+  padding-bottom: var(--e2);
+}
+
+.tabla-ordenable th:has(> button) {
+  padding: 0;
+}
+
+.tabla-ordenable th > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  gap: var(--e1);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--e2) var(--e3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tabla-ordenable th.num > button {
+  justify-content: flex-end;
+}
+
+.tabla-ordenable th > button:hover {
+  background: var(--card2);
+}
+
+.tabla-ordenable th > button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Barras de una serie: tono neutro (un dato no es una acción), extremo redondeado de 4 px. */
+.barras {
+  margin: 0;
+  padding: var(--e3) var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card);
+}
+
+.barras figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--e3);
+  margin-bottom: var(--e3);
+  font-weight: 650;
+}
+
+.barras-valor {
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.barras-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.barra {
+  display: flex;
+  flex: 1 1 0;
+  max-width: 56px;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.barra > span {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--muted);
+}
+
+.barra.activa > span,
+.barra:focus-visible > span {
+  background: var(--text);
+}
+
+.barra:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.barras-ejes {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--e1);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.modal-cuerpo details {
+  margin-block: var(--e3);
+}

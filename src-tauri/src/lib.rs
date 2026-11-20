@@ -30,6 +30,7 @@ mod permisos;
 mod pin;
 mod preparacion;
 mod printer;
+mod reportes;
 mod respaldo;
 mod sesion;
 mod usuarios;
@@ -642,6 +643,20 @@ async fn abono_anular(st: St<'_>, abono_id: String, pin: String, motivo: String,
 async fn cliente_limite_credito(st: St<'_>, cliente_id: String, limite: Option<i64>, pin: String) -> Res<()> {
     let a = st.actor().await?;
     cuentas::fijar_limite(st.pool()?, &a, &cliente_id, limite, &pin).await
+}
+
+// ─────────── Reportes de ventas (reportes.rs, solo el dueño) ───────────
+
+#[tauri::command]
+async fn reporte_rangos(st: St<'_>) -> Res<reportes::Rangos> {
+    let a = st.actor().await?;
+    reportes::rangos(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn reporte_ventas(st: St<'_>, desde: String, hasta: String) -> Res<reportes::Reporte> {
+    let a = st.actor().await?;
+    reportes::ventas(st.pool()?, &a, &desde, &hasta).await
 }
 
 #[tauri::command]
@@ -1296,6 +1311,8 @@ pub fn run() {
             abono_anular,
             cliente_limite_credito,
             credito_alcanza,
+            reporte_rangos,
+            reporte_ventas,
             sistema_restaurar,
             diagnostico_anotar,
             diagnostico_exportar,

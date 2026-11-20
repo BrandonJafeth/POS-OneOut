@@ -1,6 +1,6 @@
 # Contexto del proyecto: Punto de Venta (POS) para Librería y Bazar Chagui
 
-_Actualizado: 2026-11-16._
+_Actualizado: 2026-11-19._
 
 ## 1. Qué es
 
@@ -17,9 +17,14 @@ App de escritorio para Windows, local y sin internet, para cobrar en negocios ch
 - **Tauri v2** (Rust) + **React + TypeScript** (Vite) + **SQLite cifrado con SQLCipher**.
 - Rust decide todo lo sensible: dinero, permisos, PIN, caja, impresión, inventario. La pantalla (React) solo muestra y pide.
 - Todo el SQL está en `src/db` y en Rust. Las escrituras de catálogo pasan por `bd_lote` (operaciones con nombre) en una sola transacción. La lectura con SQL desde la pantalla (`bd_leer`) solo alcanza catálogo y configuración pública (lista blanca); todo lo demás va por comandos tipados.
-- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0020**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
+- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0021**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
 - Configuración: tabla `config` (clave → JSON). Rust valida cada clave en `src-tauri/src/config.rs` (`validar`); los valores por defecto de la pantalla están en `CONFIG_DEFECTO` (`src/db/config.ts`). Una clave nueva no necesita migración: si no existe, se usa el valor por defecto.
-- Pruebas: `npm test` (vitest con node:sqlite) y `cargo test` (Rust, ~128 pruebas). Correr desde `C:\Freelance\POS` (con `c:\` en minúscula vitest falla).
+- Pruebas: `npm test` (vitest con node:sqlite, 202) y `cargo test` (Rust, 157 + 1 ignorada que genera el fixture). Correr desde `C:\Freelance\POS` (con `c:\` en minúscula vitest falla).
+  - **Punta a punta** (`npm run e2e`): WebdriverIO + tauri-driver sobre la app real (Rust, base cifrada, WebView2). Compila la app de desarrollo y recorre crear apartado → abonar → liquidar → cierre Z → reporte. Usa una carpeta de datos nueva (`POS_DATOS`), una semilla (`POS_E2E=1`) y el reloj fijo (`POS_RELOJ_PRUEBA`): las tres solo existen en la compilación de desarrollo. Requiere `cargo install tauri-driver` y `msedgedriver` de la misma versión que WebView2 (variable `MSEDGEDRIVER`). Se eligió tauri-driver (camino oficial de Tauri) y no Playwright por CDP, que obliga a dejar activa la depuración remota de WebView2 con una variable del sistema.
+  - **Pruebas espejo**: las reglas que se validan en Rust y en TS (abono mínimo, fecha límite, abono, crédito) leen los mismos casos de `tests/casos/cuentas.json`.
+- **Tipos de TS generados desde Rust** con `ts-rs` (solo en pruebas): `cargo test` escribe `src/generados/*.ts` para los comandos nuevos (apartados y reportes) y falla una vez si cambiaron. Se eligió ts-rs y no tauri-specta: no cambia el registro de los comandos existentes y no depende de una versión RC; los nombres de comando siguen en un solo lugar por módulo (`src/db/cuentas.ts`).
+- **WebView2 mínimo: versión 120** (`preparacion::WEBVIEW2_MINIMO`; «Preparar para el cliente» lo revisa). La app usa `<dialog>` nativo, `:has()`, popover e `Intl`; no usa invoker commands (`command`/`commandfor`, 135) ni `closedby` (134). La PC de desarrollo tiene la 157. El instalador usa el runtime evergreen (se actualiza con Windows Update).
+- **Diálogos**: `src/ui/Modal.tsx` es un `<dialog>` nativo con `showModal()` (capa superior, resto inerte, Esc, foco de vuelta). Los avisos (toast) son un popover manual para quedar encima.
 
 Carpetas principales:
 ```
@@ -39,8 +44,8 @@ Formularios que guardan: usan `useEnvio`, al guardar cierran y muestran un aviso
 
 | Rol | Qué hace |
 |---|---|
-| **Cajero** | Vende, abre y cierra caja, busca o crea clientes (solo nombre, teléfono y cédula), ve los tiquetes de todos en Ventas del día y en Pendientes de factura. **No ve totales de ventas** mientras el turno está abierto. |
-| **Dueño** | Hace todo lo del cajero, más productos, precios, departamentos, usuarios, datos del negocio, clientes completos, reportes, respaldo, inventario (existencias, entradas, ajustes, conteos, costos, proveedores), bitácora, opciones de caja, anulaciones y reaperturas (con PIN). Ve las impresoras y las prueba, pero no las configura. |
+| **Cajero** | Vende, abre y cierra caja, busca o crea clientes (solo nombre, teléfono y cédula), crea apartados, recibe abonos y entrega (F9, F10), ve los tiquetes de todos en Ventas del día y en Pendientes de factura. **No ve totales de ventas** (ni de abonos) mientras el turno está abierto, ni límites de crédito. |
+| **Dueño** | Hace todo lo del cajero, más productos, precios, departamentos, usuarios, datos del negocio, clientes completos, reportes de ventas e historial de cierres, apartados (todos, cancelar, anular abonos, condonar, prorrogar, límite de crédito), respaldo, inventario (existencias, entradas, ajustes, conteos, costos, proveedores), bitácora, opciones de caja, anulaciones y reaperturas (con PIN). Ve las impresoras y las prueba, pero no las configura. |
 | **Técnico** | Configura la instalación (impresoras y gaveta, formas de pago, ajustes técnicos). **No ve datos de clientes, no vende, no toca la caja ni el inventario.** |
 
 Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio la primera vez y sesión con vencimiento. El técnico entra con **Ctrl+Alt+T** en el login.
@@ -119,6 +124,22 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 - Reportes (dueño): bajo mínimo con cantidad sugerida, inventario valorizado y movimientos; CSV sin fórmulas y PDF.
 - Carga inicial: conteo por departamento o CSV (código o id, existencia, costo) con vista previa y todo o nada.
 
+### 4.10 Apartados y crédito (fase 3, `cuentas.rs`, migración 21)
+- **Apartado**: en la venta, **F9** (pide el cliente con consentimiento si no hay) → abono (viene el mínimo, `abono_minimo_pct`) → el cobro de siempre. Las unidades quedan **reservadas** (no salen del kardex); venderlas pide el PIN del dueño aunque se permita vender sin existencia. Comprobante con número `A-0001`, saldo, fecha límite, condiciones y la línea del aviso de privacidad.
+- **F10**: buscar por número, nombre, teléfono o cédula; abonar (mixto, con vuelto en efectivo). El abono que deja el saldo en 0 **liquida**: se crea una venta normal con las líneas y precios del apartado (no los del catálogo de hoy), sin pagos por lo ya abonado (`ventas.cuenta_id`); ahí sale del inventario. "Se lleva los productos" → entregado; si no, queda pagado y se entrega después.
+- **Cada abono es dinero del turno donde se recibe** (su fecha de negocio sale del turno, incluida la caja tardía) y la venta entra al Z el día que se liquida: ningún colón se cuenta dos veces. Sin turno abierto no se abona. Un doble clic no crea dos abonos (`operacion_id`). La gaveta abre una vez por abono en efectivo (`gaveta_abono`).
+- **Z**: sección "Apartados y crédito": abonos por forma de pago (dinero), ventas pagadas con abonos o a crédito, apartados nuevos, liquidados y cancelados (devuelto y retenido), abonos anulados y condonado. El efectivo esperado suma el efectivo neto de los abonos.
+- **Dueño** (menú Apartados): abiertos, vencidos (aviso en el menú, sin acción automática), pagados sin entregar, cerrados y crédito. Cancelar (PIN, motivo, cuánto se devuelve y cuánto de eso en efectivo; el resto queda retenido), ajustar el saldo, condonar, anular un abono (en su turno abierto sale del esperado; de un turno cerrado, el Z viejo no cambia y la devolución sale hoy), prorrogar y límite de crédito. Opciones: mínimo, plazo (calendario o días de trabajo), política de cancelación (`devolver` o `retener` con %) y condiciones.
+- **Crédito** (`usa_credito`, Chaguí no): en el cobro, "Dejar … a crédito" con cliente; Rust revisa el límite (del cliente o `credito_limite_defecto`) y al cajero solo le dice si alcanza. La venta se reconoce al crearla.
+- Ley 8968: cliente con consentimiento; el límite y los pagos solo los ve el dueño y no van a la bitácora; no se anonimiza con saldo ni con un apartado pagado sin entregar.
+- Pendiente de diseño, apagado: "saldo a favor" al cancelar. Una venta que liquida un apartado no se anula desde Ventas del día (se corrige en Apartados); una venta a crédito sin abonos sí, y cancela su cuenta.
+
+### 4.11 Reportes de ventas (fase 5, `reportes.rs`, solo el dueño: permiso `reportes.ventas`)
+- Por rango de **fecha de negocio** con atajos (Hoy = día de negocio actual, Ayer, Esta semana, Este mes, Mes anterior): resumen con comparativo contra el período anterior, por día, departamento (mismo reparto que el Z), producto (más y menos vendidos), usuario, forma de pago (ventas y abonos), hora real del cobro, anulaciones y control (descuentos, ventas después del cierre, diferencias de apertura y cierre), por cobrar (antigüedad) y utilidad bruta (solo con costo; las ventas guardan su costo desde la migración 21, las viejas usan el costo actual y salen "aprox.").
+- **Suma de un reporte = suma de los cierres Z** de esas fechas: la regla "como al cerrar" (`VENTA_EN_SU_Z`) cuenta una venta en su turno si está completada o si se anuló en otro turno; esa anulación se resta el día del turno donde se anuló. Cada turno se compara con su Z congelado y, si no coincide, la pantalla lo avisa. Los turnos abiertos van aparte ("en curso").
+- Tablas ordenables y barras (por día y por hora) con su tabla. CSV (sin fórmulas, con tildes) y PDF carta en `Documentos\Punto de venta\Reportes\AAAA-MM`. Un mes entre 50.000 ventas: menos de 2 s (prueba).
+- **Cierres de caja**: el historial de turnos (antes en Caja → Turnos) vive aquí, con el mismo detalle, reimpresión, revisión, reapertura y corrección de día.
+
 ### 4.9 Seguridad y datos
 - Base cifrada (SQLCipher) con la clave guardada en Windows DPAPI.
 - **Respaldo cifrado** AES-256-GCM con contraseña, en `%APPDATA%\PuntoDeVenta-Datos\respaldos`, y restauración. El respaldo lleva la versión y la migración (`POSBAK02`); al restaurar uno viejo se pone al día con las migraciones y se verifica (integridad y bitácora) antes de reemplazar nada. Un respaldo de una versión más nueva se rechaza. No se restaura ni se actualiza con la caja abierta. `tests/fixtures` guarda un respaldo de cada versión.
@@ -136,12 +157,18 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 | 0. Prototipo de hardware | Lector, POS-58, code pages, gaveta; elegir Tauri | ✅ Hecho |
 | 1. Base | Base de datos, roles, datos del negocio, catálogo, importación CSV, códigos internos, etiquetas | ✅ Hecho |
 | 2. Venta y caja | Venta, cobro mixto, espera, tiquete, caja, cierre Z, gaveta, impresoras, turno compartido, varios turnos, pendientes de factura, seguridad | ✅ Hecho |
-| 3. Apartados y créditos | Apartados con abonos (Chaguí) y crédito (otros negocios), según banderas por negocio | ⏳ Siguiente |
+| 3. Apartados y créditos | Apartados con abonos (Chaguí) y crédito (otros negocios), según banderas por negocio | ✅ Código hecho (2026-11-19); falta la prueba manual en la PC real (PRUEBAS-MANUALES T) |
 | 4. Inventario | Existencias, entradas de mercadería, ajustes con motivo, mínimos y alertas, venta sin stock configurable; además: `bd_leer` cerrado y respaldos compatibles entre versiones | ✅ Hecho |
-| 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ⏳ Incluido en el contrato (los de inventario ya están) |
+| 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ✅ Código hecho (2026-11-19); falta la prueba manual en la PC real (PRUEBAS-MANUALES U) |
 | 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ Incluido en el contrato |
 
-**Versión actual: 0.9.0 (versión de prueba en el negocio)**, migraciones 1 a 20. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
+**Versión actual: 0.9.0 (versión de prueba en el negocio)**, migraciones 1 a 21. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
+
+### Cambios del 2026-11-19 (fases 3 y 5)
+- Migración 21: apartados y crédito (columnas en `cuentas`, `cuenta_lineas` y `abonos`; `cuenta_eventos` solo-agregar; `cajas.cuenta_siguiente`; `clientes.limite_credito`), costo por línea vendida (`venta_lineas.costo_unitario`) e índices de reportes.
+- Apartados y crédito (4.10), reportes de ventas e historial de cierres en Reportes (4.11). Diseño: DISENO-FASE3.md y DISENO-FASE5.md.
+- `ui/Modal` con `<dialog>` nativo; avisos en popover. Enter y flechas pasan de casilla en los diálogos de la venta (`ui/teclado.ts`).
+- Tipos de TS generados (ts-rs), pruebas espejo con casos compartidos y prueba de punta a punta (WebdriverIO + tauri-driver).
 
 ### Cambios desde el 2026-11-08
 - Migración 12: control de inventario de productos nuevos según su código de barras.
@@ -159,8 +186,8 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 ## 6. Lo que falta
 
 ### Incluido en el contrato (no es opcional)
-1. **Apartados con abonos y crédito (fase 3).** Las tablas `cuentas`, `cuenta_lineas`, `abonos` y `ventas.cuenta_id` ya existen; no hay lógica en Rust ni pantallas. Apartados para Chagui; crédito para otros negocios, activado por configuración. Debe integrarse con la caja (abonos en efectivo en el Z), el inventario (qué pasa con la existencia al apartar), el tiquete y el respaldo.
-2. **Reportes de ventas (fase 5):** por día, departamento, producto y usuario, exportables a PDF y CSV. El permiso `reportes` existe; falta la pantalla. Los de inventario ya están (Inventario → Reportes).
+1. **Prueba manual de apartados y reportes en la PC real** (PRUEBAS-MANUALES T y U). El dueño de Chaguí define las condiciones del apartado y la política de cancelación (Apartados → Opciones). Confirmar con el contador si los abonos necesitan comprobante propio (hoy la venta pasa a "Pendientes de factura" al liquidar).
+2. **Leer la versión de WebView2 en la PC de Chaguí** («Preparar para el cliente» la muestra; mínimo 120).
 3. **Entrega (fase 6):** aceptación de la 0.9.0 en la PC real (`PRUEBAS-MANUALES.md`), uso de prueba, instalador, respaldo configurado, capacitación y versión 1.0.0.
 
 ### Deuda técnica o seguridad (de SEGURIDAD.md)

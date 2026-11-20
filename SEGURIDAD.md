@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.9.0 (versión de prueba en el negocio), con las migraciones 1 a 12.
+Aplica a la versión 0.9.0 (versión de prueba en el negocio), con las migraciones 1 a 21.
 
 ## 1. Modelo de amenazas
 
@@ -115,8 +115,22 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Anular y corregir pagos**: solo el dueño, con su PIN y motivo (`confirmar_dueno`). La venta anulada no se borra.
 - Los pagos y los montos de una venta de un turno cerrado no se pueden cambiar (triggers). Una corrección posterior queda como `caja_ajustes` en el turno actual, la hace solo el dueño con PIN, y una devolución de efectivo entra como salida.
 
+### Apartados y crédito
+- Todo lo decide `cuentas.rs` en una transacción `BEGIN IMMEDIATE`: abono mínimo, plazo, saldo, límite de crédito, estados, existencia reservada y fechas (reloj de `util`). Un comando llamado directo rechaza lo inválido (la pantalla solo avisa).
+- El apartado y el crédito exigen un cliente con consentimiento vigente. El cajero ve el saldo de la cuenta que atiende, nunca totales ni el límite de crédito: `credito_alcanza` responde solo sí o no.
+- Cada abono va al turno abierto donde se recibe; sin turno, se rechaza. `abonos.operacion_id` evita que un doble clic o un reintento cree dos abonos. Un abono no se modifica ni se borra (triggers): se anula, con PIN del dueño y motivo.
+- `cuenta_eventos` es solo-agregar (triggers) y el saldo nunca queda negativo (trigger). La prueba `el_z_cuadra_con_apartados_en_muchos_turnos` compara el efectivo esperado con un modelo independiente y comprueba que cada abono está en exactamente un Z; se verificó que detecta un error puesto a propósito en el cálculo de abonos.
+- Lo apartado no se vende sin el PIN del dueño (aunque se permita vender sin existencia).
+- Cancelar, ajustar, condonar, anular un abono y el límite de crédito: solo el dueño, con PIN y motivo. La bitácora guarda ids, montos de la operación y motivo; **no** guarda el límite de crédito ni la lista de pagos de un cliente.
+- No se anonimiza un cliente con saldo pendiente ni con un apartado pagado sin entregar.
+
+### Reportes de ventas
+- Permiso nuevo `reportes.ventas`, solo del dueño. El técnico conserva `reportes` para la bitácora, pero no ve ventas (llevan nombres de clientes). El cajero nunca.
+- Los reportes leen solo turnos cerrados; los abiertos van aparte. Cada turno se compara con su Z congelado y la pantalla avisa si no coincide.
+- CSV sin fórmulas (`csvSeguro`) y PDF con texto escapado. Se guardan con `guardar_descarga` en la carpeta fija `Reportes\AAAA-MM` (lista blanca en Rust).
+
 ### Gaveta e impresoras
-- La gaveta solo se abre por `gaveta_venta` (venta con efectivo del turno abierto, una sola vez: `ventas.gaveta_abierta_en`), `gaveta_no_venta` (motivo de la lista; "Otro" pide texto) , `gaveta_dueno` (PIN del dueño) o `gaveta_cierre` (una vez por turno, quien puede cerrarlo, para contar; no cuenta como "sin venta"). Las tres últimas quedan en `gaveta_aperturas` (solo añadir, triggers) y en la bitácora; si el pulso no llega, no queda registro.
+- La gaveta solo se abre por `gaveta_venta` (venta con efectivo del turno abierto, una sola vez: `ventas.gaveta_abierta_en`), `gaveta_no_venta` (motivo de la lista; "Otro" pide texto) , `gaveta_dueno` (PIN del dueño) o `gaveta_cierre` (una vez por turno, quien puede cerrarlo, para contar; no cuenta como "sin venta") o `gaveta_abono` (abono de apartado o crédito en efectivo, de su turno abierto, una vez por operación: `abonos.gaveta_abierta_en`). Las tres últimas quedan en `gaveta_aperturas` (solo añadir, triggers) y en la bitácora; si el pulso no llega, no queda registro.
 - **Todo lo que se imprime pasa por una lista blanca** (`escpos::validar`): texto, saltos, negrita, tamaño, alineación, tabla de caracteres, código de barras, logo (sus datos se saltan por su largo) y corte. `ESC p`, `DLE DC4` y cualquier otro control se rechazan: ni un tiquete, ni el diagnóstico del técnico, ni una prueba de impresora pueden abrir la gaveta.
 - Las impresoras se eligen de lo que detecta Windows (impresoras, puertos COM, dispositivos USB de impresora); Rust lo vuelve a revisar al guardar y al imprimir. No se aceptan rutas escritas a mano (`\\otra-pc\cola`).
 - El tiquete original sale una vez (`ventas.impreso_en`); después solo como COPIA marcada, y cada copia queda en la bitácora.
@@ -128,7 +142,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 
 ### Cadena de suministro
 - `package-lock.json` y `Cargo.lock` están fijados. Se quitó `tauri-plugin-sql`, que ya no se usa.
-- `npm audit`: 0 vulnerabilidades. `cargo deny check`: advisories, bans, licenses y sources en ok.
+- `npm audit --omit=dev`: 0 vulnerabilidades. Las alertas de `npm audit` completo vienen de `webdriverio` (solo para la prueba de punta a punta; no va en el instalador). `cargo deny check`: advisories, bans, licenses y sources en ok.
 - `cargo audit`: sin hallazgos aplicables. Hay 3 excepciones justificadas en `src-tauri/.cargo/audit.toml`:
   - `rsa`: viene por el driver MySQL opcional de sqlx, que no se compila.
   - `glib` y `proc-macro-error`: son dependencias de Linux.
@@ -186,6 +200,7 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `caja_corte` | — | ✔ | — |
 | `caja_turnos` | ✔ | ✔ | — |
 | `gaveta_venta` | ✔ | ✔ | — |
+| `gaveta_abono` | ✔ | ✔ | — |
 | `gaveta_no_venta` | ✔ | ✔ | — |
 | `gaveta_cierre` | ✔ | ✔ | — |
 | `gaveta_dueno` | ✔ | ✔ | — |
@@ -218,6 +233,21 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `cliente_exportar` | — | ✔ | — |
 | `cliente_anonimizar` | — | ✔ | — |
 | `cliente_retencion` | — | ✔ | — |
+| `cuentas_reglas` | ✔ | ✔ | — |
+| `cuenta_crear_apartado` | ✔ | ✔ | — |
+| `cuenta_buscar` | ✔ | ✔ | — |
+| `cuenta_obtener` | ✔ | ✔ | — |
+| `cuenta_abonar / liquidar` | ✔ | ✔ | — |
+| `cuenta_entregar` | ✔ | ✔ | — |
+| `cuenta_imprimir` | ✔ | ✔ | — |
+| `credito_alcanza` | ✔ | ✔ | — |
+| `cuenta_listar / vencidas` | — | ✔ | — |
+| `cuenta_cancelar` | — | ✔ | — |
+| `cuenta_ajustar / condonar` | — | ✔ | — |
+| `abono_anular` | — | ✔ | — |
+| `cuenta_prorrogar` | — | ✔ | — |
+| `cliente_limite_credito` | — | ✔ | — |
+| `reporte_rangos / ventas` | — | ✔ | — |
 | `respaldo_crear` | — | ✔ | — |
 | `respaldo_restaurar` | — | ✔ | — |
 | `respaldo_ultimo` | — | ✔ | — |
@@ -304,10 +334,16 @@ Notas: cajero y técnico no administran al dueño (con un usuario real responden
 | Cada documento a su impresora; solo destinos detectados | `impresoras::tests::cada_documento_a_su_impresora_y_solo_destinos_detectados` |
 | El Z cuadra; si no, no se imprime; COPIA con PIN | `ventas::tests::z_cuadra_por_departamento_y_efectivo_esperado`, `desglose::tests::*`, `tests/cierre.test.ts` |
 | ESC/POS sin comandos inyectados; CSV sin fórmulas | `tests/ventas.test.ts` ("impresión segura"), `tests/clientes.test.ts` |
+| Apartados: mínimo, reserva, liquidación con el precio apartado, doble clic, sin turno no hay abono, caja tardía | `cuentas::tests::*` |
+| Cada abono en exactamente un Z; el esperado igual a un modelo independiente | `cuentas::tests::el_z_cuadra_con_apartados_en_muchos_turnos` |
+| Reglas iguales en Rust y en la pantalla | `cuentas::tests::reglas_iguales_que_en_la_pantalla`, `tests/cuentas.test.ts` (mismos casos: `tests/casos/cuentas.json`) |
+| Reportes: suma = suma de los cierres Z; solo el dueño; un mes en < 2 s con 50.000 ventas | `reportes::tests::*` |
+| Flujo completo en la app real | `npm run e2e` (WebdriverIO + tauri-driver) |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (114 pruebas + 1 ignorada que genera el fixture, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
-- TypeScript: `npm test` (167 pruebas).
+- Rust: `cd src-tauri && cargo test --lib` (157 pruebas + 1 ignorada que genera el fixture, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (202 pruebas).
+- Punta a punta: `npm run e2e` (ver CONTEXTO.md, sección 2).
 
 ## 6. Compilar y verificar una entrega
 

@@ -97,6 +97,7 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("abono_anular", false, true, false),
     ("cuenta_prorrogar", false, true, false),
     ("cliente_limite_credito", false, true, false),
+    ("reporte_rangos / ventas", false, true, false),
     ("respaldo_crear", false, true, false),
     ("respaldo_restaurar", false, true, false),
     ("respaldo_ultimo", false, true, false),
@@ -204,6 +205,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("abono_anular", denegado(cuentas::anular_abono(p, a, CAJA_1, x, "000000", "motivo largo", 0).await));
     s("cuenta_prorrogar", denegado(cuentas::prorrogar(p, a, x, "2099-01-01", "motivo largo").await));
     s("cliente_limite_credito", denegado(cuentas::fijar_limite(p, a, x, Some(1), "000000").await));
+    s("reporte_rangos / ventas", denegado(crate::reportes::ventas(p, a, "2026-01-01", "2026-01-31").await));
     s("respaldo_crear", denegado(respaldo::crear(bd, a, "contrasena-larga").await));
     s("respaldo_restaurar", denegado(respaldo::restaurar(bd, a, "000000", b"x", "contrasena-larga", None).await));
     s("respaldo_ultimo", denegado(respaldo::ultimo(bd, a).await));

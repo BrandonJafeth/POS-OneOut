@@ -29,5 +29,20 @@ fn tipos_de_typescript_al_dia() {
     escribir::<EventoFila>(&dir, &mut c);
     escribir::<CuentaDetalle>(&dir, &mut c);
     escribir::<ResultadoAbono>(&dir, &mut c);
+    use crate::reportes as r;
+    escribir::<r::Rangos>(&dir, &mut c);
+    escribir::<r::Totales>(&dir, &mut c);
+    escribir::<r::PorDia>(&dir, &mut c);
+    escribir::<r::Fila>(&dir, &mut c);
+    escribir::<r::PorUsuario>(&dir, &mut c);
+    escribir::<r::PorForma>(&dir, &mut c);
+    escribir::<r::PorHora>(&dir, &mut c);
+    escribir::<r::Anulacion>(&dir, &mut c);
+    escribir::<r::Tardia>(&dir, &mut c);
+    escribir::<r::Diferencia>(&dir, &mut c);
+    escribir::<r::PorCobrar>(&dir, &mut c);
+    escribir::<r::Utilidad>(&dir, &mut c);
+    escribir::<r::EnCurso>(&dir, &mut c);
+    escribir::<r::Reporte>(&dir, &mut c);
     assert!(c.is_empty(), "Tipos de TS actualizados (revise y suba src/generados): {c:?}");
 }

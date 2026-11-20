@@ -304,7 +304,6 @@ export default function Caja() {
         )}
       </section>
 
-      <Historial key={recarga} admin={admin} onVer={setVerTurno} />
       {admin && <AperturasSinVenta key={`a${recarga}`} />}
 
       {dialogo === "abrir" && <AbrirCaja estado={caja} onCerrar={() => setDialogo(null)} onAbierta={() => (setDialogo(null), toast.ok("Caja abierta."), void refrescar())} />}
@@ -494,7 +493,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
           </Button>
         </form>
       )}
-      {error && <Alert tono="error" titulo="No se imprimió el cierre">{error} El cierre sí quedó guardado: se puede imprimir desde aquí o desde Turnos.</Alert>}
+      {error && <Alert tono="error" titulo="No se imprimió el cierre">{error} El cierre sí quedó guardado: se puede imprimir desde aquí o desde Reportes → Cierres de caja.</Alert>}
       {d && <VistaZ d={d} denominaciones={p.estado.denominaciones} />}
       <div className="fila-botones">
         {d && <BotonImprimirZ turnoId={res.turnoId} opciones={p.cierre.o} denominaciones={p.estado.denominaciones} onError={setError} onListo={() => setError("")} />}
@@ -631,9 +630,12 @@ const TRAS_CIERRE: Record<string, string> = {
   manana: "Abierta después de un cierre: elegida para mañana",
 };
 
-function Historial(p: { admin: boolean; onVer(id: string): void }) {
-  const [desde, setDesde] = useState(haceDias(7));
-  const [hasta, setHasta] = useState(diaLocal());
+/** Historial de cierres (vive en Reportes → Cierres de caja). Con `desde`/`hasta` usa ese rango. */
+export function Historial(p: { admin: boolean; onVer(id: string): void; desde?: string; hasta?: string }) {
+  const [desdePropio, setDesde] = useState(haceDias(7));
+  const [hastaPropio, setHasta] = useState(diaLocal());
+  const desde = p.desde ?? desdePropio;
+  const hasta = p.hasta ?? hastaPropio;
   const [filas, setFilas] = useState<TurnoFila[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -643,16 +645,16 @@ function Historial(p: { admin: boolean; onVer(id: string): void }) {
     <section className="card">
       <div className="caja-cabeza">
         <h2>
-          <History size={20} aria-hidden /> {p.admin ? "Turnos" : "Mis turnos"}
+          <History size={20} aria-hidden /> {p.admin ? "Cierres de caja" : "Mis turnos"}
         </h2>
-        <div className="row">
+        {p.desde == null && <div className="row">
           <Field label="Desde">
             <input type="date" value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)} />
           </Field>
           <Field label="Hasta">
             <input type="date" value={hasta} min={desde} onChange={(e) => setHasta(e.target.value)} />
           </Field>
-        </div>
+        </div>}
       </div>
       {error && <Alert tono="error">{error}</Alert>}
       {filas && filas.length === 0 && <EmptyState icono={History} titulo="Sin turnos en esas fechas" />}
@@ -711,7 +713,7 @@ function Historial(p: { admin: boolean; onVer(id: string): void }) {
   );
 }
 
-function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void; onCambio(): Promise<void> }) {
+export function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(): void; onCambio(): Promise<void> }) {
   const { config, puede } = useSesion();
   const [d, setD] = useState<Detalle | null>(null);
   const [error, setError] = useState("");
