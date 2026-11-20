@@ -2,7 +2,7 @@
 // pagos electrónicos, movimientos, aperturas sin venta, cortes y conteo), en tablas legibles.
 import { ChevronDown } from "lucide-react";
 import { Fragment } from "react";
-import type { Detalle } from "../../db/caja";
+import { hayApartados, type Detalle, type Resumen } from "../../db/caja";
 import { DENOMINACIONES, descuadres, horaCierre, LEYENDA_CODIGOS, NOTA_USUARIOS } from "../../lib/caja/reporteZ";
 import { fechaHora, monto, montoConSigno as signo } from "../../lib/tickets";
 import Alert from "../../ui/Alert";
@@ -91,6 +91,7 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
             <tbody>
               <Fila k="Fondo inicial" v={monto(r.fondo)} />
               <Fila k="Contado (recibido)" v={"+" + monto(r.recibidoEfectivo)} />
+              {(r.abonosEfectivo ?? 0) > 0 && <Fila k="Abonos en efectivo" v={"+" + monto(r.abonosEfectivo ?? 0)} />}
               <Fila k="Entradas" v={"+" + monto(r.entradas)} />
               <Fila k="Salidas" v={"−" + monto(r.salidas)} />
               <Fila k="Vueltos" v={"−" + monto(r.vueltos)} />
@@ -196,6 +197,8 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
 
       <h3>Tarjeta, SINPE y transferencias</h3>
       <PagosElectronicos pagos={r.pagosElectronicos ?? []} />
+
+      {hayApartados(r) && <ApartadosDelTurno r={r} />}
 
       {(r.despuesDelCierre ?? []).length > 0 && (
         <>
@@ -387,5 +390,48 @@ function Fila({ k, v }: { k: string; v: string }) {
       <td>{k}</td>
       <td className="num">{v}</td>
     </tr>
+  );
+}
+
+/** Apartados y crédito del turno: los abonos son DINERO (por forma de pago), aparte de las ventas. */
+function ApartadosDelTurno({ r }: { r: Resumen }) {
+  const z = r.apartados;
+  return (
+    <section>
+      <h3>Apartados y crédito</h3>
+      <div className="vista-z-columnas">
+        <table className="tbl tbl-compacta">
+          <caption className="sr-only">Abonos recibidos por forma de pago</caption>
+          <tbody>
+            {(r.abonosPorForma ?? []).map((f) => (
+              <tr key={f.formaPagoId}>
+                <td>Abonos {f.nombre}</td>
+                <td className="num">{f.pagos}</td>
+                <td className="num">{monto(f.monto)}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td colSpan={2}>Total abonos (dinero)</td>
+              <td className="num">{monto(r.abonosTotal ?? 0)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <table className="tbl tbl-compacta">
+          <caption className="sr-only">Movimiento de apartados</caption>
+          <tbody>
+            {(r.ventasConAbonos ?? 0) > 0 && <Fila k="Ventas pagadas con abonos" v={monto(r.ventasConAbonos ?? 0)} />}
+            {(r.ventasACredito ?? 0) > 0 && <Fila k="Ventas a crédito (por cobrar)" v={monto(r.ventasACredito ?? 0)} />}
+            {!!z?.creados && <Fila k={`Apartados nuevos (${z.creados})`} v={monto(z.montoCreados)} />}
+            {!!z?.creditos && <Fila k={`Créditos nuevos (${z.creditos})`} v={monto(z.montoCreditos)} />}
+            {!!z?.liquidados && <Fila k="Apartados liquidados" v={String(z.liquidados)} />}
+            {!!z?.cancelados && <Fila k={`Cancelados (${z.cancelados}): devuelto`} v={monto(z.devuelto)} />}
+            {!!z?.retenido && <Fila k="Retenido de cancelados" v={monto(z.retenido)} />}
+            {!!z?.abonosAnulados && <Fila k={`Abonos anulados (${z.abonosAnulados})`} v={monto(z.montoAnulado)} />}
+            {!!z?.condonado && <Fila k="Condonado" v={monto(z.condonado)} />}
+          </tbody>
+        </table>
+      </div>
+      {(r.abonosElectronicos ?? []).length > 0 && <PagosElectronicos pagos={r.abonosElectronicos ?? []} />}
+    </section>
   );
 }

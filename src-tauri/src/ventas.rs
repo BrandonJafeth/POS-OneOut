@@ -298,30 +298,11 @@ pub async fn faltantes(pool: &SqlitePool, a: &Actor, caja_id: &str, lineas: &[(O
     inventario::faltantes(&mut c, &sucursal, &controladas, ve_cantidad).await
 }
 
-/// `pin_existencia`: PIN del dueño para vender sin existencia cuando la configuración no lo permite
-/// (la pantalla lo pide al recibir el error SIN_EXISTENCIA y reintenta).
-pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>) -> Res<ResultadoCobro> {
-    a.exigir("venta", "vender")?;
-    if est.lineas.is_empty() {
-        return Err("La venta no tiene productos".into());
-    }
-    for l in &est.lineas {
-        calculo::validar_linea(l)?;
-    }
-    let paso = config::entero(pool, "redondeo_total", 5).await;
-    let tope = tope_descuento(pool, a.rol).await;
-    let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
-    // El PIN se revisa antes de la transacción (la verificación escribe intentos fallidos).
-    let sin_existencia_por = match pin_existencia.filter(|p| !p.is_empty()) {
-        Some(pin) => Some(usuarios::autorizar_dueno(pool, pin, "vender sin existencia", &a.id).await?),
-        None => None,
-    };
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
-    caja::reloj_atrasado(&mut tx, "cobrar").await?;
-
-    // Precio, IVA y departamento de un producto salen de la base, no de la pantalla.
-    let mut lineas = est.lineas.clone();
+/// Precio, IVA, departamento y descuento de catálogo de cada línea salen de la base, no de la
+/// pantalla. Devuelve las líneas corregidas y, por línea, la parte en colones del descuento fijo del
+/// producto (no cuenta contra el tope del rol). La usan el cobro, el apartado y la venta a crédito.
+pub(crate) async fn lineas_de_catalogo(tx: &mut SqliteConnection, entrada: &[calculo::Linea]) -> Res<(Vec<calculo::Linea>, Vec<i64>)> {
+    let mut lineas = entrada.to_vec();
     // Descuento fijo del producto (lo puso el dueño en el catálogo): no cuenta contra el tope del rol.
     // Por línea, en colones: se guarda aparte para que el Z no se lo cargue al cajero.
     let mut catalogo: Vec<i64> = vec![];
@@ -356,6 +337,45 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
             }
         }
     }
+    Ok((lineas, catalogo))
+}
+
+/// `pin_existencia`: PIN del dueño para vender sin existencia cuando la configuración no lo permite
+/// (la pantalla lo pide al recibir el error SIN_EXISTENCIA y reintenta). También autoriza vender
+/// unidades que están apartadas.
+pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>) -> Res<ResultadoCobro> {
+    cobrar_opc(pool, a, caja_id, espera_id, est, pagos, pin_existencia, false).await
+}
+
+/// Cobro normal o, con `credito`, venta a crédito: lo que no se paga hoy queda por cobrar en una
+/// cuenta del cliente (cuentas::abrir_credito). Mismas reglas de precio, descuento y existencia.
+#[allow(clippy::too_many_arguments)]
+pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, pagos: &[PagoEntrada], pin_existencia: Option<&str>, credito: bool) -> Res<ResultadoCobro> {
+    a.exigir("venta", "vender")?;
+    if est.lineas.is_empty() {
+        return Err("La venta no tiene productos".into());
+    }
+    for l in &est.lineas {
+        calculo::validar_linea(l)?;
+    }
+    if credito {
+        a.exigir("cuentas", "vender a crédito")?;
+        if !config::booleano(pool, "usa_credito", false).await {
+            return Err("Este negocio no vende a crédito".into());
+        }
+    }
+    let paso = config::entero(pool, "redondeo_total", 5).await;
+    let tope = tope_descuento(pool, a.rol).await;
+    let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
+    // El PIN se revisa antes de la transacción (la verificación escribe intentos fallidos).
+    let sin_existencia_por = match pin_existencia.filter(|p| !p.is_empty()) {
+        Some(pin) => Some(usuarios::autorizar_dueno(pool, pin, "vender sin existencia", &a.id).await?),
+        None => None,
+    };
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
+    caja::reloj_atrasado(&mut tx, "cobrar").await?;
+    let (lineas, catalogo) = lineas_de_catalogo(&mut tx, &est.lineas).await?;
     let e2 = Estado { lineas, ..est.clone() };
     // Inventario: precio libre (sin producto) y servicios (sin control) no mueven existencia.
     let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
@@ -368,19 +388,22 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
             return Err(format!("{}No hay existencia de: {}. Para vender igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, sin_existencia.join(", ")));
         }
     }
+    // Lo apartado ya está prometido: venderlo pide el PIN del dueño aunque se permita vender sin existencia.
+    let apartadas = crate::cuentas::choques_con_apartados(&mut tx, &sucursal, &controladas).await?;
+    if !apartadas.is_empty() {
+        if sin_existencia_por.is_none() {
+            return Err(format!("{}Está apartado: {}. Para venderlo igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, apartadas.join(", ")));
+        }
+        sin_existencia.extend(apartadas);
+    }
     // El redondeo es del efectivo (no hay monedas de ¢1): tarjeta, SINPE y transferencia cobran el
     // monto exacto. Sin pagos (venta que redondea a ¢0) se mantiene el redondeo.
     let fs = formas(&mut tx).await?;
-    let con_efectivo = pagos.is_empty() || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
+    let con_efectivo = (pagos.is_empty() && !credito) || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
     let tot = calculo::totales(&e2, if con_efectivo { paso } else { 1 });
-    let pct_tope = if tot.bruto > 0 { ((tot.descuento_lineas - catalogo.iter().sum::<i64>() + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 };
-    let mut autorizado_por = None;
-    if pct_tope > tope + 1e-9 {
-        let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
-        autorizado_por = Some(ver_autorizacion(token, espera_id, pct_tope).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?);
-    }
-    if est.requiere_factura && est.cliente.is_none() {
-        return Err("Para factura electrónica, elija o cree el cliente".into());
+    let autorizado_por = revisar_tope(&tot, &catalogo, tope, est, espera_id)?;
+    if (est.requiere_factura || credito) && est.cliente.is_none() {
+        return Err(if credito { "Para vender a crédito, elija el cliente".into() } else { "Para factura electrónica, elija o cree el cliente".into() });
     }
     if let Some(cl) = &est.cliente {
         let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM clientes WHERE id = ? AND anonimizado_en IS NULL").bind(&cl.id).fetch_optional(&mut *tx).await.map_err(e)?;
@@ -396,60 +419,174 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     if !rp.errores.is_empty() {
         return Err(rp.errores.join(". "));
     }
-    if rp.faltante > 0 {
+    // A crédito, "falta" es lo que queda por cobrar; el resto de las reglas de pago son iguales.
+    if rp.faltante > 0 && !credito {
         return Err(format!("Todavía faltan {} por pagar.", crate::util::colones(rp.faltante)));
     }
+    if credito && rp.faltante == 0 {
+        return Err("Ya está pagada completa: cóbrela normal".into());
+    }
+    let repetidas = revisar_pagos(&mut tx, pagos).await?;
+    let fecha = ahora_iso();
+    // La espera activa evita que un doble clic en "Cobrar" cree dos ventas.
+    let creada_por: Option<String> = sqlx::query_scalar("SELECT usuario_id FROM ventas_espera WHERE id = ? AND caja_id = ? AND eliminado_en IS NULL")
+        .bind(espera_id)
+        .bind(caja_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(e)?;
+    let creada_por = creada_por.ok_or("Esta venta ya se cobró o se descartó")?;
+    let (venta_id, numero) = insertar_venta(
+        &mut tx,
+        &NuevaVenta {
+            caja_id,
+            turno_id: &t.id,
+            usuario_id: &a.id,
+            cliente_id: est.cliente.as_ref().map(|c| c.id.as_str()),
+            nombre_tiquete: nombre_tiquete.as_deref(),
+            tot: &tot,
+            lineas: &e2.lineas,
+            catalogo: &catalogo,
+            requiere_factura: est.requiere_factura,
+            autorizado_por: autorizado_por.as_deref(),
+            espera_creada_por: Some(&creada_por),
+            cuenta_id: None,
+            aplicados: &rp.aplicados,
+            fecha: &fecha,
+        },
+    )
+    .await?;
+    sqlx::query("UPDATE ventas_espera SET eliminado_en = ?, venta_id = ?, datos = ?, actualizado_en = ? WHERE id = ?")
+        .bind(&fecha)
+        .bind(&venta_id)
+        .bind(estado_json(&e2)?)
+        .bind(&fecha)
+        .bind(espera_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(e)?;
+    inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
+    if credito {
+        let cliente = est.cliente.as_ref().map(|c| c.id.as_str()).unwrap_or_default();
+        crate::cuentas::abrir_credito(&mut tx, a, &t, &venta_id, cliente, &e2.lineas, &catalogo, rp.faltante, &fecha).await?;
+    }
+    if !sin_existencia.is_empty() {
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
+    }
+    if !repetidas.is_empty() {
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.referencia_repetida", "venta", Some(&venta_id), &json!({"pagos": repetidas})).await?;
+    }
+    if let Some(d) = &autorizado_por {
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (tot_pct(&tot, &catalogo) * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
+    }
+    tx.commit().await.map_err(e)?;
+    if autorizado_por.is_some() {
+        if let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
+            gastar_autorizacion(t);
+        }
+    }
+    let efectivo: Vec<&str> = fs.iter().filter(|f| f.da_vuelto).map(|f| f.id.as_str()).collect();
+    let hay_efectivo = rp.aplicados.iter().any(|x| efectivo.contains(&x.pago.forma_pago_id.as_str()));
+    Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo, abrir_gaveta: hay_efectivo && gaveta })
+}
+
+/// % de descuento que cuenta contra el tope del rol (sin la parte fija del producto).
+pub(crate) fn tot_pct(tot: &calculo::Totales, catalogo: &[i64]) -> f64 {
+    if tot.bruto > 0 { ((tot.descuento_lineas - catalogo.iter().sum::<i64>() + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 }
+}
+
+/// Pasa del tope del rol: necesita el token de un solo uso que dio el PIN del dueño. Devuelve quién autorizó.
+pub(crate) fn revisar_tope(tot: &calculo::Totales, catalogo: &[i64], tope: f64, est: &Estado, espera_id: &str) -> Res<Option<String>> {
+    let pct = tot_pct(tot, catalogo);
+    if pct <= tope + 1e-9 {
+        return Ok(None);
+    }
+    let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
+    Ok(Some(ver_autorizacion(token, espera_id, pct).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?))
+}
+
+/// El token de descuento ya se usó (venta o apartado): no sirve otra vez.
+pub(crate) fn gastar_token(est: &Estado) {
+    if let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
+        gastar_autorizacion(t);
+    }
+}
+
+/// Banco válido y referencias ya usadas (se avisa, no se bloquea). Devuelve las repetidas para la bitácora.
+pub(crate) async fn revisar_pagos(tx: &mut SqliteConnection, pagos: &[PagoEntrada]) -> Res<Vec<Value>> {
     let mut repetidas = vec![];
     for p in pagos {
-        banco_valido(&mut tx, p.banco_id.as_deref()).await?;
+        banco_valido(&mut *tx, p.banco_id.as_deref()).await?;
         if let Some(r) = p.referencia.as_deref() {
-            if let Some(tiquete) = referencia_repetida(&mut tx, &p.forma_pago_id, r).await? {
+            if let Some(tiquete) = referencia_repetida(&mut *tx, &p.forma_pago_id, r).await? {
                 repetidas.push(json!({"referencia": r.trim(), "monto": p.monto, "yaUsadaEn": tiquete}));
             }
         }
     }
+    Ok(repetidas)
+}
 
+pub(crate) struct NuevaVenta<'a> {
+    pub caja_id: &'a str,
+    pub turno_id: &'a str,
+    pub usuario_id: &'a str,
+    pub cliente_id: Option<&'a str>,
+    pub nombre_tiquete: Option<&'a str>,
+    pub tot: &'a calculo::Totales,
+    pub lineas: &'a [calculo::Linea],
+    pub catalogo: &'a [i64],
+    pub requiere_factura: bool,
+    pub autorizado_por: Option<&'a str>,
+    pub espera_creada_por: Option<&'a str>,
+    /// Venta que liquida un apartado o venta a crédito.
+    pub cuenta_id: Option<&'a str>,
+    pub aplicados: &'a [calculo::Aplicado],
+    pub fecha: &'a str,
+}
+
+/// Inserta la venta con su consecutivo, líneas (con el costo del momento) y pagos. Lo comparten el
+/// cobro, la venta a crédito y la liquidación de un apartado. Devuelve (id, número del tiquete).
+pub(crate) async fn insertar_venta(tx: &mut SqliteConnection, v: &NuevaVenta<'_>) -> Res<(String, String)> {
     let venta_id = ulid();
-    let fecha = ahora_iso();
-    // El JOIN con la espera activa evita que un doble clic en "Cobrar" cree dos ventas.
     let n = sqlx::query(
         "INSERT INTO ventas (id, sucursal_id, caja_id, turno_id, consecutivo, numero, fecha, dia, usuario_id, cliente_id, nombre_tiquete,
-           subtotal, descuento, redondeo, total, iva_total, requiere_factura, descuento_autorizado_por, creado_en, actualizado_en, espera_creada_por)
+           subtotal, descuento, redondeo, total, iva_total, requiere_factura, descuento_autorizado_por, creado_en, actualizado_en, espera_creada_por, cuenta_id)
          SELECT ?, c.sucursal_id, c.id, ?, c.consecutivo_siguiente, c.prefijo_tiquete || c.consecutivo_siguiente, ?, ?, ?, ?, ?,
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, e.usuario_id
-         FROM cajas c JOIN ventas_espera e ON e.id = ? AND e.caja_id = c.id AND e.eliminado_en IS NULL
-         WHERE c.id = ? AND c.eliminado_en IS NULL",
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         FROM cajas c WHERE c.id = ? AND c.eliminado_en IS NULL",
     )
     .bind(&venta_id)
-    .bind(&t.id)
-    .bind(&fecha)
+    .bind(v.turno_id)
+    .bind(v.fecha)
     .bind(dia_local())
-    .bind(&a.id)
-    .bind(est.cliente.as_ref().map(|c| c.id.clone()))
-    .bind(&nombre_tiquete)
-    .bind(tot.subtotal)
-    .bind(tot.descuento)
-    .bind(tot.redondeo)
-    .bind(tot.total)
-    .bind(tot.iva)
-    .bind(est.requiere_factura as i64)
-    .bind(&autorizado_por)
-    .bind(&fecha)
-    .bind(&fecha)
-    .bind(espera_id)
-    .bind(caja_id)
+    .bind(v.usuario_id)
+    .bind(v.cliente_id)
+    .bind(v.nombre_tiquete)
+    .bind(v.tot.subtotal)
+    .bind(v.tot.descuento)
+    .bind(v.tot.redondeo)
+    .bind(v.tot.total)
+    .bind(v.tot.iva)
+    .bind(v.requiere_factura as i64)
+    .bind(v.autorizado_por)
+    .bind(v.fecha)
+    .bind(v.fecha)
+    .bind(v.espera_creada_por)
+    .bind(v.cuenta_id)
+    .bind(v.caja_id)
     .execute(&mut *tx)
     .await
     .map_err(e)?
     .rows_affected();
     if n == 0 {
-        return Err("Esta venta ya se cobró o se descartó".into());
+        return Err("Caja no encontrada".into());
     }
-    sqlx::query("UPDATE cajas SET consecutivo_siguiente = consecutivo_siguiente + 1, actualizado_en = ? WHERE id = ?").bind(&fecha).bind(caja_id).execute(&mut *tx).await.map_err(e)?;
-    for (i, l) in e2.lineas.iter().enumerate() {
+    sqlx::query("UPDATE cajas SET consecutivo_siguiente = consecutivo_siguiente + 1, actualizado_en = ? WHERE id = ?").bind(v.fecha).bind(v.caja_id).execute(&mut *tx).await.map_err(e)?;
+    for (i, l) in v.lineas.iter().enumerate() {
         sqlx::query(
             "INSERT INTO venta_lineas (id, venta_id, producto_id, codigo, descripcion, departamento_id, cantidad, precio_unitario,
-               descuento, descuento_catalogo, total, tasa_iva, iva, orden, creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               descuento, descuento_catalogo, total, tasa_iva, iva, orden, creado_en, actualizado_en, costo_unitario)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT costo FROM producto_costos WHERE producto_id = ?))",
         )
         .bind(ulid())
         .bind(&venta_id)
@@ -460,18 +597,19 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .bind(l.cantidad)
         .bind(l.precio_unitario)
         .bind(l.descuento)
-        .bind(catalogo[i])
+        .bind(v.catalogo.get(i).copied().unwrap_or(0))
         .bind(calculo::importe(l))
         .bind(if l.exento { 0.0 } else { l.tasa_iva })
-        .bind(tot.iva_lineas[i])
+        .bind(v.tot.iva_lineas.get(i).copied().unwrap_or(0))
         .bind(i as i64)
-        .bind(&fecha)
-        .bind(&fecha)
+        .bind(v.fecha)
+        .bind(v.fecha)
+        .bind(&l.producto_id)
         .execute(&mut *tx)
         .await
         .map_err(e)?;
     }
-    for ap in &rp.aplicados {
+    for ap in v.aplicados {
         sqlx::query(
             "INSERT INTO venta_pagos (id, venta_id, forma_pago_id, banco_id, monto, recibido, vuelto, referencia, ultimos4, pagador, creado_en, actualizado_en, usuario_id, turno_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -486,43 +624,16 @@ pub async fn cobrar_con(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .bind(ap.pago.referencia.as_deref().map(str::trim).filter(|s| !s.is_empty()))
         .bind(ap.pago.ultimos4.as_deref().filter(|s| !s.is_empty()))
         .bind(calculo::validar_pagador(true, ap.pago.pagador.as_deref()).ok().flatten())
-        .bind(&fecha)
-        .bind(&fecha)
-        .bind(&a.id)
-        .bind(&t.id)
+        .bind(v.fecha)
+        .bind(v.fecha)
+        .bind(v.usuario_id)
+        .bind(v.turno_id)
         .execute(&mut *tx)
         .await
         .map_err(e)?;
-    }
-    sqlx::query("UPDATE ventas_espera SET eliminado_en = ?, venta_id = ?, datos = ?, actualizado_en = ? WHERE id = ?")
-        .bind(&fecha)
-        .bind(&venta_id)
-        .bind(estado_json(&e2)?)
-        .bind(&fecha)
-        .bind(espera_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(e)?;
-    inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
-    if !sin_existencia.is_empty() {
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
-    }
-    if !repetidas.is_empty() {
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.referencia_repetida", "venta", Some(&venta_id), &json!({"pagos": repetidas})).await?;
-    }
-    if let Some(d) = &autorizado_por {
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (pct_tope * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
     }
     let numero: String = sqlx::query_scalar("SELECT numero FROM ventas WHERE id = ?").bind(&venta_id).fetch_one(&mut *tx).await.map_err(e)?;
-    tx.commit().await.map_err(e)?;
-    if autorizado_por.is_some() {
-        if let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
-            gastar_autorizacion(t);
-        }
-    }
-    let efectivo: Vec<&str> = fs.iter().filter(|f| f.da_vuelto).map(|f| f.id.as_str()).collect();
-    let hay_efectivo = rp.aplicados.iter().any(|x| efectivo.contains(&x.pago.forma_pago_id.as_str()));
-    Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo, abrir_gaveta: hay_efectivo && gaveta })
+    Ok((venta_id, numero))
 }
 
 // ─────────── Consultas ───────────
@@ -541,8 +652,9 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
     puede_consultar(a)?;
     let Some(f) = sqlx::query(
         "SELECT v.*, u.nombre AS cajero, c.nombre AS cliente, t.estado AS turno_estado, t.usuario_apertura_id AS turno_usuario_id,
-           ue.nombre AS espera_creada, ua.nombre AS anulada_por_nombre FROM ventas v
+           ue.nombre AS espera_creada, ua.nombre AS anulada_por_nombre, k.numero AS cuenta_numero, k.tipo AS cuenta_tipo FROM ventas v
          JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN clientes c ON c.id = v.cliente_id LEFT JOIN caja_turnos t ON t.id = v.turno_id
+         LEFT JOIN cuentas k ON k.id = v.cuenta_id
          LEFT JOIN usuarios ue ON ue.id = v.espera_creada_por LEFT JOIN usuarios ua ON ua.id = v.anulada_por
          WHERE v.id = ? AND v.eliminado_en IS NULL",
     )
@@ -596,6 +708,9 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
         "facturaReferencia": f.get::<Option<String>, _>("factura_referencia"),
         "reimpresiones": f.get::<i64, _>("reimpresiones"),
         "impreso": f.get::<Option<String>, _>("impreso_en").is_some(),
+        // Venta que liquida un apartado (pagada con abonos) o a crédito (lo no pagado queda por cobrar).
+        "cuentaNumero": f.get::<Option<String>, _>("cuenta_numero"),
+        "cuentaTipo": f.get::<Option<String>, _>("cuenta_tipo"),
         "lineas": lineas.iter().map(|l| json!({
             "id": l.get::<String, _>("id"),
             "productoId": l.get::<Option<String>, _>("producto_id"),
@@ -760,7 +875,7 @@ pub struct CambioPago {
     pub pagador: Option<String>,
 }
 
-const SIN_EFECTIVO: &str = "En la caja ya no queda ese efectivo (salió en retiros o salidas). Registre primero una entrada de efectivo por lo que falta y vuelva a intentarlo.";
+pub(crate) const SIN_EFECTIVO: &str = "En la caja ya no queda ese efectivo (salió en retiros o salidas). Registre primero una entrada de efectivo por lo que falta y vuelva a intentarlo.";
 
 /// Caja donde queda un ajuste posterior al cierre: la abierta de hoy (el dueño puede usar la de un cajero).
 async fn turno_para_ajuste(c: &mut SqliteConnection, caja_id: &str) -> Res<Turno> {
@@ -986,9 +1101,27 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
     let dueno = usuarios::confirmar_dueno(pool, a, pin, "anular venta").await?;
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let v = sqlx::query("SELECT numero, total, estado, turno_id, factura_emitida, factura_referencia FROM ventas WHERE id = ? AND eliminado_en IS NULL").bind(venta_id).fetch_one(&mut *tx).await.map_err(e)?;
+    let v = sqlx::query("SELECT numero, total, estado, turno_id, factura_emitida, factura_referencia, cuenta_id FROM ventas WHERE id = ? AND eliminado_en IS NULL").bind(venta_id).fetch_one(&mut *tx).await.map_err(e)?;
     if v.get::<String, _>("estado") == "anulada" {
         return Err("La venta ya está anulada".into());
+    }
+    // Venta de un apartado o a crédito: el dinero vino (o viene) en abonos de otros turnos. Una venta
+    // a crédito sin abonos se anula junto con su cuenta; lo demás se corrige desde Apartados.
+    if let Some(cuenta) = v.get::<Option<String>, _>("cuenta_id") {
+        let k = sqlx::query("SELECT numero, tipo, (SELECT COUNT(*) FROM abonos a WHERE a.cuenta_id = k.id AND a.anulado_en IS NULL) AS abonos FROM cuentas k WHERE k.id = ?").bind(&cuenta).fetch_one(&mut *tx).await.map_err(e)?;
+        let num: String = k.get::<Option<String>, _>("numero").unwrap_or_default();
+        if k.get::<String, _>("tipo") != "credito" || k.get::<i64, _>("abonos") > 0 {
+            return Err(format!("Esta venta es del {} {num}, que ya tiene abonos: no se anula aquí. Corríjalo en Apartados.", if k.get::<String, _>("tipo") == "credito" { "crédito" } else { "apartado" }));
+        }
+        sqlx::query("UPDATE cuentas SET estado = 'cancelada', saldo = 0, cancelada_en = ?, cancelada_por = ?, cancelada_motivo = ?, actualizado_en = ? WHERE id = ?")
+            .bind(ahora_iso())
+            .bind(&a.id)
+            .bind(&motivo)
+            .bind(ahora_iso())
+            .bind(&cuenta)
+            .execute(&mut *tx)
+            .await
+            .map_err(e)?;
     }
     if turno_de_venta(&mut tx, v.get("turno_id")).await?.is_none() != cerrado {
         return Err("Alguien abrió o cerró la caja mientras tanto. Cierre esta ventana y vuelva a intentarlo.".into());

@@ -45,6 +45,9 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => &["inventario"],
         c if c.starts_with("inventario_") => &["inventario"],
         c if c.starts_with("respaldo_") => &["respaldo"],
+        // Política de apartados y crédito: la decide el dueño. Activar el módulo (usa_*) es del técnico.
+        "abono_minimo_pct" => &["cuentas.admin", "config.tecnica"],
+        c if c.starts_with("apartado_") || c.starts_with("credito_") => &["cuentas.admin", "config.tecnica"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }
 }
@@ -105,6 +108,22 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
             Some(t) if t.is_empty() || chrono::DateTime::parse_from_rfc3339(t).is_ok() => Ok(()),
             _ => Err("«reloj_ignorar_hasta»: vacío o una fecha como \"2027-01-31T18:00:00.000Z\"".into()),
         },
+        "abono_minimo_pct" | "apartado_retencion_pct" => entero(0, 100),
+        "apartado_plazo_dias" | "credito_plazo_dias" => entero(1, 365),
+        "credito_limite_defecto" => entero(0, 100_000_000),
+        "apartado_plazo_tipo" => match v.as_str() {
+            Some("calendario" | "laborables") => Ok(()),
+            _ => Err("«apartado_plazo_tipo»: \"calendario\" o \"laborables\"".into()),
+        },
+        "apartado_cancelacion" => match v.as_str() {
+            Some("devolver" | "retener") => Ok(()),
+            _ => Err("«apartado_cancelacion»: \"devolver\" o \"retener\"".into()),
+        },
+        "apartado_condiciones" => match v.as_str() {
+            Some(t) if t.chars().count() <= 300 && !t.chars().any(|c| c.is_control() && c != '\n') => Ok(()),
+            _ => Err("Las condiciones del apartado: texto de hasta 300 letras".into()),
+        },
+        "usa_apartados" | "usa_credito" => si_no(),
         "abrir_gaveta_efectivo" | "imprime_tiquete" | "mostrar_iva" | "caja_turno_compartido" | "caja_z_detalle_completo" | "caja_z_por_departamento" => si_no(),
         _ => Ok(()),
     }

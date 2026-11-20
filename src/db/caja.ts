@@ -226,7 +226,35 @@ export interface Resumen {
   supervisor: string;
   /** Ventas cobradas antes del día de negocio del turno (caja abierta después del cierre). Vacío en cierres viejos. */
   despuesDelCierre?: { fecha: string; numero: string; usuario: string; total: number }[];
+  /** Abonos a apartados y créditos: DINERO del turno, aparte de las ventas. Faltan en cierres viejos. */
+  abonosPorForma?: PorForma[];
+  abonosTotal?: number;
+  /** Efectivo neto de los abonos (recibido − vuelto): entra al efectivo esperado. */
+  abonosEfectivo?: number;
+  abonosElectronicos?: PagoElectronico[];
+  /** Ventas que liquidan un apartado (pagadas con abonos) o a crédito (por cobrar). */
+  ventasConAbonos?: number;
+  ventasACredito?: number;
+  apartados?: ApartadosZ;
 }
+
+export interface ApartadosZ {
+  creados: number;
+  montoCreados: number;
+  creditos: number;
+  montoCreditos: number;
+  liquidados: number;
+  cancelados: number;
+  devuelto: number;
+  retenido: number;
+  abonosAnulados: number;
+  montoAnulado: number;
+  condonado: number;
+}
+
+/** ¿El turno tuvo movimiento de apartados o crédito? (para mostrar la sección solo si hace falta) */
+export const hayApartados = (r: Resumen) =>
+  (r.abonosTotal ?? 0) > 0 || (r.ventasConAbonos ?? 0) > 0 || (r.ventasACredito ?? 0) > 0 || Object.values(r.apartados ?? {}).some((x) => x !== 0);
 
 /** Lectura del día (estadisticas.rs). */
 export interface Estadisticas {

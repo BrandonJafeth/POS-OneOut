@@ -49,11 +49,10 @@ csv = "1.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+ts-rs = { version = "11", default-features = false, features = ["serde-compat"] }
 
 # Argon2 sin optimizar (modo dev) tarda varios segundos por PIN: se compila optimizado siempre.
 [profile.dev.package.argon2]
-opt-level = 3
-[profile.dev.package.blake2]
 opt-level = 3
 # SQLite (y SQLCipher) compilado sin optimizar hace lentas las pruebas.
 [profile.dev.package.libsqlite3-sys]

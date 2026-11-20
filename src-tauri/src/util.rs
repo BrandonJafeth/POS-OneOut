@@ -63,6 +63,14 @@ pub fn ahora() -> DateTime<FixedOffset> {
         RELOJ.with(|r| r.set(Some((f, 1))));
         return f;
     }
+    // Compilación de desarrollo (prueba de punta a punta): la app arranca en esa hora y avanza con el
+    // tiempo real. La versión final no lo tiene (debug_assertions).
+    #[cfg(all(debug_assertions, not(test)))]
+    if let Some(f) = std::env::var("POS_RELOJ_PRUEBA").ok().and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
+        static INICIO: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        let pasado = INICIO.get_or_init(std::time::Instant::now).elapsed();
+        return f + chrono::Duration::from_std(pasado).unwrap_or_default();
+    }
     Local::now().fixed_offset()
 }
 

@@ -50,6 +50,8 @@ pub fn codigo_corto(tipo: &str, nombre: &str) -> String {
         "efectivo" => "Co".into(),
         "tarjeta" => "Ta".into(),
         "sinpe" | "transferencia" => "De".into(),
+        "apartado" => "Ab".into(),
+        "credito" => "Cr".into(),
         _ => {
             let mut c = nombre.chars().filter(|c| c.is_alphanumeric());
             let a: String = c.next().map(|x| x.to_uppercase().collect()).unwrap_or_else(|| "O".into());
@@ -247,6 +249,22 @@ pub async fn calcular(c: &mut SqliteConnection, turno_id: &str) -> Res<Desglose>
     .iter()
     .map(|f| Pago { venta_id: f.get("venta_id"), forma: f.get("nombre"), tipo: f.get("tipo"), orden: f.get("orden"), da_vuelto: f.get::<i64, _>("da_vuelto") == 1, monto: f.get("monto") })
     .collect();
+    // Ventas que liquidan un apartado o a crédito: lo que no pagaron hoy vino (o vendrá) en abonos.
+    // Se reparte como una forma más, sin ser dinero de este turno (los abonos van en su sección).
+    let mut pagos = pagos;
+    for f in sqlx::query(
+        "SELECT v.id, k.tipo, v.total - COALESCE((SELECT SUM(p.monto) FROM venta_pagos p WHERE p.venta_id = v.id AND p.eliminado_en IS NULL), 0) AS resto
+         FROM ventas v JOIN cuentas k ON k.id = v.cuenta_id WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL",
+    )
+    .bind(turno_id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?
+    {
+        let credito = f.get::<String, _>("tipo") == "credito";
+        let (forma, tipo) = if credito { ("Crédito", "credito") } else { ("Abonos de apartado", "apartado") };
+        pagos.push(Pago { venta_id: f.get("id"), forma: forma.into(), tipo: tipo.into(), orden: 900, da_vuelto: false, monto: f.get("resto") });
+    }
     Ok(armar(&ventas, &lineas, &pagos))
 }
 

@@ -51,6 +51,39 @@ pub async fn por_venta(pool: &SqlitePool, a: &Actor, venta_id: &str) -> Res<()> 
     cerrar(tx, r).await
 }
 
+/// Abono (o primer abono de un apartado) con efectivo, en su turno abierto, una sola vez por
+/// operación: mismo camino que la venta (un abono es dinero que entra a la gaveta).
+pub async fn por_abono(pool: &SqlitePool, a: &Actor, operacion_id: &str) -> Res<()> {
+    a.exigir("cuentas", "abrir la gaveta")?;
+    if !config::booleano(pool, "abrir_gaveta_efectivo", true).await {
+        return Err("La caja está configurada para no abrir la gaveta con las ventas.".into());
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let v = sqlx::query(
+        "SELECT a.caja_id, a.turno_id, MAX(a.gaveta_abierta_en) AS abierta,
+           MAX(CASE WHEN f.da_vuelto = 1 AND a.anulado_en IS NULL THEN 1 ELSE 0 END) AS efectivo
+         FROM abonos a JOIN formas_pago f ON f.id = a.forma_pago_id WHERE a.operacion_id = ? GROUP BY a.operacion_id",
+    )
+    .bind(operacion_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(e)?
+    .ok_or("Abono no encontrado")?;
+    if v.get::<i64, _>("efectivo") != 1 {
+        return Err("La gaveta solo se abre con un abono en efectivo.".into());
+    }
+    if v.get::<Option<String>, _>("abierta").is_some() {
+        return Err("La gaveta ya se abrió con este abono. Para abrirla otra vez use «No venta».".into());
+    }
+    let caja_id: String = v.get("caja_id");
+    let t = caja::turno_abierto(&mut tx, &caja_id).await?.filter(|t| Some(&t.id) == v.get::<Option<String>, _>("turno_id").as_ref()).ok_or("Ese abono es de un turno ya cerrado.")?;
+    let comp = caja::compartido(&mut tx).await;
+    caja::puede_operar(a, &t, comp)?;
+    sqlx::query("UPDATE abonos SET gaveta_abierta_en = ? WHERE operacion_id = ?").bind(ahora_iso()).bind(operacion_id).execute(&mut *tx).await.map_err(e)?;
+    let r = impresoras::pulso_gaveta(&mut tx, &caja_id).await;
+    cerrar(tx, r).await
+}
+
 /// Termina la apertura: si el pulso salió, se guarda. Si la impresora no contestó a tiempo, el pulso
 /// pudo llegar tarde y abrir la gaveta: se guarda igual (nunca una apertura sin registro) y se avisa.
 /// Si falló de otra forma (sin impresora, desconectada), no se abrió: no queda nada.

@@ -16,7 +16,7 @@ use sqlx::{Row, SqlitePool};
 
 pub const NOMBRE_ANONIMO: &str = "Cliente anonimizado";
 const TIPOS_ID: &[&str] = &["fisica", "juridica", "dimex", "nite", "extranjero"];
-const MOTIVOS: &[&str] = &["solicitud_titular", "retencion", "otro"];
+pub(crate) const MOTIVOS: &[&str] = &["solicitud_titular", "retencion", "otro"];
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -306,7 +306,15 @@ async fn cuentas_de(pool: &SqlitePool, id: &str) -> Res<Vec<Map<String, Value>>>
 /// Apartados o créditos abiertos con saldo: mientras existan, no se puede anonimizar.
 pub async fn cuentas_con_saldo(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Vec<Map<String, Value>>> {
     a.exigir("clientes", "ver clientes")?;
-    Ok(cuentas_de(pool, id).await?.into_iter().filter(|c| c.get("estado").and_then(|v| v.as_str()) == Some("abierta") && c.get("saldo").and_then(|v| v.as_i64()).unwrap_or(0) > 0).collect())
+    // Abiertas con saldo, y apartados pagados sin entregar (hay productos del cliente en la tienda).
+    Ok(cuentas_de(pool, id)
+        .await?
+        .into_iter()
+        .filter(|c| {
+            let estado = c.get("estado").and_then(|v| v.as_str());
+            (estado == Some("abierta") && c.get("saldo").and_then(|v| v.as_i64()).unwrap_or(0) > 0) || (estado == Some("pagada") && c.get("tipo").and_then(|v| v.as_str()) == Some("apartado"))
+        })
+        .collect())
 }
 
 /// "Exportar mis datos" (derecho de acceso). Queda en bitácora con el formato.
@@ -390,7 +398,7 @@ pub async fn sugerencias_retencion(pool: &SqlitePool, a: &Actor) -> Res<Vec<Basi
            ) AS ultimo
            FROM clientes c
            WHERE c.anonimizado_en IS NULL
-             AND NOT EXISTS (SELECT 1 FROM cuentas k WHERE k.cliente_id = c.id AND k.eliminado_en IS NULL AND k.estado = 'abierta' AND k.saldo > 0)
+             AND NOT EXISTS (SELECT 1 FROM cuentas k WHERE k.cliente_id = c.id AND k.eliminado_en IS NULL AND ((k.estado = 'abierta' AND k.saldo > 0) OR (k.estado = 'pagada' AND k.tipo = 'apartado')))
          ) WHERE ultimo < ? ORDER BY ultimo",
     )
     .bind(limite.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())

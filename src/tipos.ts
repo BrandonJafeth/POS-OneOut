@@ -339,6 +339,9 @@ export interface Venta {
   facturaEmitida: boolean;
   facturaReferencia: string | null;
   reimpresiones: number;
+  /** Apartado que liquida (A-0012) o crédito (C-0003); lo que no está en pagos vino o viene en abonos. */
+  cuentaNumero?: string | null;
+  cuentaTipo?: "apartado" | "credito" | null;
   lineas: VentaLinea[];
   pagos: VentaPago[];
 }

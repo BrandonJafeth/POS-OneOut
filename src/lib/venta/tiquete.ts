@@ -59,6 +59,12 @@ export function tiqueteVenta(n: Negocio, v: Venta, s: TicketSettings, o: Opcione
   if (v.redondeo) p.line(lr("Redondeo", (v.redondeo < 0 ? "-" : "") + monto(Math.abs(v.redondeo)), c));
   p.bold(true).line(lr("TOTAL", monto(v.total), c)).bold(false);
   for (const x of lineasPago(v)) lrLargo(x.sub ? `  ${x.texto}` : x.texto, monto(x.monto), c).forEach((l) => p.line(l));
+  // Apartado liquidado o venta a crédito: lo que no está en los pagos de hoy.
+  if (v.cuentaNumero) {
+    const resto = v.total - v.pagos.reduce((s, pg) => s + pg.monto, 0);
+    const texto = v.cuentaTipo === "credito" ? `A crédito (${v.cuentaNumero})` : `Pagado con abonos (${v.cuentaNumero})`;
+    if (resto > 0) lrLargo(texto, monto(resto), c).forEach((l) => p.line(l));
+  }
   if (o.mostrarIva && v.ivaTotal) p.line(lr("IVA incluido", monto(v.ivaTotal), c));
   p.line(sep2(c));
   if (o.textoNoFactura?.trim()) {

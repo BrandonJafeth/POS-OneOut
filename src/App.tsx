@@ -1,5 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import {
+  Bookmark,
   Boxes,
   FileText,
   Info,
@@ -27,6 +28,7 @@ import { guardarConfig, leerConfig, type ConfigApp } from "./db/config";
 import { iniciarBase } from "./db/iniciar";
 import { cerrarSesion, estadoSistema, tocarSesion } from "./db/usuarios";
 import { alertasInventario } from "./db/inventario";
+import { cuentasVencidas } from "./db/cuentas";
 import { pendientesFactura } from "./db/ventas";
 import { alPerderSesion, SESION_EXPIRADA } from "./lib/invocar";
 import { puede, type Permiso } from "./lib/permisos";
@@ -34,6 +36,7 @@ import { fechaHora } from "./lib/tickets";
 import Administracion from "./screens/Administracion";
 import Caja from "./screens/Caja";
 import CambiarPinObligatorio from "./screens/CambiarPinObligatorio";
+import Apartados from "./screens/Apartados";
 import Clientes from "./screens/Clientes";
 import Inventario from "./screens/Inventario";
 import { BORRADOR as BORRADOR_ENTRADA } from "./screens/inventario/Entrada";
@@ -51,7 +54,7 @@ import { ConfirmarProvider } from "./ui/Confirmar";
 import { ToastProvider } from "./ui/Toast";
 import { aplicarTema } from "./ui/tema";
 
-export type Pagina = "venta" | "caja" | "ventas" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
+export type Pagina = "venta" | "caja" | "ventas" | "apartados" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
 
 interface Seccion {
   id: Pagina;
@@ -65,6 +68,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "venta", texto: "Venta", icono: ShoppingCart, permisos: ["venta"] },
   { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja"] },
   { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["venta"] },
+  { id: "apartados", texto: "Apartados", icono: Bookmark, permisos: ["cuentas.admin"] },
   { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
   { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario"] },
   { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes"] },
@@ -225,7 +229,8 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     () => crearSesion(p.usuario, p.config, p.recargarConfig, p.salir, caja, recargarCaja, irA),
     [p.usuario, p.config, p.recargarConfig, p.salir, caja, recargarCaja, irA],
   );
-  const visible = (s: Seccion) => s.permisos.some((x) => sesion.puede(x));
+  // Apartados solo si el negocio los usa (o vende a crédito).
+  const visible = (s: Seccion) => s.permisos.some((x) => sesion.puede(x)) && (s.id !== "apartados" || p.config.usa_apartados || p.config.usa_credito);
   const principal = PRINCIPAL.filter(visible);
   const avanzado = AVANZADO.filter(visible);
   // Arranca en la primera sección que el rol puede usar (Venta para cajero y dueño).
@@ -237,6 +242,13 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
   useEffect(() => {
     if (!sesion.puede("inventario")) return;
     alertasInventario().then(setBajoMinimo, () => setBajoMinimo(0));
+  }, [pagina]);
+
+  // Apartados o créditos vencidos: aviso al dueño (sin acción automática).
+  const [vencidas, setVencidas] = useState(0);
+  useEffect(() => {
+    if (!sesion.puede("cuentas.admin") || !(p.config.usa_apartados || p.config.usa_credito)) return;
+    cuentasVencidas().then(setVencidas, () => setVencidas(0));
   }, [pagina]);
 
   useEffect(() => {
@@ -281,6 +293,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     venta: <Venta />,
     caja: <Caja />,
     ventas: <VentasHoy />,
+    apartados: <Apartados />,
     productos: <Productos />,
     inventario: <Inventario />,
     clientes: <Clientes />,
@@ -310,6 +323,11 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
       {s.id === "facturas" && facturas > 0 && (
         <span className="nav-contador" aria-label={`${facturas} pendientes`}>
           {facturas}
+        </span>
+      )}
+      {s.id === "apartados" && vencidas > 0 && (
+        <span className="nav-contador" aria-label={`${vencidas} vencidos`}>
+          {vencidas}
         </span>
       )}
       {s.id === "inventario" && bajoMinimo > 0 && (

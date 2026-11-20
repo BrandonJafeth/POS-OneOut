@@ -54,8 +54,8 @@ export const faltantesVenta = (lineas: { productoId?: string | null; cantidad: n
 export const referenciaUsada = (formaPagoId: string, referencia: string) => invocar<string | null>("venta_referencia_usada", { formaPagoId, referencia });
 
 /** Sin caja abierta de hoy, Rust lo rechaza ("La caja está cerrada…"). */
-export function cobrarVenta(_actor: Actor, esperaId: string, estado: EstadoEspera, pagos: PagoEntrada[], pinExistencia?: string): Promise<ResultadoCobro> {
-  return invocar<ResultadoCobro>("venta_cobrar", { esperaId, estado, pagos, pinExistencia: pinExistencia ?? null });
+export function cobrarVenta(_actor: Actor, esperaId: string, estado: EstadoEspera, pagos: PagoEntrada[], pinExistencia?: string, credito = false): Promise<ResultadoCobro> {
+  return invocar<ResultadoCobro>("venta_cobrar", { esperaId, estado, pagos, pinExistencia: pinExistencia ?? null, credito });
 }
 
 // ─────────── Consultas ───────────

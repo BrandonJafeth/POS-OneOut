@@ -101,7 +101,7 @@ export default function PrecioLibre(p: { departamentos: Departamento[]; onAgrega
           {errores.depto && <span className="campo-error">{errores.depto}</span>}
         </div>
         <Field label="Descripción (opcional)" ayuda={d ? `Si la deja vacía, en el tiquete sale «${d.nombre}».` : undefined}>
-          <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
+          <input data-opcional value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
         </Field>
         <Button type="submit" variante="primario" tamano="lg" atajo="Enter">
           Agregar

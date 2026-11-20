@@ -6,7 +6,7 @@
 //   toast.ok("Producto guardado");
 //   toast.mostrar({ tono: "info", titulo: "Venta 2 descartada", accion: { texto: "Deshacer", onClick } });
 import { X } from "lucide-react";
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copiar } from "../lib/copiar";
 import { ICONO_TONO, type Tono } from "./Badge";
 
@@ -50,6 +50,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }),
     [mostrar, cerrar],
   );
+  // La zona es un popover manual siempre abierto: así queda en la capa superior, también sobre un
+  // diálogo nativo. Cada aviso nuevo la vuelve a abrir para quedar encima del último diálogo.
+  const zona = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const z = zona.current;
+    if (!z?.showPopover) return;
+    try {
+      if (z.matches(":popover-open")) z.hidePopover();
+      z.showPopover();
+    } catch {
+      // Sin soporte de popover: queda como antes (z-index).
+    }
+  }, [actual?.id]);
   const tono = actual?.tono ?? "ok";
   const Icono = ICONO_TONO[tono];
   // Tiempo para leerlo: mínimo 4 s (7 s con acción o error) y más si el texto es largo.
@@ -60,7 +73,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={api}>
       {children}
       {/* La zona existe siempre: así el lector de pantalla anuncia lo que entra. */}
-      <div className="toast-zona" role="status" aria-live="polite">
+      <div ref={zona} popover="manual" className="toast-zona" role="status" aria-live="polite">
         {actual && (
           <div key={actual.id} className={`toast toast-${tono}`} role={tono === "error" ? "alert" : undefined}>
             <span className="toast-icono" aria-hidden>

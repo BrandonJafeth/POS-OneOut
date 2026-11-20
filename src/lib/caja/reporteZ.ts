@@ -7,7 +7,7 @@
 // 48 en 80 mm, ~90 en el PDF carta).
 // Si los números no cuadran entre sí, no se arma nada: se avisa (Rust también lo revisa).
 import type { Corte, DepartamentoDesglose, Detalle, Movimiento, Resumen } from "../../db/caja";
-import { agruparPorForma } from "../../db/caja";
+import { agruparPorForma, hayApartados } from "../../db/caja";
 import type { Negocio } from "../../tipos";
 import { EscPos } from "../escpos";
 import { diaLocal } from "../texto";
@@ -57,7 +57,8 @@ const den = (d: number) => (d >= 1000 ? `${d / 1000} mil` : String(d));
 /** Copia de caja.rs::revisar_cuadre: si algo no suma, el Z no se imprime. */
 export function descuadres(r: Resumen): string[] {
   const d: string[] = [];
-  const formas = r.porForma.reduce((s, f) => s + f.monto, 0);
+  // Lo que liquida un apartado o queda a crédito no entró por una forma de pago hoy (igual que Rust).
+  const formas = r.porForma.reduce((s, f) => s + f.monto, 0) + (r.ventasConAbonos ?? 0) + (r.ventasACredito ?? 0);
   if (formas !== r.totalVentas) d.push(`formas de pago ${monto(formas)} ≠ ventas ${monto(r.totalVentas)}`);
   if (r.conDesglose) {
     const deps = r.desglose.departamentos.reduce((s, x) => s + x.monto, 0);
@@ -71,7 +72,7 @@ export function descuadres(r: Resumen): string[] {
       if (porForma !== x.monto) d.push(`${x.nombre}: formas de pago ${monto(porForma)} ≠ ${monto(x.monto)}`);
     }
   }
-  if (r.efectivoEsperado !== r.fondo + r.recibidoEfectivo - r.vueltos + r.entradas - r.salidas) d.push("efectivo esperado");
+  if (r.efectivoEsperado !== r.fondo + r.recibidoEfectivo - r.vueltos + (r.abonosEfectivo ?? 0) + r.entradas - r.salidas) d.push("efectivo esperado");
   if (!r.cuadra) d.push(...r.descuadres);
   return [...new Set(d)];
 }
@@ -201,6 +202,7 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
   titulo(l, "EFECTIVO", cols);
   l.push({ t: lr("Fondo inicial", monto(r.fondo), cols) });
   l.push({ t: lr("Contado (recibido)", "+" + monto(r.recibidoEfectivo), cols) });
+  if (r.abonosEfectivo) l.push({ t: lr("Abonos en efectivo", "+" + monto(r.abonosEfectivo), cols) });
   l.push({ t: lr("Entradas", "+" + monto(r.entradas), cols) });
   l.push({ t: lr("Salidas", "-" + monto(r.salidas), cols) });
   l.push({ t: lr("Vueltos", "-" + monto(r.vueltos), cols) });
@@ -256,6 +258,25 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
         else l.push({ t: lr(izq, monto(x.monto), cols) }, ...wrap(dato, cols - 2).map((y) => ({ t: `  ${y}` })));
       }
     }
+  }
+
+  // Apartados y crédito: el dinero (abonos) aparte de las ventas, para que no se confundan.
+  if (hayApartados(r)) {
+    const z = r.apartados;
+    titulo(l, "APARTADOS Y CRÉDITO", cols);
+    for (const f of r.abonosPorForma ?? []) l.push({ t: fila(`Abonos ${f.nombre}`, ` (${f.pagos})`, monto(f.monto), cols) });
+    if (r.abonosTotal) l.push({ t: lr("Total abonos (dinero)", monto(r.abonosTotal), cols), b: true });
+    if (r.ventasConAbonos) l.push(...lrLargo("Ventas pagadas con abonos", monto(r.ventasConAbonos), cols).map((t) => ({ t })));
+    if (r.ventasACredito) l.push(...lrLargo("Ventas a crédito (por cobrar)", monto(r.ventasACredito), cols).map((t) => ({ t })));
+    if (z?.creados) l.push({ t: lr(`Apartados nuevos (${z.creados})`, monto(z.montoCreados), cols) });
+    if (z?.creditos) l.push({ t: lr(`Créditos nuevos (${z.creditos})`, monto(z.montoCreditos), cols) });
+    if (z?.liquidados) l.push({ t: lr("Apartados liquidados", String(z.liquidados), cols) });
+    if (z?.cancelados) {
+      l.push({ t: lr(`Cancelados (${z.cancelados}) devuelto`, monto(z.devuelto), cols) });
+      if (z.retenido) l.push({ t: lr("  retenido", monto(z.retenido), cols) });
+    }
+    if (z?.abonosAnulados) l.push({ t: lr(`Abonos anulados (${z.abonosAnulados})`, monto(z.montoAnulado), cols) });
+    if (z?.condonado) l.push({ t: lr("Condonado", monto(z.condonado), cols) });
   }
 
   // Sin movimientos no va la sección: EFECTIVO ya dice entradas +0 y salidas -0.

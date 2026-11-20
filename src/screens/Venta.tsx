@@ -6,7 +6,8 @@
 // Las pestañas viven en useEsperas, el catálogo en useCatalogo y las reglas de dinero en
 // lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
 import { flechasPestanas } from "../ui/pestanas";
-import { Banknote, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
+import { navegarCampos } from "../ui/teclado";
+import { Banknote, Bookmark, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
 import type { Permiso } from "../lib/permisos";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
@@ -32,6 +33,10 @@ import { useToast } from "../ui/Toast";
 import { useConfirmar } from "../ui/Confirmar";
 import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
+import AbonarApartado from "./venta/AbonarApartado";
+import Apartar from "./venta/Apartar";
+import { abonar, crearApartado, nuevaOperacion, reglasCuentas, type CuentaFila, type Reglas, type ResultadoAbono } from "../db/cuentas";
+import { abrirGavetaAbono, imprimirComprobante } from "../lib/cuentas/imprimir";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
 import { FAVORITOS, lecturaConCantidad, useCatalogo } from "./venta/useCatalogo";
@@ -40,7 +45,7 @@ import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { fondoPildora, textoSobre } from "../ui/departamentos";
 import { seleccionarAlTocar } from "../ui/seleccionarAlTocar";
 
-type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | null;
+type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | "apartar" | "apartados" | null;
 
 /** Lo que muestra el botón "Atajos" (F1). Debe coincidir con el manejador de teclas de Venta y con Cobro. */
 const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso?: Permiso }[] }[] = [
@@ -66,6 +71,13 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
       { teclas: ["+", "−"], texto: "Una más / una menos de la última línea (con el buscador vacío)" },
       { teclas: ["Supr"], texto: "Quitar la línea abierta" },
       { teclas: ["F8"], texto: "Descuento al total" },
+    ],
+  },
+  {
+    grupo: "Apartados",
+    lista: [
+      { teclas: ["F9"], texto: "Apartar la venta (pide el cliente si no hay)", permiso: "cuentas" },
+      { teclas: ["F10"], texto: "Buscar un apartado y abonar, liquidar o entregar", permiso: "cuentas" },
     ],
   },
   {
@@ -100,11 +112,21 @@ export default function Venta() {
   const [focoCantidad, setFocoCantidad] = useState<{ productoId: string; n: number } | null>(null);
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [pendiente, setPendiente] = useState<EstadoEspera | null>(null); // cambio que espera PIN de dueño
-  const [sinExistencia, setSinExistencia] = useState<{ pagos: PagoEntrada[]; mensaje: string } | null>(null);
+  const [sinExistencia, setSinExistencia] = useState<{ pagos: PagoEntrada[]; mensaje: string; credito: boolean } | null>(null);
   const [cobrada, setCobrada] = useState<(ResultadoCobro & { errorImpresion?: string; errorGaveta?: string }) | null>(null);
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
   const buscador = useRef<HTMLInputElement>(null);
+  // Apartados y crédito: reglas del negocio (Rust), el abono recién cobrado y su id de operación
+  // (uno por diálogo abierto: un doble Enter o un reintento no crea dos abonos).
+  const [reglas, setReglas] = useState<Reglas | null>(null);
+  const [trasCliente, setTrasCliente] = useState(false);
+  const [abonado, setAbonado] = useState<{ r: ResultadoAbono; nuevo: boolean; errorImpresion?: string; errorGaveta?: string } | null>(null);
+  const operacion = useRef("");
+  useEffect(() => {
+    if (puede("cuentas")) reglasCuentas().then(setReglas, () => setReglas(null));
+  }, []);
+  const usaApartados = !!reglas?.usaApartados && puede("cuentas");
   const tabs = useEsperas(setError);
   const { esperas, activa, activaId, setActivaId, actual, actualizar } = tabs;
   const { productos, total: totalCatalogo, cargando, buscando, sel, setSel, orden, cambiarOrden, grilla, finGrilla, alternarFavorito } = useCatalogo(texto, filtro, setError);
@@ -135,7 +157,11 @@ export default function Venta() {
   const tope = topeDescuento(actor.rol, config.descuento_max_pct);
   const confirmar = useConfirmar();
   const [confirmando, setConfirmando] = useState(false);
-  const modal = dialogo !== null || pendiente !== null || cobrada !== null || confirmando;
+  const modal = dialogo !== null || pendiente !== null || cobrada !== null || abonado !== null || confirmando;
+  // Un id de operación por cada vez que se abre apartar o abonar.
+  useEffect(() => {
+    if (dialogo === "apartar" || dialogo === "apartados") operacion.current = nuevaOperacion();
+  }, [dialogo]);
 
   useEffect(() => {
     (async () => {
@@ -300,15 +326,15 @@ export default function Venta() {
 
   // ── Cobro
   // La venta ya quedó guardada al cobrar: si la impresora o la gaveta fallan, se avisa y se sigue.
-  async function cobrar(pagos: PagoEntrada[], pinExistencia?: string) {
+  async function cobrar(pagos: PagoEntrada[], pinExistencia?: string, credito = false) {
     if (!activa) return;
     let r: ResultadoCobro;
     try {
-      r = await cobrarVenta(actor, activa.id, estado, pagos, pinExistencia);
+      r = await cobrarVenta(actor, activa.id, estado, pagos, pinExistencia, credito);
     } catch (e) {
-      // Sin existencia y la configuración no deja vender así: el dueño autoriza con su PIN.
+      // Sin existencia (o la unidad está apartada): el dueño autoriza con su PIN.
       const m = e instanceof Error ? e.message : "";
-      if (!pinExistencia && m.startsWith(SIN_EXISTENCIA)) return setSinExistencia({ pagos, mensaje: m.slice(SIN_EXISTENCIA.length) });
+      if (!pinExistencia && m.startsWith(SIN_EXISTENCIA)) return setSinExistencia({ pagos, mensaje: m.slice(SIN_EXISTENCIA.length), credito });
       throw e;
     }
     setSinExistencia(null);
@@ -335,6 +361,47 @@ export default function Venta() {
     await tabs.quitar(activa.id);
   }
 
+
+  // ── Apartados: el abono ya quedó guardado; si la gaveta o la impresora fallan, se avisa y se sigue.
+  async function despuesDeAbono(r: ResultadoAbono, nuevo: boolean) {
+    let errorImpresion: string | undefined;
+    let errorGaveta: string | undefined;
+    if (r.abrirGaveta) {
+      try {
+        await abrirGavetaAbono(operacion.current);
+      } catch (e) {
+        errorGaveta = textoError(e);
+      }
+    }
+    if (config.imprime_tiquete) {
+      try {
+        // Liquidado: sale el tiquete de la venta. Si no, el comprobante del apartado o del abono.
+        if (r.ventaId) await imprimirVenta(r.ventaId, config);
+        else await imprimirComprobante(r.cuentaId, config, { tipo: nuevo ? "apartado" : "abono", operacionId: operacion.current, condiciones: reglas?.condiciones });
+      } catch (e) {
+        errorImpresion = textoError(e);
+      }
+    }
+    setDialogo(null);
+    setAbonado({ r, nuevo, errorImpresion, errorGaveta });
+  }
+
+  async function apartar(abono: number, pagos: PagoEntrada[]) {
+    if (!activa) return;
+    const r = await crearApartado(activa.id, estado, abono, pagos, operacion.current);
+    await despuesDeAbono(r, true);
+    await tabs.quitar(activa.id);
+  }
+
+  async function abonarCuenta(k: CuentaFila, m: number, pagos: PagoEntrada[], entregar: boolean) {
+    const r = await abonar(k.id, m, pagos, operacion.current, entregar);
+    await despuesDeAbono(r, false);
+  }
+
+  function cerrarAbonado() {
+    setAbonado(null);
+    alBuscador();
+  }
 
   async function reimprimir() {
     if (!cobrada) return;
@@ -363,6 +430,13 @@ export default function Venta() {
   const ajena = !!caja?.turno && !caja.puedeUsar;
   const cerrada = !!caja && (!caja.turno || caja.deOtroDia || ajena);
 
+  // Enter y flechas pasan de casilla en los diálogos de la venta (cobro, venta simple, cliente). Solo
+  // aquí: en el resto de la app Enter sigue guardando como siempre. En burbuja: un Enter propio va primero.
+  useEffect(() => {
+    window.addEventListener("keydown", navegarCampos);
+    return () => window.removeEventListener("keydown", navegarCampos);
+  }, []);
+
   // ── Atajos de teclado (la lista visible está en ATAJOS, abajo: si cambia uno, cambiar los dos)
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -381,6 +455,14 @@ export default function Venta() {
         F4: () => setDialogo("libre"),
         F7: () => puede("clientes.basico") && setDialogo("cliente"),
         F8: () => (estado.lineas.length ? setDialogo("descuento") : vacia()),
+        // Apartar: sin cliente, primero el cliente (y sigue solo al elegirlo).
+        F9: () => {
+          if (!usaApartados) return;
+          if (!estado.lineas.length) return vacia();
+          if (!estado.cliente) return setTrasCliente(true), setDialogo("cliente");
+          setDialogo("apartar");
+        },
+        F10: () => usaApartados && setDialogo("apartados"),
         F12: () => (estado.lineas.length ? setDialogo("cobro") : vacia()),
       };
       if (atajos[e.key]) {
@@ -524,6 +606,11 @@ export default function Venta() {
           {caja?.puedeUsar && (
             <Button variante="fantasma" icono={Inbox} onClick={() => setDialogo("noventa")} title="Abrir la gaveta sin vender (cambio de billetes…). Queda anotado.">
               Abrir gaveta
+            </Button>
+          )}
+          {usaApartados && (
+            <Button variante="fantasma" icono={Bookmark} atajo="F10" onClick={() => setDialogo("apartados")}>
+              Apartados
             </Button>
           )}
           <Button variante="fantasma" icono={Keyboard} atajo="F1" onClick={() => setDialogo("atajos")}>
@@ -688,6 +775,16 @@ export default function Venta() {
             <Button icono={Percent} atajo="F8" disabled={!estado.lineas.length} onClick={() => setDialogo("descuento")}>
               Descuento
             </Button>
+            {usaApartados && (
+              <Button
+                icono={Bookmark}
+                atajo="F9"
+                disabled={!estado.lineas.length}
+                onClick={() => (estado.cliente ? setDialogo("apartar") : (setTrasCliente(true), setDialogo("cliente")))}
+              >
+                Apartar
+              </Button>
+            )}
             <span className="muted" style={{ alignSelf: "center", fontSize: 14 }}>
               {articulos} art.
             </span>
@@ -704,7 +801,16 @@ export default function Venta() {
         <PrecioLibre departamentos={departamentos} onCerrar={() => setDialogo(null)} onAgregar={(l) => (agregarLinea(l), setDialogo(null))} />
       )}
       {dialogo === "cliente" && (
-        <ClienteVenta estado={estado} onCerrar={() => setDialogo(null)} onCambio={(c) => (actualizar({ ...actual(), ...c }), setDialogo(null))} />
+        <ClienteVenta
+          estado={estado}
+          onCerrar={() => (setDialogo(null), setTrasCliente(false))}
+          onCambio={(c) => {
+            actualizar({ ...actual(), ...c });
+            if (trasCliente && !c.cliente) setAviso("Para apartar, elija o cree el cliente (con su consentimiento).");
+            setDialogo(trasCliente && c.cliente ? "apartar" : null);
+            setTrasCliente(false);
+          }}
+        />
       )}
       {dialogo === "descuento" && (
         <DescuentoTotal
@@ -743,9 +849,63 @@ export default function Venta() {
           </div>
         </Modal>
       )}
-      {dialogo === "cobro" && <Cobro total={t.total} totalExacto={t.total - t.redondeo} pagador={estado.cliente?.nombre ?? estado.nombreTiquete ?? undefined} formas={formas} bancos={bancos} onCerrar={() => setDialogo(null)} onCobrar={cobrar} />}
+      {dialogo === "cobro" && (
+        <Cobro
+          total={t.total}
+          totalExacto={t.total - t.redondeo}
+          pagador={estado.cliente?.nombre ?? estado.nombreTiquete ?? undefined}
+          formas={formas}
+          bancos={bancos}
+          onCerrar={() => setDialogo(null)}
+          onCobrar={cobrar}
+          onCredito={reglas?.usaCredito && estado.cliente && puede("cuentas") ? (pagos) => cobrar(pagos, undefined, true) : undefined}
+        />
+      )}
+      {dialogo === "apartar" && estado.cliente && caja?.turno && reglas && (
+        <Apartar total={t.total} cliente={estado.cliente.nombre} reglas={reglas} dia={caja.turno.dia} formas={formas} bancos={bancos} onApartar={apartar} onCerrar={() => setDialogo(null)} />
+      )}
+      {dialogo === "apartados" && <AbonarApartado formas={formas} bancos={bancos} onAbonar={abonarCuenta} onCerrar={() => (setDialogo(null), alBuscador())} />}
+      {abonado && (
+        <Modal titulo={abonado.nuevo ? `Apartado ${abonado.r.numero} creado` : abonado.r.ventaId ? `${abonado.r.numero} liquidado` : `Abono a ${abonado.r.numero}`} onCerrar={cerrarAbonado} ancho={460}>
+          {abonado.r.vuelto > 0 && (
+            <div className="cobro-resumen ok">
+              <Banknote size={24} aria-hidden /> Vuelto <strong>{monto(abonado.r.vuelto)}</strong>
+            </div>
+          )}
+          <dl className="cifras">
+            <div>
+              <dt>Abonó</dt>
+              <dd>{monto(abonado.r.abonadoAhora)}</dd>
+            </div>
+            <div>
+              <dt>Saldo</dt>
+              <dd>{monto(abonado.r.saldo)}</dd>
+            </div>
+          </dl>
+          {abonado.r.ventaNumero && (
+            <p>
+              Venta {abonado.r.ventaNumero}. {abonado.r.estado === "entregada" ? "Entregado." : "Pagado: queda por entregar (F10 → Entregar)."}
+            </p>
+          )}
+          {abonado.errorGaveta && (
+            <Alert tono="aviso" titulo="La gaveta no abrió">
+              {abonado.errorGaveta}
+            </Alert>
+          )}
+          {abonado.errorImpresion && (
+            <Alert tono="error" titulo="No se imprimió el comprobante">
+              {abonado.errorImpresion} El abono sí quedó guardado: reimprímalo desde F10.
+            </Alert>
+          )}
+          <div className="fila-botones">
+            <Button variante="primario" tamano="lg" icono={ShoppingCart} atajo="Enter" onClick={cerrarAbonado} autoFocus>
+              Siguiente venta
+            </Button>
+          </div>
+        </Modal>
+      )}
       {sinExistencia && (
-        <PinDueno motivo={sinExistencia.mensaje} onCerrar={() => setSinExistencia(null)} onPin={(pin) => cobrar(sinExistencia.pagos, pin)} />
+        <PinDueno motivo={sinExistencia.mensaje} onCerrar={() => setSinExistencia(null)} onPin={(pin) => cobrar(sinExistencia.pagos, pin, sinExistencia.credito)} />
       )}
       {pendiente && (
         <PinDueno

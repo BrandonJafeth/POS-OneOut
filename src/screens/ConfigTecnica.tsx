@@ -196,6 +196,9 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   impresoras: "Impresoras: agregar, cambiar, quitar y gaveta",
   "impresoras.asignar": "Impresoras: ver, probar y asignar documentos",
   inventario: "Inventario: existencias, entradas, ajustes, conteos, costos",
+  cuentas: "Apartados y crédito: crear, buscar, abonar, entregar",
+  "cuentas.admin": "Apartados: todos, cancelar, anular abonos, condonar, límites",
+  "reportes.ventas": "Reportes de ventas e historial de cierres",
 };
 
 function Permisos() {

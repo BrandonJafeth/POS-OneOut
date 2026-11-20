@@ -29,7 +29,7 @@ impl Rol {
     }
 }
 
-const CAJERO: &[&str] = &["venta", "caja", "clientes.basico", "facturas"];
+const CAJERO: &[&str] = &["venta", "caja", "clientes.basico", "facturas", "cuentas"];
 const DUENO: &[&str] = &[
     "venta",
     "caja",
@@ -46,6 +46,9 @@ const DUENO: &[&str] = &[
     "facturas",
     "impresoras.asignar",
     "inventario",
+    "cuentas",
+    "cuentas.admin",
+    "reportes.ventas",
 ];
 // El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
 // Impresoras: agregarlas, cambiar su conexión o formato, quitarlas y la gaveta ("impresoras") son

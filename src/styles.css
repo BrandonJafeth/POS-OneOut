@@ -991,17 +991,32 @@ button.tab.active,
   animation: aparecer 150ms ease-out;
 }
 
+/* Diálogo nativo (<dialog> con showModal): capa superior, el resto inerte, Esc cierra. */
 .modal {
-  max-width: 100%;
+  max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
+  padding: 0;
+  border: 0;
+  color: var(--text);
   background: var(--card);
   border-radius: 16px;
   box-shadow:
     0 24px 60px var(--sombra),
     0 2px 8px var(--sombra);
+  overscroll-behavior: contain;
   animation: subir 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal::backdrop {
+  background: rgba(14, 15, 18, 0.45);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  animation: aparecer 150ms ease-out;
 }
 
 @keyframes aparecer {
@@ -1019,7 +1034,8 @@ button.tab.active,
 
 @media (prefers-reduced-motion: reduce) {
   .overlay,
-  .modal {
+  .modal,
+  .modal::backdrop {
     animation: none;
   }
 }
@@ -3090,6 +3106,21 @@ textarea::placeholder {
   transform: translateX(-50%);
   width: min(460px, calc(100vw - 32px));
   pointer-events: none;
+}
+
+/* Popover (capa superior): sin los estilos del navegador; siempre visible aunque esté vacía. */
+.toast-zona[popover] {
+  inset: auto auto var(--e5) 50%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  color: inherit;
+}
+
+.toast-zona[popover]:not(:popover-open) {
+  display: block;
 }
 
 .toast {

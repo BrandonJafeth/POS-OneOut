@@ -40,7 +40,20 @@ interface Fila extends Omit<PagoEntrada, "monto"> {
 }
 
 /** `total`: redondeado, lo que se cobra en efectivo. `totalExacto`: sin redondear, lo que se cobra si no hay efectivo. */
-export default function Cobro(p: { total: number; totalExacto: number; /** Cliente de la venta: llena "Nombre de quien paga" en SINPE. */ pagador?: string; formas: FormaPago[]; bancos: Banco[]; onCobrar(pagos: PagoEntrada[]): Promise<void>; onCerrar(): void }) {
+export default function Cobro(p: {
+  total: number;
+  totalExacto: number;
+  /** Cliente de la venta: llena "Nombre de quien paga" en SINPE. */
+  pagador?: string;
+  formas: FormaPago[];
+  bancos: Banco[];
+  /** "Cobrar" por defecto; "Abono del apartado A-0012" al abonar. */
+  titulo?: string;
+  onCobrar(pagos: PagoEntrada[]): Promise<void>;
+  /** Venta a crédito (solo si el negocio la usa y hay cliente): lo que falte queda por cobrar. */
+  onCredito?(pagos: PagoEntrada[]): Promise<void>;
+  onCerrar(): void;
+}) {
   const { config } = useSesion();
   const efectivo = p.formas.find((f) => f.daVuelto) ?? p.formas[0];
   const clave = useRef(1);
@@ -200,7 +213,7 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
         )}
         {fp?.pideUltimos4 && (
           <Field label="Últimos 4 (opcional)">
-            <input className="mini mono" inputMode="numeric" value={f.ultimos4 ?? ""} onChange={(e) => set(f.clave, { ultimos4: e.target.value.replace(/\D/g, "").slice(0, 4) })} />
+            <input data-opcional className="mini mono" inputMode="numeric" value={f.ultimos4 ?? ""} onChange={(e) => set(f.clave, { ultimos4: e.target.value.replace(/\D/g, "").slice(0, 4) })} />
           </Field>
         )}
       </>
@@ -208,7 +221,7 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
   };
 
   return (
-    <Modal titulo="Cobrar" onCerrar={p.onCerrar} ancho={680}>
+    <Modal titulo={p.titulo ?? "Cobrar"} onCerrar={p.onCerrar} ancho={680}>
       <form
         ref={formRef}
         onSubmit={(e) => {
@@ -355,6 +368,24 @@ export default function Cobro(p: { total: number; totalExacto: number; /** Clien
             Dividir pago
           </Button>
           <span style={{ flex: 1 }} />
+          {p.onCredito && r.faltante > 0 && (
+            <Button
+              disabled={ocupado || sinMonto.length > 0}
+              onClick={async () => {
+                setOcupado(true);
+                setError("");
+                try {
+                  await p.onCredito?.(pagosEfectivos);
+                } catch (e) {
+                  setError(textoError(e));
+                } finally {
+                  setOcupado(false);
+                }
+              }}
+            >
+              Dejar {monto(r.faltante)} a crédito
+            </Button>
+          )}
           <Button type="submit" variante="primario" tamano="lg" atajo="Enter" disabled={!listo || ocupado}>
             {ocupado ? "Guardando…" : "Confirmar cobro"}
           </Button>

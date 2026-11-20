@@ -6,6 +6,7 @@ mod calculo;
 mod clave;
 mod clientes;
 mod config;
+mod cuentas;
 mod desglose;
 mod diagnostico;
 mod escpos;
@@ -21,6 +22,8 @@ mod fechas_caja;
 mod casos_raros;
 #[cfg(test)]
 mod tabla_permisos;
+#[cfg(test)]
+mod tipos_ts;
 mod inventario;
 mod negocio;
 mod permisos;
@@ -464,6 +467,12 @@ async fn gaveta_venta(st: St<'_>, venta_id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn gaveta_abono(st: St<'_>, operacion_id: String) -> Res<()> {
+    let a = st.actor().await?;
+    gaveta::por_abono(st.pool()?, &a, &operacion_id).await
+}
+
+#[tauri::command]
 async fn gaveta_cierre(st: St<'_>) -> Res<()> {
     let a = st.actor().await?;
     gaveta::para_cierre(st.pool()?, &a, caja::CAJA_1).await
@@ -538,9 +547,107 @@ async fn venta_referencia_usada(st: St<'_>, forma_pago_id: String, referencia: S
 }
 
 #[tauri::command]
-async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>, pin_existencia: Option<String>) -> Res<ventas::ResultadoCobro> {
+async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>, pin_existencia: Option<String>, credito: Option<bool>) -> Res<ventas::ResultadoCobro> {
     let a = st.actor().await?;
-    ventas::cobrar_con(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos, pin_existencia.as_deref()).await
+    ventas::cobrar_opc(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos, pin_existencia.as_deref(), credito.unwrap_or(false)).await
+}
+
+// ─────────── Apartados y crédito (cuentas.rs) ───────────
+
+#[tauri::command]
+async fn cuentas_reglas(st: St<'_>) -> Res<cuentas::Reglas> {
+    let a = st.actor().await?;
+    cuentas::reglas(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn cuenta_crear_apartado(st: St<'_>, espera_id: String, estado: calculo::Estado, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String) -> Res<cuentas::ResultadoAbono> {
+    let a = st.actor().await?;
+    cuentas::crear_apartado(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, monto, &pagos, &operacion_id).await
+}
+
+#[tauri::command]
+async fn cuenta_abonar(st: St<'_>, cuenta_id: String, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String, entregar: bool) -> Res<cuentas::ResultadoAbono> {
+    let a = st.actor().await?;
+    cuentas::abonar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, monto, &pagos, &operacion_id, entregar).await
+}
+
+#[tauri::command]
+async fn cuenta_entregar(st: St<'_>, cuenta_id: String) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::entregar(st.pool()?, &a, &cuenta_id).await
+}
+
+#[tauri::command]
+async fn cuenta_buscar(st: St<'_>, texto: String) -> Res<Vec<cuentas::CuentaFila>> {
+    let a = st.actor().await?;
+    cuentas::buscar(st.pool()?, &a, &texto).await
+}
+
+#[tauri::command]
+async fn cuenta_obtener(st: St<'_>, id: String) -> Res<cuentas::CuentaDetalle> {
+    let a = st.actor().await?;
+    cuentas::obtener(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn cuenta_imprimir(st: St<'_>, cuenta_id: String, datos: Vec<u8>) -> Res<bool> {
+    let a = st.actor().await?;
+    cuentas::imprimir(st.pool()?, &a, &cuenta_id, &datos).await
+}
+
+#[tauri::command]
+async fn cuenta_listar(st: St<'_>, filtro: String) -> Res<Vec<cuentas::CuentaFila>> {
+    let a = st.actor().await?;
+    cuentas::listar(st.pool()?, &a, &filtro).await
+}
+
+#[tauri::command]
+async fn cuenta_vencidas(st: St<'_>) -> Res<i64> {
+    let a = st.actor().await?;
+    cuentas::vencidas(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn cuenta_cancelar(st: St<'_>, cuenta_id: String, pin: String, motivo: String, devuelto: i64, en_efectivo: i64) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::cancelar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, &pin, &motivo, devuelto, en_efectivo).await
+}
+
+#[tauri::command]
+async fn cuenta_ajustar(st: St<'_>, cuenta_id: String, cambio: i64, pin: String, motivo: String) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::ajustar(st.pool()?, &a, &cuenta_id, cambio, &pin, &motivo).await
+}
+
+#[tauri::command]
+async fn cuenta_condonar(st: St<'_>, cuenta_id: String, pin: String, motivo: String, entregar: bool) -> Res<Option<String>> {
+    let a = st.actor().await?;
+    cuentas::condonar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, &pin, &motivo, entregar).await
+}
+
+#[tauri::command]
+async fn cuenta_prorrogar(st: St<'_>, cuenta_id: String, fecha_limite: String, motivo: String) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::prorrogar(st.pool()?, &a, &cuenta_id, &fecha_limite, &motivo).await
+}
+
+#[tauri::command]
+async fn abono_anular(st: St<'_>, abono_id: String, pin: String, motivo: String, devolucion_efectivo: i64) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::anular_abono(st.pool()?, &a, caja::CAJA_1, &abono_id, &pin, &motivo, devolucion_efectivo).await
+}
+
+#[tauri::command]
+async fn cliente_limite_credito(st: St<'_>, cliente_id: String, limite: Option<i64>, pin: String) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::fijar_limite(st.pool()?, &a, &cliente_id, limite, &pin).await
+}
+
+#[tauri::command]
+async fn credito_alcanza(st: St<'_>, cliente_id: String, monto: i64) -> Res<bool> {
+    let a = st.actor().await?;
+    cuentas::credito_alcanza_cliente(st.pool()?, &a, &cliente_id, monto).await
 }
 
 #[tauri::command]
@@ -1001,12 +1108,43 @@ async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]
         None
     };
     let bd = Bd::abrir(dir, clave).await;
+    // Prueba de punta a punta (solo compilación de desarrollo, base vacía): usuarios y un producto.
+    #[cfg(debug_assertions)]
+    if let (Ok(b), Ok("1")) = (&bd, std::env::var("POS_E2E").as_deref()) {
+        if let Err(err) = semilla_e2e(&b.pool).await {
+            return (Err(format!("Semilla de prueba: {err}")), clave);
+        }
+    }
     if let (Ok(b), Some(anterior)) = (&bd, &restaurada) {
         if let Err(err) = respaldo::anotar_restauracion(b, anterior, clave.as_ref()).await {
             return (Err(format!("Se restauró el respaldo pero no se pudo anotar en la bitácora: {err}")), clave);
         }
     }
     (bd, clave)
+}
+
+/// Base vacía para la prueba de punta a punta (tests/e2e): técnico, dueña Ana (246813), cajero Luis
+/// (2580), ambos con su PIN ya cambiado, y un producto con código. No existe en la versión final.
+#[cfg(debug_assertions)]
+async fn semilla_e2e(pool: &sqlx::SqlitePool) -> Res<()> {
+    let hay: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios").fetch_one(pool).await.map_err(util::e)?;
+    if hay > 0 {
+        return Ok(());
+    }
+    let t = usuarios::crear_tecnico_inicial(pool, "735919").await?;
+    let tec = sesion::Actor { id: t.id, rol: permisos::Rol::Tecnico, nombre: "Técnico".into() };
+    for (nombre, rol, pin) in [("Ana", permisos::Rol::Dueno, "246813"), ("Luis", permisos::Rol::Cajero, "2580")] {
+        let u = usuarios::crear(pool, &tec, nombre, rol, pin).await?;
+        usuarios::cambiar_pin(pool, &sesion::Actor { id: u.id.clone(), rol, nombre: nombre.into() }, &u.id, pin).await?;
+    }
+    let id = util::ulid();
+    sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, 'Retablo tallado', 'retablo tallado', '00000000000000000000000D01', 20000)")
+        .bind(&id)
+        .execute(pool)
+        .await
+        .map_err(util::e)?;
+    sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7501234567893', ?, 'barras')").bind(&id).execute(pool).await.map_err(util::e)?;
+    Ok(())
 }
 
 /// Solo se navega dentro de la app (nada de sitios externos ni ventanas nuevas).
@@ -1142,6 +1280,22 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sistema_estado,
             sistema_crear_tecnico,
+            cuentas_reglas,
+            cuenta_crear_apartado,
+            cuenta_abonar,
+            cuenta_entregar,
+            cuenta_buscar,
+            cuenta_obtener,
+            cuenta_imprimir,
+            cuenta_listar,
+            cuenta_vencidas,
+            cuenta_cancelar,
+            cuenta_ajustar,
+            cuenta_condonar,
+            cuenta_prorrogar,
+            abono_anular,
+            cliente_limite_credito,
+            credito_alcanza,
             sistema_restaurar,
             diagnostico_anotar,
             diagnostico_exportar,
@@ -1181,6 +1335,7 @@ pub fn run() {
             caja_corte,
             caja_turnos,
             gaveta_venta,
+            gaveta_abono,
             gaveta_no_venta,
             gaveta_cierre,
             gaveta_dueno,

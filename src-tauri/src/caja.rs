@@ -426,7 +426,7 @@ pub fn apertura_en(ahora: chrono::DateTime<chrono::FixedOffset>, ultimo_cierre: 
     Apertura { caso, hoy: hoy.to_string(), siguiente: siguiente_laborable(hoy, h).to_string(), nombre_hoy: DIAS[dia_semana(hoy)].into() }
 }
 
-async fn horario(c: &mut SqliteConnection) -> Horario {
+pub(crate) async fn horario_con(c: &mut SqliteConnection) -> Horario {
     leer_horario(config::valor_con(c, "caja_horario").await.as_ref())
 }
 
@@ -437,7 +437,7 @@ async fn apertura_para(c: &mut SqliteConnection, caja_id: &str) -> Res<Apertura>
         .fetch_one(&mut *c)
         .await
         .map_err(e)?;
-    let h = horario(c).await;
+    let h = horario_con(c).await;
     Ok(apertura_en(crate::util::ahora(), ultimo.as_deref(), &h))
 }
 
@@ -573,7 +573,7 @@ pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &st
     let dueno = usuarios::confirmar_dueno(pool, a, pin, "corregir el día de la caja").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
-    let ap = apertura_en(crate::util::ahora(), None, &horario(&mut tx).await);
+    let ap = apertura_en(crate::util::ahora(), None, &horario_con(&mut tx).await);
     let (hoy, siguiente) = (ap.hoy, ap.siguiente);
     let cerrado_hoy = t.cerrado_en.as_deref().is_some_and(|c| dia_de(c) == hoy);
     if t.estado != "abierto" && !cerrado_hoy {
@@ -821,6 +821,34 @@ pub struct Resumen {
     /// Ventas hechas antes del día de negocio del turno (caja abierta después del cierre, que cuenta
     /// para mañana): fecha y hora real, tiquete, usuario y monto. Vacío en cierres viejos.
     pub despues_del_cierre: Vec<VentaTardia>,
+    /// Abonos a apartados y créditos recibidos en el turno, por forma de pago: DINERO, no ventas.
+    pub abonos_por_forma: Vec<PorForma>,
+    pub abonos_total: i64,
+    /// Efectivo neto de los abonos (recibido − vuelto): entra al efectivo esperado.
+    pub abonos_efectivo: i64,
+    pub abonos_electronicos: Vec<PagoElectronico>,
+    /// Ventas del turno que no se pagaron hoy: liquidan un apartado (pagadas con abonos) o a crédito
+    /// (por cobrar). Explican la diferencia entre "ventas" y formas de pago.
+    pub ventas_con_abonos: i64,
+    pub ventas_a_credito: i64,
+    pub apartados: ApartadosZ,
+}
+
+/// Movimiento de apartados y créditos del turno (de cuenta_eventos).
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ApartadosZ {
+    pub creados: i64,
+    pub monto_creados: i64,
+    pub creditos: i64,
+    pub monto_creditos: i64,
+    pub liquidados: i64,
+    pub cancelados: i64,
+    pub devuelto: i64,
+    pub retenido: i64,
+    pub abonos_anulados: i64,
+    pub monto_anulado: i64,
+    pub condonado: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -845,9 +873,13 @@ pub fn fuera_de_umbral(diferencia: i64, umbral: i64) -> bool {
 /// Revisa que todo cuadre (si no, el Z no se imprime con números inconsistentes).
 fn revisar_cuadre(r: &mut Resumen) {
     let mut d = Vec::new();
-    let formas: i64 = r.por_forma.iter().map(|f| f.monto).sum();
+    // Lo que liquida un apartado o queda a crédito no entró por una forma de pago hoy.
+    let formas: i64 = r.por_forma.iter().map(|f| f.monto).sum::<i64>() + r.ventas_con_abonos + r.ventas_a_credito;
     if formas != r.total_ventas {
         d.push(format!("formas de pago {} ≠ ventas {}", colones(formas), colones(r.total_ventas)));
+    }
+    if r.abonos_por_forma.iter().map(|f| f.monto).sum::<i64>() != r.abonos_total {
+        d.push("abonos por forma de pago".into());
     }
     if r.con_desglose {
         let deps: i64 = r.desglose.departamentos.iter().map(|x| x.monto).sum();
@@ -865,7 +897,7 @@ fn revisar_cuadre(r: &mut Resumen) {
             d.push(format!("pagos que no suman el total en los tiquetes {}", r.desglose.ventas_descuadradas.join(", ")));
         }
     }
-    if r.efectivo_esperado != r.fondo + r.recibido_efectivo - r.vueltos + r.entradas - r.salidas {
+    if r.efectivo_esperado != r.fondo + r.recibido_efectivo - r.vueltos + r.abonos_efectivo + r.entradas - r.salidas {
         d.push("efectivo esperado".into());
     }
     r.cuadra = d.is_empty();
@@ -1061,9 +1093,102 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         .await
         .map_err(e)?;
     // Los ajustes no cambian el efectivo de este turno: una devolución en efectivo entra como salida.
-    r.efectivo_esperado = r.fondo + r.recibido_efectivo - r.vueltos + r.entradas - r.salidas;
+    abonos_del_turno(c, t, &mut r).await?;
+    r.efectivo_esperado = r.fondo + r.recibido_efectivo - r.vueltos + r.abonos_efectivo + r.entradas - r.salidas;
     revisar_cuadre(&mut r);
     Ok(r)
+}
+
+/// Un abono cuenta en el Z de su turno salvo que se haya anulado en ese mismo turno (como una venta):
+/// anulado después, su Z ya estaba cerrado y la devolución sale en el turno donde se anuló.
+pub const ABONO_EN_SU_Z: &str = "(a.anulado_en IS NULL OR COALESCE(a.anulado_turno_id, '') <> a.turno_id)";
+
+/// Abonos, ventas pagadas con abonos o a crédito, y el movimiento de apartados del turno.
+async fn abonos_del_turno(c: &mut SqliteConnection, t: &Turno, r: &mut Resumen) -> Res<()> {
+    let filas = sqlx::query(&format!(
+        "SELECT f.id, f.nombre, f.tipo, f.da_vuelto, COUNT(a.id) AS n, SUM(a.monto) AS monto, SUM(COALESCE(a.recibido, a.monto)) AS recibido, SUM(COALESCE(a.vuelto, 0)) AS vuelto
+         FROM abonos a JOIN formas_pago f ON f.id = a.forma_pago_id WHERE a.turno_id = ? AND {ABONO_EN_SU_Z} GROUP BY f.id ORDER BY f.orden, f.nombre"
+    ))
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    for f in &filas {
+        let da_vuelto = f.get::<i64, _>("da_vuelto") == 1;
+        let monto: i64 = f.get("monto");
+        if da_vuelto {
+            r.abonos_efectivo += f.get::<i64, _>("recibido") - f.get::<i64, _>("vuelto");
+        }
+        r.abonos_total += monto;
+        let (nombre, tipo): (String, String) = (f.get("nombre"), f.get("tipo"));
+        r.abonos_por_forma.push(PorForma { forma_pago_id: f.get("id"), codigo: desglose::codigo_corto(&tipo, &nombre), nombre, tipo, da_vuelto, pagos: f.get("n"), monto });
+    }
+    r.abonos_electronicos = sqlx::query(&format!(
+        "SELECT a.fecha, k.numero, f.nombre AS forma, f.tipo, a.monto, a.ultimos4, COALESCE(NULLIF(b.abreviatura, ''), b.nombre) AS banco, a.referencia, a.pagador
+         FROM abonos a JOIN cuentas k ON k.id = a.cuenta_id JOIN formas_pago f ON f.id = a.forma_pago_id LEFT JOIN bancos b ON b.id = a.banco_id
+         WHERE a.turno_id = ? AND f.da_vuelto = 0 AND {ABONO_EN_SU_Z} ORDER BY f.orden, a.fecha"
+    ))
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?
+    .iter()
+    .map(|p| PagoElectronico {
+        fecha: p.get("fecha"),
+        venta_numero: p.get::<Option<String>, _>("numero").unwrap_or_default(),
+        forma: p.get("forma"),
+        tipo: p.get("tipo"),
+        monto: p.get("monto"),
+        ultimos4: p.get("ultimos4"),
+        banco: p.get("banco"),
+        referencia: p.get("referencia"),
+        pagador: p.get("pagador"),
+    })
+    .collect();
+    for f in sqlx::query(
+        "SELECT k.tipo, SUM(v.total - COALESCE((SELECT SUM(p.monto) FROM venta_pagos p WHERE p.venta_id = v.id AND p.eliminado_en IS NULL), 0)) AS resto
+         FROM ventas v JOIN cuentas k ON k.id = v.cuenta_id WHERE v.turno_id = ? AND v.estado = 'completada' AND v.eliminado_en IS NULL GROUP BY k.tipo",
+    )
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?
+    {
+        if f.get::<String, _>("tipo") == "credito" {
+            r.ventas_a_credito += f.get::<i64, _>("resto");
+        } else {
+            r.ventas_con_abonos += f.get::<i64, _>("resto");
+        }
+    }
+    let ev = sqlx::query(
+        "SELECT k.tipo AS ktipo, e.tipo, COUNT(*) AS n, COALESCE(SUM(e.monto), 0) AS monto, COALESCE(SUM(CASE WHEN e.tipo = 'cancelada' THEN k.retenido END), 0) AS retenido
+         FROM cuenta_eventos e JOIN cuentas k ON k.id = e.cuenta_id WHERE e.turno_id = ? GROUP BY k.tipo, e.tipo",
+    )
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    let z = &mut r.apartados;
+    for f in &ev {
+        let (n, monto): (i64, i64) = (f.get("n"), f.get("monto"));
+        match (f.get::<String, _>("ktipo").as_str(), f.get::<String, _>("tipo").as_str()) {
+            ("apartado", "creada") => (z.creados, z.monto_creados) = (n, monto),
+            ("credito", "creada") => (z.creditos, z.monto_creditos) = (n, monto),
+            (_, "liquidada") => z.liquidados += n,
+            (_, "cancelada") => {
+                z.cancelados += n;
+                z.devuelto += monto;
+                z.retenido += f.get::<i64, _>("retenido");
+            }
+            (_, "abono_anulado") => {
+                z.abonos_anulados += n;
+                z.monto_anulado += monto;
+            }
+            (_, "condonacion") => z.condonado += monto,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Lo único del turno abierto que recibe el cajero: fondo, sus movimientos de efectivo y las
