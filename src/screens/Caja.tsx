@@ -1,7 +1,7 @@
 // Caja: el turno abierto (de la caja, no de una persona), movimientos, "no venta", corte, cierre
 // con arqueo y cierre Z; historial de turnos y, para el dueño, las aperturas de gaveta sin venta.
 // Con el turno abierto, el cajero no ve totales de ventas (Rust ni siquiera se los manda).
-import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, Eye, FileDown, History, Inbox, KeyRound, Lock, LockOpen, NotebookPen, Printer, RotateCcw, Scissors } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, BarChart3, CheckCircle2, ChevronRight, Eye, FileDown, History, Inbox, KeyRound, Lock, LockOpen, NotebookPen, Printer, RotateCcw, Scissors } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
 import { textoError } from "../components/Mensaje";
@@ -630,8 +630,39 @@ const TRAS_CIERRE: Record<string, string> = {
   manana: "Abierta después de un cierre: elegida para mañana",
 };
 
-/** Historial de cierres (vive en Reportes → Cierres de caja). Con `desde`/`hasta` usa ese rango. */
-export function Historial(p: { admin: boolean; onVer(id: string): void; desde?: string; hasta?: string }) {
+const DIA_LARGO = new Intl.DateTimeFormat("es-CR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+/** "Viernes 13 de noviembre" (más claro que 2026-11-13 para quien no es técnico). */
+const diaLargo = (d: string) => {
+  const s = DIA_LARGO.format(new Date(`${d}T00:00:00Z`)).replace(",", "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+/** "a las 19:44", o "el 16/11 a las 20:42" si se cerró otro día. */
+const cuandoCerro = (h: string) => (h.includes(" ") ? `el ${h.replace(" ", " a las ")}` : `a las ${h}`);
+
+/** Efectivo contado al cerrar y, debajo, cómo quedó en palabras: cuadró, faltó o sobró (con icono, no solo color). */
+function Cuadre({ t }: { t: { contado: number | null; esperado: number | null; diferencia: number | null } }) {
+  const d = t.diferencia;
+  if (t.contado == null) return <span className="muted">Se cuenta al cerrar</span>;
+  return (
+    <span className="efectivo">
+      <strong>{monto(t.contado)}</strong>
+      {d === 0 || d == null ? (
+        <span className="cuadre ok">
+          <CheckCircle2 size={16} aria-hidden /> Cuadró
+        </span>
+      ) : (
+        <span className={d < 0 ? "cuadre falta" : "cuadre sobra"} title={t.esperado != null ? `Tenía que haber ${monto(t.esperado)}` : undefined}>
+          <AlertTriangle size={16} aria-hidden /> {d < 0 ? "Faltó" : "Sobró"} {monto(Math.abs(d))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Historial de cierres (vive en Reportes → Cierres de caja). Con `desde`/`hasta` usa ese rango.
+ *  `onDia`: botón "Resumen del día" en el encabezado de cada día. */
+export function Historial(p: { admin: boolean; onVer(id: string): void; onDia?(dia: string): void; desde?: string; hasta?: string }) {
   const [desdePropio, setDesde] = useState(haceDias(7));
   const [hastaPropio, setHasta] = useState(diaLocal());
   const desde = p.desde ?? desdePropio;
@@ -659,48 +690,71 @@ export function Historial(p: { admin: boolean; onVer(id: string): void; desde?: 
       {error && <Alert tono="error">{error}</Alert>}
       {filas && filas.length === 0 && <EmptyState icono={History} titulo="Sin turnos en esas fechas" />}
       {filas && filas.length > 0 && (
-        <table className="tbl">
+        <table className="tbl tbl-cierres">
           <thead>
             <tr>
-              <th>Día</th>
               <th>Abrió</th>
               <th>Cerró</th>
               <th className="num">Ventas</th>
               <th className="num">Total</th>
-              <th className="num">Diferencia</th>
-              <th />
+              <th>Efectivo contado al cerrar</th>
+              <th>
+                <span className="sr-only">Avisos</span>
+              </th>
             </tr>
           </thead>
           {turnosPorDia(filas).map((g) => (
             <tbody key={g.dia}>
-              <tr className="fila-grupo">
-                <th colSpan={7} scope="rowgroup">
-                  <div className="row">
-                    <span>
-                      {g.dia} · {plural(g.turnos.length, "turno", "turnos")}
-                      {g.total !== null && ` · total del día ${monto(g.total)}`}
+              {/* El resumen del día va como encabezado propio, distinto de las filas de cada caja. */}
+              <tr className="fila-dia">
+                <th colSpan={6} scope="rowgroup">
+                  <div className="fila-dia-contenido">
+                    <span className="fila-dia-fecha">
+                      {diaLargo(g.dia)}
+                      <span className="muted">
+                        {plural(g.turnos.length, "caja", "cajas")} · {plural(g.turnos.reduce((s, t) => s + (t.ventas ?? 0), 0), "venta", "ventas")}
+                      </span>
                     </span>
                     {g.tardias > 0 && <Badge tono="aviso">{plural(g.tardias, "venta", "ventas")} después del cierre</Badge>}
+                    <span className="fila-dia-total">
+                      <span className="muted">Vendido</span> {g.total === null ? "—" : monto(g.total)}
+                    </span>                    {p.onDia && (
+                      <Button icono={BarChart3} onClick={() => p.onDia?.(g.dia)}>
+                        Resumen del día
+                      </Button>
+                    )}
                   </div>
                 </th>
               </tr>
               {g.turnos.map((t) => (
-                <FilaClic key={t.id} etiqueta={`Abrir turno del ${t.dia}`} onAbrir={() => p.onVer(t.id)}>
-                  <td>{t.dia}</td>
+                <FilaClic key={t.id} etiqueta={`Ver la caja que abrió ${t.usuarioApertura} a las ${hora(t.abiertoEn)}`} onAbrir={() => p.onVer(t.id)}>
                   <td>
-                    {t.usuarioApertura} · {hora(t.abiertoEn)}
+                    {t.usuarioApertura} <span className="muted">a las {hora(t.abiertoEn)}</span>
                   </td>
-                  <td>{t.cerradoEn ? `${t.usuarioCierre ?? ""} · ${horaCierre(t)}` : <Badge tono="ok">Abierta</Badge>}</td>
+                  <td>
+                    {t.cerradoEn ? (
+                      <>
+                        {t.usuarioCierre ?? ""} <span className="muted">{cuandoCerro(horaCierre(t))}</span>
+                      </>
+                    ) : (
+                      <Badge tono="ok">Abierta</Badge>
+                    )}
+                  </td>
                   <td className="num">{t.ventas ?? <span className="muted" title="Se ve al cerrar">—</span>}</td>
                   <td className="num">{t.total == null ? <span className="muted" title="Se ve al cerrar">—</span> : monto(t.total)}</td>
-                  <td className="num">{t.diferencia == null ? "" : signo(t.diferencia)}</td>
                   <td>
-                    <div className="row">
+                    <Cuadre t={t} />
+                  </td>
+                  <td>
+                    <div className="row fila-avisos">
                       {t.pendienteRevision && <Badge tono="aviso">Revisar</Badge>}
                       {t.alertaNoVentas && <Badge tono="aviso">{plural(t.noVentas, "apertura", "aperturas")} sin venta</Badge>}
                       {TRAS_CIERRE[t.aperturaCaso ?? ""] && <Badge tono="info">{TRAS_CIERRE[t.aperturaCaso ?? ""]}</Badge>}
                       {t.aperturaCuadra === false && <Badge tono="aviso">Diferencia de apertura{t.diferenciaApertura !== null ? ` ${signo(t.diferenciaApertura)}` : ""}</Badge>}
                       {t.ventasDespuesDelCierre > 0 && <Badge tono="aviso">{plural(t.ventasDespuesDelCierre, "venta", "ventas")} después del cierre</Badge>}
+                      <span className="fila-ver" aria-hidden>
+                        Ver <ChevronRight size={16} />
+                      </span>
                     </div>
                   </td>
                 </FilaClic>

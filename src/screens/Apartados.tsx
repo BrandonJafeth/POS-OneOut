@@ -116,7 +116,10 @@ export default function Apartados() {
               {lista.map((k) => (
                 <FilaClic key={k.id} etiqueta={`${k.numero}, ${k.cliente}, saldo ${monto(k.saldo)}`} onAbrir={() => setAbierta(k.id)}>
                   <td className="mono">{k.numero}</td>
-                  <td>{k.cliente}</td>
+                  <td>
+                    {k.cliente}
+                    {k.descripcion && <div className="muted">{k.descripcion}</div>}
+                  </td>
                   <td>{fecha(k.fecha)}</td>
                   <td>{fecha(k.fechaLimite)}</td>
                   <td className="num">{monto(k.total)}</td>
@@ -159,6 +162,7 @@ function Detalle(p: { id: string; reglas: Reglas; onCerrar(): void }) {
             Creado el {fecha(k.fecha)} por {d.usuario}
             {d.ventaNumero ? ` · venta ${d.ventaNumero}` : ""}
           </div>
+          {k.descripcion && <p className="apartado-detalle">{k.descripcion}</p>}
         </div>
         <EstadoCuenta k={k} />
       </div>

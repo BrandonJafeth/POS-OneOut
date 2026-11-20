@@ -386,9 +386,9 @@ export default function Venta() {
     setAbonado({ r, nuevo, errorImpresion, errorGaveta });
   }
 
-  async function apartar(abono: number, pagos: PagoEntrada[]) {
+  async function apartar(abono: number, pagos: PagoEntrada[], descripcion: string) {
     if (!activa) return;
-    const r = await crearApartado(activa.id, estado, abono, pagos, operacion.current);
+    const r = await crearApartado(activa.id, estado, abono, pagos, operacion.current, descripcion);
     await despuesDeAbono(r, true);
     await tabs.quitar(activa.id);
   }
@@ -609,8 +609,8 @@ export default function Venta() {
             </Button>
           )}
           {usaApartados && (
-            <Button variante="fantasma" icono={Bookmark} atajo="F10" onClick={() => setDialogo("apartados")}>
-              Apartados
+            <Button variante="fantasma" icono={Bookmark} atajo="F10" onClick={() => setDialogo("apartados")} title="Buscar un apartado para abonar, cobrar lo que falta o entregar">
+              Abonar apartado
             </Button>
           )}
           <Button variante="fantasma" icono={Keyboard} atajo="F1" onClick={() => setDialogo("atajos")}>
@@ -731,6 +731,11 @@ export default function Venta() {
             <ScanBarcode size={40} aria-hidden strokeWidth={1.5} />
             <strong>Venta vacía</strong>
             Escanee o toque un producto.
+            {usaApartados && (
+              <Button icono={Bookmark} atajo="F10" className="tiquete-vacio-accion" onClick={() => setDialogo("apartados")}>
+                ¿Viene a pagar un apartado?
+              </Button>
+            )}
           </div>
         ) : (
           <ul className="lineas">

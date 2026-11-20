@@ -27,6 +27,8 @@ fn atajos_de_fechas() {
     let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
     assert_eq!(periodo_anterior(d("2026-11-01"), d("2026-11-30")), (d("2026-10-01"), d("2026-10-31")));
     assert_eq!(periodo_anterior(d("2026-11-16"), d("2026-11-22")), (d("2026-11-09"), d("2026-11-15")));
+    assert_eq!(mismo_periodo_anio_pasado(d("2026-11-19"), d("2026-11-19")), (d("2025-11-19"), d("2025-11-19")));
+    assert_eq!(mismo_periodo_anio_pasado(d("2028-02-01"), d("2028-02-29")), (d("2027-02-01"), d("2027-02-28")));
 }
 
 fn total(n: i64) -> Conteo {

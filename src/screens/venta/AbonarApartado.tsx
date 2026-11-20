@@ -91,6 +91,7 @@ export default function AbonarApartado(p: {
           <div>
             <strong>{k.cliente}</strong>
             {k.telefono && <span className="muted"> · {k.telefono}</span>}
+            {k.descripcion && <p className="apartado-detalle">{k.descripcion}</p>}
           </div>
           <EstadoCuenta k={k} />
         </div>
@@ -188,7 +189,7 @@ export default function AbonarApartado(p: {
 
   return (
     <Modal titulo="Apartados" onCerrar={p.onCerrar} ancho={720}>
-      <Field label="Número, nombre, teléfono o cédula">
+      <Field label="Número, nombre, teléfono, cédula o detalle">
         <div className="buscador-entrada">
           <Search size={20} aria-hidden />
           <input ref={buscador} autoFocus className="grande-venta" style={{ minHeight: 48, fontSize: 17 }} value={texto} onChange={(e) => setTexto(e.target.value)} />
@@ -211,7 +212,10 @@ export default function AbonarApartado(p: {
             {lista.map((c) => (
               <FilaClic key={c.id} etiqueta={`${c.numero}, ${c.cliente}, saldo ${monto(c.saldo)}`} onAbrir={() => abrir(c)}>
                 <td className="mono">{c.numero}</td>
-                <td>{c.cliente}</td>
+                <td>
+                  {c.cliente}
+                  {c.descripcion && <div className="muted">{c.descripcion}</div>}
+                </td>
                 <td className="num">{monto(c.saldo)}</td>
                 <td>{c.estado === "pagada" || c.vencida ? <EstadoCuenta k={c} /> : fecha(c.fechaLimite)}</td>
               </FilaClic>

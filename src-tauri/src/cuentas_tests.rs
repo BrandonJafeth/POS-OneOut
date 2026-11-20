@@ -137,6 +137,24 @@ async fn cerrar_exacto(p: &SqlitePool, dueno: &Actor) -> String {
 // ─────────── Flujo principal ───────────
 
 #[tokio::test]
+async fn la_descripcion_se_guarda_limpia_y_se_busca() {
+    let (bd, _, _, luis) = base_con_usuarios().await;
+    let p = &bd.pool;
+    reloj("2026-11-16T10:00:00-06:00");
+    let pid = producto(p, 20000, 1).await;
+    let cl = cliente(p).await;
+    abrir(p, &luis, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
+    let est = Estado { lineas: vec![linea(&pid, 20000, 1)], cliente: Some(cl), ..Default::default() };
+    let esp = crear_espera(p, &luis, CAJA_1, &est).await.unwrap();
+    let largo = "x".repeat(201);
+    assert!(crear_apartado_con(p, &luis, CAJA_1, &esp.id, &est, 10000, &[pago(EF, 10000)], &ulid(), Some(&largo)).await.is_err());
+    crear_apartado_con(p, &luis, CAJA_1, &esp.id, &est, 10000, &[pago(EF, 10000)], &ulid(), Some("  Retablo de   graduada ")).await.unwrap();
+    let r = buscar(p, &luis, "retablo").await.unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].descripcion.as_deref(), Some("Retablo de graduada"));
+}
+
+#[tokio::test]
 async fn apartar_abonar_y_liquidar_en_otro_turno() {
     let (bd, _, ana, luis) = base_con_usuarios().await;
     let p = &bd.pool;

@@ -33,6 +33,7 @@ export function comprobanteCuenta(n: Negocio, d: CuentaDetalle, s: TicketSetting
   p.align("center").bold(true).size(true, true).line(k.numero).size(false, false).line(titulo).bold(false).align("left");
   p.line(lr("Fecha:", fechaHora(new Date()), c));
   wrap("Cliente: " + k.cliente, c).forEach((l) => p.line(l));
+  if (k.descripcion) wrap("Detalle: " + k.descripcion, c).forEach((l) => p.line(l));
   p.line(sep(c));
   if (o.tipo === "apartado") {
     for (const l of d.lineas) {

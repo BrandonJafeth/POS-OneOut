@@ -1650,6 +1650,10 @@ details.fiscal summary {
 }
 
 .tiquete-vacio {
+  /* Ocupa el alto como la lista de líneas: Cobrar queda siempre al pie (The Fixed Ticket Rule). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--e6) var(--e5);
   text-align: center;
   color: var(--muted);
@@ -1664,6 +1668,27 @@ details.fiscal summary {
   display: block;
   margin: var(--e2) 0 var(--e1);
   color: var(--text);
+}
+
+/* Horario de caja: una hora para todos los días, alineada con su botón. */
+.horario-todos {
+  align-items: flex-start;
+  margin-block: var(--e3) var(--e4);
+}
+
+.horario-todos > .btn,
+.horario-todos > button {
+  margin-top: 26px; /* alto de la etiqueta + separación: queda a la par del campo */
+}
+
+/* Atajo visible para el cliente que viene a pagar lo que debe (sin tener que conocer F10). */
+.tiquete-vacio .tiquete-vacio-accion {
+  display: flex;
+  margin: var(--e5) auto 0;
+}
+
+.tiquete-vacio .tiquete-vacio-accion svg {
+  color: currentColor;
 }
 
 .tiquete-pie {
@@ -3638,7 +3663,381 @@ td.linea-producto {
   color: var(--texto, inherit);
 }
 
+/* Historial de cierres: cada día es un encabezado propio (fecha, total, resumen) y debajo sus cajas. */
+.tbl-cierres .fila-dia th {
+  padding: var(--e3) var(--e4);
+  border-top: 1px solid var(--line);
+  background: var(--card2);
+  text-align: left;
+  font-weight: 400;
+}
+
+.tbl-cierres tbody:first-of-type .fila-dia th {
+  border-top: 0;
+}
+
+.fila-dia-contenido {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e2) var(--e4);
+}
+
+.fila-dia-fecha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--e1) var(--e3);
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.fila-dia-fecha .muted {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.fila-dia-total {
+  margin-left: auto;
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.fila-dia-total .muted {
+  margin-right: var(--e1);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* Las cajas del día van un poco hacia adentro: se leen como parte de ese día. */
+.tbl-cierres tr.clic > td:first-child {
+  padding-left: var(--e5);
+}
+
+/* El monto contado va primero (lo que se busca); el cuadre debajo, más chico. */
+.efectivo {
+  display: inline-grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.efectivo .cuadre {
+  font-size: 13px;
+}
+
+.cuadre {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cuadre.ok {
+  color: var(--ok);
+}
+
+.cuadre.falta {
+  color: var(--err);
+}
+
+.cuadre.sobra {
+  color: var(--warn);
+}
+
+.fila-avisos {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* "Ver ›" al final: la fila se puede abrir, sin tener que adivinarlo. */
+.fila-ver {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+tr.clic:hover .fila-ver,
+tr.clic:focus-visible .fila-ver {
+  color: var(--text);
+}
+
 /* ─── Reportes (fase 5) ─── */
+/* Menú agrupado a la izquierda (como el del POS anterior) y el reporte a la derecha. */
+.reportes-marco {
+  display: grid;
+  grid-template-columns: 228px minmax(0, 1fr);
+  gap: var(--e5);
+  align-items: start;
+}
+
+.reportes-menu {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--e4);
+  padding: var(--e3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card);
+}
+
+.reportes-grupo h2 {
+  margin: 0 0 var(--e1);
+  padding: 0 var(--e2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.reportes-grupo ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reportes-grupo button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e2);
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px var(--e2);
+  border: 0;
+  border-radius: var(--radio);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.25;
+  text-align: left;
+  /* El botón global no parte el texto; aquí un nombre largo baja de línea en vez de empujar la flecha. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.reportes-grupo button svg {
+  flex: none;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.reportes-grupo button:hover {
+  background: var(--card2);
+}
+
+.reportes-grupo button:hover svg,
+.reportes-grupo button[aria-current="page"] svg {
+  opacity: 1;
+}
+
+.reportes-grupo button[aria-current="page"] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.reportes-grupo button[aria-current="page"] svg {
+  color: var(--accent);
+}
+
+.reportes-grupo button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.reportes-principal {
+  min-width: 0;
+}
+
+.reportes-principal > .card + .card,
+.reportes-principal > .card {
+  margin-bottom: var(--e4);
+}
+
+@media (min-width: 1600px) {
+  .reportes-marco {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1200px) {
+  .reportes-marco {
+    grid-template-columns: 196px minmax(0, 1fr);
+    gap: var(--e4);
+  }
+}
+
+.reportes-filtro .segmento button {
+  min-height: 38px;
+}
+
+/* Cifras del reporte: las principales grandes; la variación con icono y texto (no solo color). */
+.kpis {
+  display: grid;
+  /* 150 px: las 4 cifras caben en una fila desde 1024 px (sin una casilla huérfana). */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  margin: 0;
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--hair);
+  overflow: hidden;
+}
+
+.kpis > div {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: var(--e3) var(--e4) var(--e4);
+  background: var(--card);
+}
+
+.kpis dt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.kpis dd {
+  margin: 0;
+}
+
+.kpi-valor {
+  font-size: 30px;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-nota {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e1);
+  margin-top: var(--e1) !important;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.kpi-nota svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.kpi-nota.sube {
+  color: var(--ok);
+}
+
+.kpi-nota.baja {
+  color: var(--err);
+}
+
+.kpis-menores {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.kpis-menores .kpi-valor {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* Vistazo de lo más vendido: lista corta con barra de proporción. */
+.tops {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--e4);
+}
+
+.top {
+  padding: var(--e3) var(--e4) var(--e4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radio-g);
+  background: var(--card);
+}
+
+.top-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e2);
+  margin-bottom: var(--e2);
+}
+
+.top-cabeza h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.top ol {
+  display: grid;
+  gap: var(--e3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.top li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px var(--e3);
+}
+
+.top-nombre {
+  overflow: hidden;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.top-monto {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.top-monto .muted {
+  font-weight: 400;
+}
+
+.top-barra {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--card2);
+}
+
+.top-barra > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--muted);
+}
+
+/* Detalle de lo apartado ("Retablo de graduada"). */
+.apartado-detalle {
+  margin: var(--e1) 0 0;
+  font-size: 16px;
+  font-weight: 550;
+}
+
 .reportes-filtro {
   display: flex;
   flex-wrap: wrap;
@@ -3676,16 +4075,6 @@ td.linea-producto {
 
 .reportes-cabeza h2 {
   font-size: 19px;
-}
-
-.reportes-cifras {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
-
-.reportes-cifras > div,
-.reportes-cifras > div:nth-child(odd) {
-  border-right: 1px solid var(--hair);
-  border-bottom: 1px solid var(--hair);
 }
 
 /* Cifras dentro de un diálogo: aire antes de lo que sigue (campo, tabla). */
@@ -3784,10 +4173,73 @@ td.linea-producto {
   cursor: default;
 }
 
+.barra {
+  position: relative;
+  justify-content: center;
+}
+
 .barra > span {
+  position: relative;
   width: 100%;
   border-radius: 4px 4px 0 0;
   background: var(--muted);
+}
+
+/* Con comparación: la barra de antes detrás, a todo el ancho; la de ahora encima, más angosta. */
+.barra:has(> .antes) > span:not(.antes) {
+  width: 62%;
+}
+
+.barra > span.antes {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  background: var(--card2);
+}
+
+.barra.activa > span.antes,
+.barra:focus-visible > span.antes {
+  background: var(--hair);
+}
+
+.barras figcaption > span:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e1) var(--e4);
+}
+
+.barras-leyenda {
+  display: inline-flex;
+  gap: var(--e3);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.barras-leyenda > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.muestra {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+}
+
+.muestra.ahora {
+  background: var(--muted);
+}
+
+.muestra.antes {
+  border: 1px solid var(--line);
+  background: var(--card2);
 }
 
 .barra.activa > span,

@@ -132,6 +132,8 @@ pub struct CuentaFila {
     pub telefono: Option<String>,
     pub fecha: String,
     pub fecha_limite: Option<String>,
+    /// Qué se apartó, en palabras del cajero (opcional).
+    pub descripcion: Option<String>,
     pub total: i64,
     pub saldo: i64,
     pub abonado: i64,
@@ -400,8 +402,29 @@ pub async fn choques_con_apartados(c: &mut SqliteConnection, sucursal_id: &str, 
 
 /// `monto`: lo que abona hoy (lo aplicado, sin el vuelto). `pagos`: cómo lo paga (igual que el cobro).
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)] // solo las pruebas apartan sin descripción; la app usa `crear_apartado_con`
 pub async fn crear_apartado(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, monto: i64, pagos: &[PagoEntrada], operacion_id: &str) -> Res<ResultadoAbono> {
+    crear_apartado_con(pool, a, caja_id, espera_id, est, monto, pagos, operacion_id, None).await
+}
+
+/// Igual que `crear_apartado`, con la descripción de lo que se aparta (opcional, hasta 200 letras).
+#[allow(clippy::too_many_arguments)]
+pub async fn crear_apartado_con(
+    pool: &SqlitePool,
+    a: &Actor,
+    caja_id: &str,
+    espera_id: &str,
+    est: &Estado,
+    monto: i64,
+    pagos: &[PagoEntrada],
+    operacion_id: &str,
+    descripcion: Option<&str>,
+) -> Res<ResultadoAbono> {
     a.exigir("cuentas", "crear apartados")?;
+    let descripcion = descripcion.map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|d| !d.is_empty());
+    if descripcion.as_ref().is_some_and(|d| d.chars().count() > 200) {
+        return Err("La descripción del apartado es muy larga (máximo 200 letras)".into());
+    }
     operacion_valida(operacion_id)?;
     if let Some(r) = ya_registrado(pool, operacion_id).await? {
         return Ok(r);
@@ -481,8 +504,8 @@ pub async fn crear_apartado(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_
     let saldo = tot.total - monto;
     sqlx::query(
         "INSERT INTO cuentas (id, sucursal_id, caja_id, tipo, cliente_id, usuario_id, fecha, total, saldo, estado, numero, consecutivo, turno_id, fecha_limite,
-           subtotal, descuento, redondeo, descuento_autorizado_por, requiere_factura, espera_id, creado_en, actualizado_en)
-         VALUES (?, ?, ?, 'apartado', ?, ?, ?, ?, ?, 'abierta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+           subtotal, descuento, redondeo, descuento_autorizado_por, requiere_factura, espera_id, creado_en, actualizado_en, descripcion)
+         VALUES (?, ?, ?, 'apartado', ?, ?, ?, ?, ?, 'abierta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&cuenta_id)
     .bind(&sucursal)
@@ -504,6 +527,7 @@ pub async fn crear_apartado(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_
     .bind(espera_id)
     .bind(&fecha)
     .bind(&fecha)
+    .bind(&descripcion)
     .execute(&mut *tx)
     .await
     .map_err(e)?;
@@ -987,7 +1011,7 @@ pub async fn prorrogar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, fecha_limi
 
 // ─────────── Consultas ───────────
 
-const SELECT_FILA: &str = "SELECT k.id, k.numero, k.tipo, k.estado, k.cliente_id, c.nombre AS cliente, c.telefono, k.fecha, k.fecha_limite, k.total, k.saldo, k.condonado
+const SELECT_FILA: &str = "SELECT k.id, k.numero, k.tipo, k.estado, k.cliente_id, c.nombre AS cliente, c.telefono, k.fecha, k.fecha_limite, k.descripcion, k.total, k.saldo, k.condonado
   FROM cuentas k JOIN clientes c ON c.id = k.cliente_id";
 
 fn a_fila(f: &sqlx::sqlite::SqliteRow, hoy: NaiveDate) -> CuentaFila {
@@ -1008,6 +1032,7 @@ fn a_fila(f: &sqlx::sqlite::SqliteRow, hoy: NaiveDate) -> CuentaFila {
         telefono: f.get("telefono"),
         fecha: f.get("fecha"),
         fecha_limite: limite,
+        descripcion: f.get("descripcion"),
         abonado: total - saldo - f.get::<i64, _>("condonado"),
         total,
         saldo,
@@ -1023,7 +1048,7 @@ pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str) -> Res<Vec<CuentaFila
     let like = format!("%{}%", normalizar(q));
     let filas = sqlx::query(&format!(
         "{SELECT_FILA} WHERE k.eliminado_en IS NULL AND k.estado IN ('abierta', 'pagada') AND (k.tipo = 'credito' OR k.estado = 'abierta' OR k.fecha_entrega IS NULL)
-           AND (?1 = '' OR k.consecutivo = ?2 OR c.nombre_busqueda LIKE ?3 OR c.telefono LIKE ?4 OR c.cedula LIKE ?4)
+           AND (?1 = '' OR k.consecutivo = ?2 OR c.nombre_busqueda LIKE ?3 OR c.telefono LIKE ?4 OR c.cedula LIKE ?4 OR k.descripcion LIKE ?4)
          ORDER BY k.fecha DESC LIMIT 50"
     ))
     .bind(q)

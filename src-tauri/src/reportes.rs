@@ -68,6 +68,12 @@ pub fn periodo_anterior(desde: NaiveDate, hasta: NaiveDate) -> (NaiveDate, Naive
     (desde - chrono::Duration::days(n), desde - chrono::Duration::days(1))
 }
 
+/// Las mismas fechas del año pasado (19 nov → 19 nov). Un 29 de febrero pasa al 28.
+pub fn mismo_periodo_anio_pasado(desde: NaiveDate, hasta: NaiveDate) -> (NaiveDate, NaiveDate) {
+    let atras = |d: NaiveDate| d.checked_sub_months(chrono::Months::new(12)).unwrap_or(d);
+    (atras(desde), atras(hasta))
+}
+
 // ─────────── Tipos ───────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -227,6 +233,12 @@ pub struct Reporte {
     pub turnos: i64,
     pub totales: Totales,
     pub anterior: Totales,
+    /// Las mismas fechas del año pasado.
+    pub anio_desde: String,
+    pub anio_hasta: String,
+    pub anio: Totales,
+    /// Ventas por día del año pasado (solo día, tiquetes y ventas), para comparar día con día.
+    pub por_dia_anio: Vec<PorDia>,
     pub por_dia: Vec<PorDia>,
     pub por_departamento: Vec<Fila>,
     pub por_producto: Vec<Fila>,
@@ -320,6 +332,18 @@ pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> R
     let mut r = Reporte { desde: desde.into(), hasta: hasta.into(), anterior_desde: p0.to_string(), anterior_hasta: p1.to_string(), ..Default::default() };
     r.totales = totales(&mut c, desde, hasta).await?;
     r.anterior = totales(&mut c, &r.anterior_desde, &r.anterior_hasta).await?;
+    let (a0, a1) = mismo_periodo_anio_pasado(d0, d1);
+    (r.anio_desde, r.anio_hasta) = (a0.to_string(), a1.to_string());
+    r.anio = totales(&mut c, &r.anio_desde, &r.anio_hasta).await?;
+    r.por_dia_anio = sqlx::query_as::<_, (String, i64, i64)>(&(ventas_sql("t.dia, COUNT(*), SUM(v.total)") + " GROUP BY t.dia ORDER BY t.dia"))
+        .bind(&r.anio_desde)
+        .bind(&r.anio_hasta)
+        .fetch_all(&mut *c)
+        .await
+        .map_err(e)?
+        .into_iter()
+        .map(|(dia, tiquetes, ventas)| PorDia { dia, tiquetes, ventas, ..Default::default() })
+        .collect();
 
     // Turnos cerrados del rango: control contra su Z congelado (misma regla) y diferencias de caja.
     let turnos = sqlx::query(
