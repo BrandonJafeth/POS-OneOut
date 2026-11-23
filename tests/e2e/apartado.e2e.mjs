@@ -114,11 +114,33 @@ try {
   await ver("A-0001 liquidado");
   await b.keys(["Enter"]);
 
+  paso("proforma (F11): se guarda e imprime, la pestaña queda ligada y al cobrar (F12) se convierte");
+  await escribir("input[placeholder='Buscar o escanear producto']", "7501234567893");
+  await b.keys(["Enter"]);
+  await ver("Retablo tallado");
+  await b.keys(["F11"]);
+  await ver("Guardar como proforma");
+  await captura("12-proforma-guardar");
+  await b.keys(["Enter"]); // sin nombre: Enter guarda e imprime
+  await ver("Proforma P-0001"); // la pestaña (y el aviso) dicen el número
+  await b.keys(["F12"]);
+  await ver("Confirmar cobro");
+  await b.keys(["Enter"]); // efectivo exacto
+  await ver("cobrada");
+  await b.keys(["Escape"]); // cierra "Venta … cobrada"
+  await b.waitUntil(async () => (await b.$$("dialog[open]")).length === 0, { timeout: 10000, timeoutMsg: "No se cerró la venta cobrada" });
+  await boton("Proformas", true);
+  await boton("Convertidas");
+  await (await b.$("tr*=P-0001")).waitForDisplayed({ timeout: 10000 });
+  await captura("13-proforma-convertida");
+  await boton("Venta", true);
+
   paso("cierra la caja: el abono y la venta del apartado salen en el Z");
   await boton("Caja", true);
   await boton("Cerrar caja");
   await boton("Escribir el total");
-  await b.keys(["2", "0", "0", "0", "0"]);
+  // ¢20.000 del apartado + ¢20.000 de la venta que convirtió la proforma.
+  await b.keys(["4", "0", "0", "0", "0"]);
   await boton("Listo, revisar el conteo");
   await boton("Confirmar y cerrar");
   await ver("Dinero recibido");

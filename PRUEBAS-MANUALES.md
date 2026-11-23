@@ -227,7 +227,36 @@ Antes, como Ana: **Apartados → Opciones**, escriba las condiciones (por ejempl
 13. **Ajustar, condonar, prorrogar.** Ajuste −¢500 (motivo y PIN) → el saldo baja. Condonar → se liquida con ese descuento y sale la venta. Prorrogar a otra fecha → cambia «Vence».
 14. **Vencido.** Ponga la fecha de Windows después de la fecha límite de un apartado abierto. → En el menú, Apartados muestra un contador; la pestaña **Vencidos** lo lista con los días de atraso. No se cancela solo.
 15. **Ley 8968.** En Clientes, intente anonimizar a Marta con un apartado abierto. → Lo rechaza. En la bitácora, `cuenta.abono` y `cuenta.cancelar` no llevan nombre ni teléfono.
-16. **Crédito** (solo en un negocio con `usa_credito`, Técnico → Configuración). Sin límite: cobro → «Dejar ¢… a crédito» → «no alcanza». Como Ana, en Apartados → Crédito → un cliente → **Límite de crédito** ¢50.000 (PIN). Venda con prima de ¢10.000 y deje el resto a crédito → C-0001; abónelo con F10. En el Z: «Ventas a crédito (por cobrar)».
+16. **Prorrogar pide PIN.** Prorrogar sin PIN o con uno equivocado → no deja. Con PIN y motivo → cambia «Vence».
+17. **Condonar con la caja cerrada.** Con la caja cerrada, Condonar un apartado → «Para condonar, abra la caja primero (se registra una venta)» y el botón no se activa.
+18. **Qué se aparta.** El campo dice «Describa el producto. No escriba datos personales del cliente.» y no acepta más de 200 letras.
+
+## V. Crédito (solo en un negocio con crédito; en Chaguí queda apagado)
+
+Antes, como técnico: **Técnico → Claves de configuración**, `usa_credito` → `true`.
+
+1. **Opciones (Ana).** Apartados → Opciones → **Crédito**: límite general ¢100.000, 30 días, «Solo días de trabajo», condiciones «Pague el saldo antes de la fecha límite», PIN. → Guardado. Sin PIN no deja. «Preparar para el cliente» marca Crédito como listo.
+2. **Límite por cliente sin cuenta previa.** Clientes → un cliente → **Cambiar límite** ¢25.000 (PIN). → «Límite de crédito: ¢25.000». La bitácora no guarda el monto.
+3. **Crédito disponible.** Como Luis, venta de ¢30.000 con ese cliente (F7) → F12. → «Crédito disponible: ¢25.000». Pague ¢5.000 y **Dejar ¢25.000 a crédito**. Con ¢4.000 pagados → «no alcanza» y el botón no se activa.
+4. **Comprobante.** Salen el tiquete y el comprobante **C-0001**: total ¢30.000, pagado hoy, saldo, «Pagar antes del …» (nunca un domingo con días de trabajo), condiciones y «Firma del cliente». No dice «pagaré».
+5. **Estado de cuenta (Ana).** Clientes → el cliente → **Estado de cuenta**: el crédito y sus apartados abiertos, cada abono con fecha y hora, y el total adeudado. **Imprimir** (térmica) y **PDF**. Como Luis no aparece.
+6. **Ajuste hacia arriba.** Ajuste +¢1.000 al crédito (PIN). → El saldo sube ¢1.000; «Condonado» no aparece negativo.
+7. **El Z y los reportes.** «Ventas a crédito (por cobrar)» en el Z; en Reportes → Formas de pago, la fila «A crédito (por cobrar)» y las formas suman lo vendido.
+
+## W. Proformas
+
+1. **Crear (Luis, sin caja abierta).** Agregue productos, un descuento de línea y pulse **F11** (o el botón **Proforma**). Escriba un nombre («Pedro») → **Guardar e imprimir**. → Sale «PROFORMA P-0001», «Válida hasta el …» (8 días de trabajo), detalle, total, condiciones y la leyenda «Proforma. No es una factura ni un comprobante de pago. Precios sujetos a existencia.». No abre la gaveta ni baja la existencia. La pestaña dice «Proforma P-0001».
+2. **Cobrar sin cambios.** Abra la caja y en esa pestaña F12 → cobre. → Proformas → Convertidas: P-0001 con la venta. El Z tiene la venta, no la proforma.
+3. **Cambiar y cobrar.** Otra proforma; después de guardarla, cambie una cantidad. → Aviso «La venta ya no coincide con la proforma P-0002». F12 → elegir **Guardar como nueva versión (P-0002-2) y cobrar** o **Cobrar sin ligar**. La versión anterior queda «Reemplazada».
+4. **Descartar.** Guarde una proforma y descarte la pestaña. → Sigue vigente en Proformas.
+5. **Pasar a venta.** Proformas → una vigente → **Pasar a venta**. → Abre una pestaña nueva ligada. Si el dueño subió un precio, se cobra el de la proforma. Con una vencida (cambie la fecha de Windows): aviso «venció el …» y precios de hoy, línea por línea.
+6. **Una sola vez.** Abra dos veces la misma proforma con Pasar a venta y cobre las dos pestañas. → La segunda dice que ya está convertida.
+7. **Apartar.** Una pestaña ligada → F9 → la proforma pasa a convertida (en el apartado).
+8. **Reimprimir y PDF.** → Sale «COPIA». El PDF carta lleva logo, datos y la leyenda.
+9. **Anular (Ana).** Con motivo. Luis no ve el botón.
+10. **Nombre escrito.** 30 días después de anularla o de que venza (fecha de Windows), la reimpresión dice «Cliente: no registrado». La bitácora y el reporte nunca muestran el nombre.
+11. **Reporte (Ana).** Reportes → Ventas → **Proformas**: emitidas, convertidas, vencidas y anuladas con montos. No suman a las ventas.
+12. **Opciones (Ana).** Proformas → Opciones: vigencia, días, precio al convertir, condiciones y días para borrar el nombre.
 
 ## U. Reportes y cierres de caja
 

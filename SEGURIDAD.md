@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.9.0 (versión de prueba en el negocio), con las migraciones 1 a 21.
+Aplica a la versión 0.9.2 (versión de prueba en el negocio), con las migraciones 1 a 24.
 
 ## 1. Modelo de amenazas
 
@@ -123,6 +123,12 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - Lo apartado no se vende sin el PIN del dueño (aunque se permita vender sin existencia).
 - Cancelar, ajustar, condonar, anular un abono y el límite de crédito: solo el dueño, con PIN y motivo. La bitácora guarda ids, montos de la operación y motivo; **no** guarda el límite de crédito ni la lista de pagos de un cliente.
 - No se anonimiza un cliente con saldo pendiente ni con un apartado pagado sin entregar.
+
+### Proformas (0.9.2)
+- `proformas.rs` decide todo. Una proforma no mueve dinero, no abre la gaveta, no toca ni reserva inventario y no entra al Z ni a las ventas (prueba `una_proforma_no_toca_dinero_inventario_ni_z…`).
+- Permisos: `proformas` (cajero y dueño: crear, buscar, imprimir, pasar a venta), `proformas.anular` y `proformas.admin` (solo dueño). El técnico no entra.
+- Se convierte dentro de la transacción del cobro o del apartado, solo si la venta coincide con la proforma; índices únicos en `ventas.proforma_id` y `cuentas.proforma_id`: nunca dos veces, ni con doble clic ni reabriéndola. El precio de la proforma solo se acepta si está vigente y la opción lo permite; si no, el del catálogo.
+- Ley 8968: el nombre escrito (sin cliente guardado) queda solo en la proforma y se borra solo a los N días (`proforma_retencion_nombre_dias`); no va a la bitácora ni a los reportes. Un cliente guardado necesita su consentimiento.
 
 ### Reportes de ventas
 - Permiso nuevo `reportes.ventas`, solo del dueño. El técnico conserva `reportes` para la bitácora, pero no ve ventas (llevan nombres de clientes). El cajero nunca.

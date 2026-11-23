@@ -132,11 +132,17 @@ los anteriores.
 7. Restaurar respaldos viejos con la migración 24.
 8. e2e: proforma → imprimir → convertir en venta → cobrar.
 
-## Decisiones que necesito de ti
+## Decisiones (aprobadas el 2026-11-23)
 
-1. **Atajo F11** y botón «Proforma» en la fila de Descuento/Apartar. (¿Otro?)
-2. **Al guardar, la pestaña se cierra** (como al apartar). Alternativa: dejarla abierta por si el cliente compra ya.
-3. **Precio al convertir una vigente: el de la proforma** por defecto (configurable).
-4. **Nombre libre no se guarda** (reimpresión sin nombre). Alternativa: guardarlo, pero entonces entra en Ley 8968.
-5. **No hace falta la caja abierta** para crear ni imprimir una proforma (no mueve dinero). Para convertir, sí (es una venta).
-6. **Anular sin PIN** (solo motivo, solo dueño).
+1. **F11** y botón «Proforma» junto a Descuento y Apartar.
+2. **Al guardar, la pestaña queda abierta y ligada** («Proforma P-0012» en la pestaña). Cobrar (F12) o apartar (F9)
+   sin cambios la convierte en la misma transacción. Si cambian líneas, cantidades o descuentos: aviso «La venta ya no
+   coincide con la proforma P-0012» y, al cobrar o apartar, se elige «Guardar como nueva versión (P-0012-2) y cobrar»
+   o «Cobrar sin ligar a la proforma». Descartar la pestaña deja la proforma vigente.
+3. **Precio al convertir una vigente: el de la proforma** por defecto (`proforma_precio_al_convertir`). Vencida: precio
+   de hoy con aviso por línea.
+4. **Nombre escrito:** se guarda solo en esa proforma (no crea cliente) y se **borra solo** N días después de que vence,
+   se convierte o se anula (`proforma_retencion_nombre_dias`, 30). Después la reimpresión dice «Cliente: no
+   registrado». No va a la bitácora ni a los reportes. (Cambia lo dicho en §10.)
+5. **Caja abierta** solo para convertir.
+6. **Anular:** permiso `proformas.anular` (solo dueño por defecto), con motivo y sin PIN.
