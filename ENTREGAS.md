@@ -3,7 +3,7 @@
 Cada instalador entregado, con su SHA-256. Antes de instalar, compare (PowerShell, en la carpeta del instalador):
 
 ```powershell
-Get-FileHash ".\Punto de Venta_0.9.1_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\Punto de Venta_0.9.2_x64-setup.exe" -Algorithm SHA256
 ```
 
 Ningún instalador repite número de versión: con el SHA-256 de una versión anotado aquí, `build.rs` no deja
@@ -12,6 +12,22 @@ compilar otro instalador con ese número (hay que subir la versión).
 Si el hash no coincide, **no lo instale**: avise al técnico. Los instaladores no están firmados; Windows
 SmartScreen avisa «Windows protegió su PC» → **Más información → Ejecutar de todas formas**. No desactive el
 antivirus.
+
+## 0.9.2 — crédito completo, huecos de cuentas y proformas (2026-11-23)
+
+| | |
+|---|---|
+| Archivo | `Punto de Venta_0.9.2_x64-setup.exe` (NSIS, por usuario, 4,56 MiB) |
+| SHA-256 | `680c9607da74e5f58a3e641b7961b37533ba3fbdfe241f357df1f04b9083e27e` |
+| Commit | `e9d3bc8` (rama `entrega-0.9.1`; el código es el de `02514a3`, los commits siguientes solo tocan `.impeccable/hook.cache.json`) |
+| Migraciones | 1 a 24 |
+| Respaldo | `POSBAK02` (fixture `tests/fixtures/respaldo-v0.9.2-m24.posbak`) |
+| Pruebas | `cargo test --lib` 170 ok (1 ignorada: genera fixture) · `npm test` 217 ok · `tsc` sin errores · e2e 10 de 10 |
+
+Cambios desde 0.9.1:
+- Crédito completo (apagado en Chaguí): opciones del dueño con PIN, límite por cliente desde su ficha, estado de cuenta (térmica y PDF), «Crédito disponible» en el cobro, comprobante de crédito además del tiquete, fecha límite con días de trabajo.
+- Huecos: prorrogar con PIN, ayuda en «Qué se aparta», mensaje claro al condonar con la caja cerrada, ajuste de crédito sin condonado negativo.
+- Proformas (migración 24): F11 o botón «Proforma», P-0001 y versiones, vigencia, pasar a venta o apartado (una sola vez), reimpresión COPIA y PDF, anular (dueño), reporte, nombre escrito que se borra solo.
 
 ## 0.9.1 — cierre de apartados y reportes, claridad de abonos (2026-11-20)
 
