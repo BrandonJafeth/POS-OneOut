@@ -3,13 +3,15 @@
 import type { AbonoFila } from "../generados/AbonoFila";
 import type { CuentaDetalle } from "../generados/CuentaDetalle";
 import type { CuentaFila } from "../generados/CuentaFila";
+import type { EstadoCuenta } from "../generados/EstadoCuenta";
+import type { OpcionesCredito } from "../generados/OpcionesCredito";
 import type { Reglas } from "../generados/Reglas";
 import type { ResultadoAbono } from "../generados/ResultadoAbono";
 import { invocar } from "../lib/invocar";
 import { ulid } from "../lib/ulid";
 import type { EstadoEspera, PagoEntrada } from "../tipos";
 
-export type { AbonoFila, CuentaDetalle, CuentaFila, Reglas, ResultadoAbono };
+export type { AbonoFila, CuentaDetalle, CuentaFila, EstadoCuenta, OpcionesCredito, Reglas, ResultadoAbono };
 
 export const reglasCuentas = () => invocar<Reglas>("cuentas_reglas");
 
@@ -38,8 +40,14 @@ export const cancelarApartado = (cuentaId: string, pin: string, motivo: string, 
   invocar<void>("cuenta_cancelar", { cuentaId, pin, motivo, devuelto, enEfectivo });
 export const ajustarCuenta = (cuentaId: string, cambio: number, pin: string, motivo: string) => invocar<void>("cuenta_ajustar", { cuentaId, cambio, pin, motivo });
 export const condonarCuenta = (cuentaId: string, pin: string, motivo: string, entregar: boolean) => invocar<string | null>("cuenta_condonar", { cuentaId, pin, motivo, entregar });
-export const prorrogarCuenta = (cuentaId: string, fechaLimite: string, motivo: string) => invocar<void>("cuenta_prorrogar", { cuentaId, fechaLimite, motivo });
+export const prorrogarCuenta = (cuentaId: string, fechaLimite: string, motivo: string, pin: string) => invocar<void>("cuenta_prorrogar", { cuentaId, fechaLimite, motivo, pin });
 export const anularAbono = (abonoId: string, pin: string, motivo: string, devolucionEfectivo: number) => invocar<void>("abono_anular", { abonoId, pin, motivo, devolucionEfectivo });
 export const fijarLimiteCredito = (clienteId: string, limite: number | null, pin: string) => invocar<void>("cliente_limite_credito", { clienteId, limite, pin });
-/** El cajero solo sabe si alcanza; nunca el límite ni lo que debe el cliente. */
-export const creditoAlcanza = (clienteId: string, monto: number) => invocar<boolean>("credito_alcanza", { clienteId, monto });
+/** Límite propio del cliente (null = el del negocio). Solo el dueño. */
+export const limiteCliente = (clienteId: string) => invocar<number | null>("cliente_limite_obtener", { clienteId });
+/** Cuánto crédito le queda al cliente. El cajero ve solo esto; nunca el límite ni lo que debe. */
+export const creditoDisponible = (clienteId: string) => invocar<number>("credito_disponible", { clienteId });
+export const opcionesCredito = () => invocar<OpcionesCredito>("credito_opciones");
+export const guardarOpcionesCredito = (opciones: OpcionesCredito, pin: string) => invocar<void>("credito_guardar_opciones", { opciones, pin });
+/** Créditos y apartados abiertos de un cliente, con abonos y total adeudado. Solo el dueño. */
+export const estadoCuenta = (clienteId: string) => invocar<EstadoCuenta>("cliente_estado_cuenta", { clienteId });

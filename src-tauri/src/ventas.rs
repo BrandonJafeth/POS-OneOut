@@ -277,6 +277,8 @@ pub struct ResultadoCobro {
     /// Hay efectivo y la caja abre la gaveta con las ventas (config abrir_gaveta_efectivo):
     /// la pantalla pide abrirla (gaveta_venta) después de imprimir.
     pub abrir_gaveta: bool,
+    /// Venta a crédito: la cuenta que quedó por cobrar (su comprobante se imprime además del tiquete).
+    pub cuenta_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -467,10 +469,12 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .await
         .map_err(e)?;
     inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
-    if credito {
+    let cuenta_id = if credito {
         let cliente = est.cliente.as_ref().map(|c| c.id.as_str()).unwrap_or_default();
-        crate::cuentas::abrir_credito(&mut tx, a, &t, &venta_id, cliente, &e2.lineas, &catalogo, rp.faltante, &fecha).await?;
-    }
+        Some(crate::cuentas::abrir_credito(&mut tx, a, &t, &venta_id, cliente, &e2.lineas, &catalogo, rp.faltante, &fecha).await?)
+    } else {
+        None
+    };
     if !sin_existencia.is_empty() {
         bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
     }
@@ -488,7 +492,7 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     }
     let efectivo: Vec<&str> = fs.iter().filter(|f| f.da_vuelto).map(|f| f.id.as_str()).collect();
     let hay_efectivo = rp.aplicados.iter().any(|x| efectivo.contains(&x.pago.forma_pago_id.as_str()));
-    Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo, abrir_gaveta: hay_efectivo && gaveta })
+    Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo, abrir_gaveta: hay_efectivo && gaveta, cuenta_id })
 }
 
 /// % de descuento que cuenta contra el tope del rol (sin la parte fija del producto).

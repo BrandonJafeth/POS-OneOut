@@ -11,4 +11,9 @@ plazoTipo: string,
 /**
  * "devolver" o "retener" (saldo a favor queda diseñado, apagado).
  */
-cancelacion: string, retencionPct: number, condiciones: string, };
+cancelacion: string, retencionPct: number, condiciones: string, 
+/**
+ * Crédito: plazo para pagar, cómo se cuentan los días y condiciones impresas. Los límites NO van
+ * aquí (las reglas las ve el cajero): están en OpcionesCredito, solo para el dueño.
+ */
+creditoPlazoDias: number, creditoPlazoTipo: string, creditoCondiciones: string, };

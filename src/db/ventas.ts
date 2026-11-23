@@ -41,6 +41,8 @@ export interface ResultadoCobro {
   hayEfectivo: boolean;
   /** Hay efectivo y la caja abre la gaveta con las ventas: pedir gaveta_venta después de imprimir. */
   abrirGaveta: boolean;
+  /** Venta a crédito: la cuenta que quedó por cobrar (se imprime su comprobante). */
+  cuentaId?: string | null;
 }
 
 /** Rust rechaza el cobro con este prefijo si falta existencia y la configuración no deja vender sin ella. */

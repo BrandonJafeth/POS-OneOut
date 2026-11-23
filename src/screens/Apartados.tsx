@@ -12,17 +12,21 @@ import {
   cancelarApartado,
   condonarCuenta,
   fijarLimiteCredito,
+  guardarOpcionesCredito,
   listarCuentas,
   obtenerCuenta,
+  opcionesCredito,
   prorrogarCuenta,
   reglasCuentas,
   type AbonoFila,
   type CuentaDetalle,
   type CuentaFila,
   type FiltroCuentas,
+  type OpcionesCredito,
   type Reglas,
 } from "../db/cuentas";
 import { guardarConfig } from "../db/config";
+import Alert from "../ui/Alert";
 import { AYUDA_ABONOS } from "../lib/caja/reporteZ";
 import { imprimirComprobante } from "../lib/cuentas/imprimir";
 import AyudaInfo from "../ui/AyudaInfo";
@@ -81,7 +85,20 @@ export default function Apartados() {
       </div>
       <Mensaje error={error} />
       {tab === "opciones" ? (
-        reglas && <Opciones reglas={reglas} onGuardado={() => void reglasCuentas().then(setReglas)} />
+        reglas && (
+          <>
+            <section className="card">
+              <h2>Apartados</h2>
+              <Opciones reglas={reglas} onGuardado={() => void reglasCuentas().then(setReglas)} />
+            </section>
+            {config.usa_credito && (
+              <section className="card">
+                <h2>Crédito</h2>
+                <OpcionesDeCredito onGuardado={() => void reglasCuentas().then(setReglas)} />
+              </section>
+            )}
+          </>
+        )
       ) : lista === null ? (
         <p className="muted">Cargando…</p>
       ) : lista.length === 0 ? (
@@ -329,7 +346,11 @@ function DialogoAccion(p: { accion: Accion; d: CuentaDetalle; reglas: Reglas; on
   const [error, setError] = useState("");
   const n = leerMontoEntero(montoTxt) ?? 0;
   const ef = leerMontoEntero(efectivoTxt) ?? 0;
-  const conPin = a.tipo !== "prorrogar";
+  // Todas cambian lo prometido al cliente o el dinero: todas piden el PIN del dueño.
+  const conPin = true;
+  // Condonar un apartado registra una venta: sin caja abierta, se dice antes de pedir el PIN.
+  const { caja } = useSesion();
+  const sinCaja = a.tipo === "condonar" && k.tipo === "apartado" && !caja?.turno;
   const titulo = { cancelar: "Cancelar apartado", ajustar: "Ajustar saldo", condonar: "Condonar saldo", prorrogar: "Prorrogar", limite: "Límite de crédito", anular: "Anular abono" }[a.tipo];
 
   async function enviar() {
@@ -344,7 +365,7 @@ function DialogoAccion(p: { accion: Accion; d: CuentaDetalle; reglas: Reglas; on
         await condonarCuenta(k.id, pin, motivo, true);
         return p.onHecho(`Saldo de ${monto(k.saldo)} condonado.`);
       case "prorrogar":
-        await prorrogarCuenta(k.id, fechaNueva, motivo);
+        await prorrogarCuenta(k.id, fechaNueva, motivo, pin);
         return p.onHecho("Fecha límite cambiada.");
       case "limite":
         await fijarLimiteCredito(k.clienteId, montoTxt.trim() ? n : null, pin);
@@ -400,7 +421,8 @@ function DialogoAccion(p: { accion: Accion; d: CuentaDetalle; reglas: Reglas; on
             </Field>
           </>
         )}
-        {a.tipo === "condonar" && <p>Se perdona el saldo de {monto(k.saldo)}. {k.tipo === "apartado" ? "El apartado se liquida y se entrega (necesita la caja abierta)." : "El crédito queda pagado."}</p>}
+        {a.tipo === "condonar" && <p>Se perdona el saldo de {monto(k.saldo)}. {k.tipo === "apartado" ? "El apartado se liquida y se entrega." : "El crédito queda pagado."}</p>}
+        {sinCaja && <Alert tono="aviso">Para condonar, abra la caja primero (se registra una venta).</Alert>}
         {a.tipo === "prorrogar" && (
           <Field label="Nueva fecha límite">
             <input type="date" autoFocus value={fechaNueva} onChange={(e) => setFechaNueva(e.target.value)} />
@@ -433,12 +455,73 @@ function DialogoAccion(p: { accion: Accion; d: CuentaDetalle; reglas: Reglas; on
         )}
         <Mensaje error={error} />
         <div className="fila-botones">
-          <Button type="submit" variante={a.tipo === "cancelar" ? "peligro" : "primario"} disabled={ocupado || (conPin && !pin) || (a.tipo !== "limite" && motivo.trim().length < 5)}>
+          <Button type="submit" variante={a.tipo === "cancelar" ? "peligro" : "primario"} disabled={ocupado || sinCaja || (conPin && !pin) || (a.tipo !== "limite" && motivo.trim().length < 5)}>
             {titulo}
           </Button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Crédito del negocio (dueño, con PIN): límite general, plazo y condiciones del comprobante. */
+function OpcionesDeCredito(p: { onGuardado(): void }) {
+  const toast = useToast();
+  const [o, setO] = useState<OpcionesCredito | null>(null);
+  const [limite, setLimite] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    opcionesCredito().then((x) => (setO(x), setLimite(conMiles(String(x.limiteDefecto)))), (e) => setError(textoError(e)));
+  }, []);
+  if (!o) return <Mensaje error={error} />;
+  const set = (x: Partial<OpcionesCredito>) => setO({ ...o, ...x });
+  return (
+    <form
+      className="formulario"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError("");
+        setOcupado(true);
+        try {
+          await guardarOpcionesCredito({ ...o, limiteDefecto: leerMontoEntero(limite) ?? 0 }, pin);
+          setPin("");
+          p.onGuardado();
+          toast.ok("Opciones de crédito guardadas.");
+        } catch (x) {
+          setPin("");
+          setError(textoError(x));
+        } finally {
+          setOcupado(false);
+        }
+      }}
+    >
+      <div className="row">
+        <Field label="Límite general" ayuda="Para quien no tiene límite propio. ¢0: solo compran a crédito los clientes con límite propio.">
+          <CampoMonto valor={limite} onCambio={setLimite} />
+        </Field>
+        <Field label="Plazo para pagar (días)">
+          <input className="small" inputMode="numeric" value={String(o.plazoDias)} onChange={(e) => set({ plazoDias: Number(e.target.value.replace(/\D/g, "").slice(0, 3)) || 0 })} />
+        </Field>
+        <Field label="Los días se cuentan">
+          <select value={o.plazoTipo} onChange={(e) => set({ plazoTipo: e.target.value })}>
+            <option value="calendario">Todos (calendario)</option>
+            <option value="laborables">Solo días de trabajo</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="Condiciones impresas en el comprobante de crédito" ayuda="Hasta 300 letras. Ejemplo: «Pague el saldo antes de la fecha límite.»">
+        <textarea rows={3} maxLength={300} value={o.condiciones} onChange={(e) => set({ condiciones: e.target.value })} />
+      </Field>
+      <Field label="PIN del dueño">
+        <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+      </Field>
+      <Mensaje error={error} />
+      <Button type="submit" variante="primario" disabled={ocupado || !pin}>
+        Guardar
+      </Button>
+    </form>
   );
 }
 

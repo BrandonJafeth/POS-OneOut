@@ -25,6 +25,7 @@ import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
 import { bruto, calcularTotales, conCantidad, conLinea, descuentoCatalogo, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
 import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
+import { imprimirTrasCobro } from "../lib/venta/trasCobro";
 import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
@@ -35,7 +36,7 @@ import Field from "../ui/Field";
 import ClienteVenta from "./venta/ClienteVenta";
 import AbonarApartado from "./venta/AbonarApartado";
 import Apartar from "./venta/Apartar";
-import { abonar, crearApartado, nuevaOperacion, reglasCuentas, type CuentaFila, type Reglas, type ResultadoAbono } from "../db/cuentas";
+import { abonar, crearApartado, creditoDisponible, nuevaOperacion, reglasCuentas, type CuentaFila, type Reglas, type ResultadoAbono } from "../db/cuentas";
 import { abrirGavetaAbono, imprimirComprobante } from "../lib/cuentas/imprimir";
 import Cobro from "./venta/Cobro";
 import PrecioLibre from "./venta/PrecioLibre";
@@ -141,6 +142,15 @@ export default function Venta() {
   }, [productos, config.venta_mostrar_existencia]);
 
   const estado = activa?.estado ?? estadoVacio();
+  // Crédito disponible del cliente elegido: se pide al abrir el cobro (Rust vuelve a revisar al cobrar).
+  // Sin cliente o sin crédito en el negocio, nada cambia en el cobro.
+  const conCredito = !!(reglas?.usaCredito && estado.cliente && puede("cuentas"));
+  const [disponible, setDisponible] = useState<number | null>(null);
+  useEffect(() => {
+    setDisponible(null);
+    if (dialogo !== "cobro" || !conCredito || !estado.cliente) return;
+    creditoDisponible(estado.cliente.id).then(setDisponible, () => setDisponible(null));
+  }, [dialogo, conCredito, estado.cliente?.id]);
   // Si la configuración no deja vender sin existencia, se avisa antes de cobrar (Rust lo revisa de nuevo al cobrar).
   const [faltan, setFaltan] = useState<string[]>([]);
   const cantidades = estado.lineas.map((l) => `${l.productoId}:${l.cantidad}`).join();
@@ -349,11 +359,10 @@ export default function Venta() {
       }
     }
     if (config.imprime_tiquete) {
-      try {
-        await imprimirVenta(r.ventaId, config);
-      } catch (e) {
-        errorImpresion = textoError(e);
-      }
+      errorImpresion = await imprimirTrasCobro(r, {
+        venta: (id) => imprimirVenta(id, config),
+        comprobanteCredito: (id) => imprimirComprobante(id, config, { tipo: "credito", condiciones: reglas?.creditoCondiciones }),
+      });
     }
     setDialogo(null);
     setCobrada({ ...r, errorImpresion, errorGaveta });
@@ -863,7 +872,8 @@ export default function Venta() {
           bancos={bancos}
           onCerrar={() => setDialogo(null)}
           onCobrar={cobrar}
-          onCredito={reglas?.usaCredito && estado.cliente && puede("cuentas") ? (pagos) => cobrar(pagos, undefined, true) : undefined}
+          onCredito={conCredito ? (pagos) => cobrar(pagos, undefined, true) : undefined}
+          creditoDisponible={disponible}
         />
       )}
       {dialogo === "apartar" && estado.cliente && caja?.turno && reglas && (

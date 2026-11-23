@@ -55,7 +55,7 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
 /// Claves que cambian cobros, el efectivo o el cierre: tipo y rango. Un valor de otro tipo no daba
 /// error: Rust usaba su valor por defecto y la pantalla el guardado (p. ej. redondeo "5" en texto:
 /// la pantalla no redondeaba y una tarjeta por el total mostrado pasaba del total cobrado).
-fn validar(clave: &str, v: &Value) -> Res<()> {
+pub(crate) fn validar(clave: &str, v: &Value) -> Res<()> {
     let entero = |min: i64, max: i64| match v.as_i64() {
         Some(n) if (min..=max).contains(&n) => Ok(()),
         _ => Err(format!("«{clave}»: debe ser un número entero de {min} a {max}")),
@@ -111,9 +111,13 @@ fn validar(clave: &str, v: &Value) -> Res<()> {
         "abono_minimo_pct" | "apartado_retencion_pct" => entero(0, 100),
         "apartado_plazo_dias" | "credito_plazo_dias" => entero(1, 365),
         "credito_limite_defecto" => entero(0, 100_000_000),
-        "apartado_plazo_tipo" => match v.as_str() {
+        "apartado_plazo_tipo" | "credito_plazo_tipo" => match v.as_str() {
             Some("calendario" | "laborables") => Ok(()),
-            _ => Err("«apartado_plazo_tipo»: \"calendario\" o \"laborables\"".into()),
+            _ => Err(format!("«{clave}»: \"calendario\" o \"laborables\"")),
+        },
+        "credito_condiciones" => match v.as_str() {
+            Some(t) if t.chars().count() <= 300 && !t.chars().any(|c| c.is_control() && c != '\n') => Ok(()),
+            _ => Err("Las condiciones del crédito: texto de hasta 300 letras".into()),
         },
         "apartado_cancelacion" => match v.as_str() {
             Some("devolver" | "retener") => Ok(()),

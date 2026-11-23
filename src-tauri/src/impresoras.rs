@@ -291,6 +291,12 @@ const LIMITE_IMPRESION: std::time::Duration = std::time::Duration::from_millis(3
 /// transacción: sin límite, una impresora USB trabada (sin papel, colgada) dejaba la base tomada y
 /// ningún cobro podía guardarse. shortcut: el hilo trabado queda esperando al driver; se libera al reiniciar.
 fn con_limite(i: &Impresora, datos: &[u8]) -> Res<()> {
+    // En pruebas, la impresora simulada contesta al instante salvo que esté "trabada": sin hilo ni
+    // límite de tiempo, el resultado no depende de lo cargada que esté la máquina.
+    #[cfg(test)]
+    if !printer::simulada::esta_trabada(&i.destino) {
+        return printer::enviar(&i.conexion, &i.destino, i.baudios as u32, datos);
+    }
     // Una impresora que sigue trabada con el trabajo anterior no recibe otro: se avisa al instante
     // en vez de dejar otro hilo esperando (se acumularían hasta reiniciar).
     {

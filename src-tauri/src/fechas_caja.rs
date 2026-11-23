@@ -561,12 +561,7 @@ async fn el_z_cuadra_en_cientos_de_turnos() {
                 corte(p, &dueno, CAJA_1, Some(&Retiro { monto: m, categoria: "Retiro de dinero".into(), nota: String::new() }), Some(PIN)).await.unwrap();
                 esperado -= m;
             }
-            // Con la máquina cargada la impresora de prueba puede pasar su límite (300 ms): la apertura
-            // queda registrada igual ("no contestó a tiempo"), que es lo que importa para el Z.
-            3 => crate::gaveta::no_venta(p, quien, CAJA_1, "Cambio de billetes", "", None)
-                .await
-                .or_else(|m| if m.contains(crate::impresoras::SIN_RESPUESTA) { Ok(()) } else { Err(m) })
-                .unwrap(),
+            3 => crate::gaveta::no_venta(p, quien, CAJA_1, "Cambio de billetes", "", None).await.unwrap(),
             _ => {}
         }
         // Cierre: el cajero cuenta a ciegas (a veces con diferencia).

@@ -44,3 +44,8 @@ export function validarAbono(saldo: number, monto: number, minimo: number | null
 export function creditoAlcanza(limite: number, saldo: number, nuevo: number): boolean {
   return limite > 0 && saldo + nuevo <= limite;
 }
+
+/** Crédito que le queda al cliente: límite menos lo que debe, nunca negativo. */
+export function creditoDisponible(limite: number, saldo: number): number {
+  return Math.max(0, limite - saldo);
+}

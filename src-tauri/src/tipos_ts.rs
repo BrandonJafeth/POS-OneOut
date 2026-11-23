@@ -29,6 +29,8 @@ fn tipos_de_typescript_al_dia() {
     escribir::<EventoFila>(&dir, &mut c);
     escribir::<CuentaDetalle>(&dir, &mut c);
     escribir::<ResultadoAbono>(&dir, &mut c);
+    escribir::<OpcionesCredito>(&dir, &mut c);
+    escribir::<EstadoCuenta>(&dir, &mut c);
     use crate::reportes as r;
     escribir::<r::Rangos>(&dir, &mut c);
     escribir::<r::Totales>(&dir, &mut c);

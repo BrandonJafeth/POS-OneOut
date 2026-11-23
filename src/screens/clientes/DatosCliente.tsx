@@ -14,7 +14,12 @@ import {
   type CuentaResumen,
   type MotivoAnonimizacion,
 } from "../../db/clientes";
+import { fijarLimiteCredito, limiteCliente } from "../../db/cuentas";
 import { obtenerNegocio } from "../../db/negocio";
+import { conMiles, leerMontoEntero } from "../../lib/texto";
+import CampoMonto from "../../ui/CampoMonto";
+import Field from "../../ui/Field";
+import EstadoCuentaCliente from "./EstadoCuentaCliente";
 import { csvCliente, descargar, pdfCliente } from "../../lib/exportarCliente";
 import { monto } from "../../lib/tickets";
 import { plural } from "../../lib/texto";
@@ -23,7 +28,8 @@ import { useToast } from "../../ui/Toast";
 import { useEnvio } from "../../ui/useEnvio";
 
 export default function DatosCliente(p: { clienteId: string; motivoSugerido?: MotivoAnonimizacion; onCerrar(): void; onCambio(): void }) {
-  const { actor } = useSesion();
+  const { actor, config } = useSesion();
+  const [estado, setEstado] = useState(false);
   const [c, setC] = useState<Cliente | null>(null);
   const [form, setForm] = useState<Cliente | null>(null);
   const [pendientes, setPendientes] = useState<CuentaResumen[]>([]);
@@ -126,6 +132,13 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
           Saldo pendiente: {pendientes.map((k) => `${k.tipo} ${monto(k.saldo)}`).join(", ")}
         </p>
       )}
+      {!anonimo && (config.usa_credito || pendientes.length > 0) && (
+        <div className="row">
+          {config.usa_credito && <LimiteCredito clienteId={c.id} />}
+          <button onClick={() => setEstado(true)}>Estado de cuenta</button>
+        </div>
+      )}
+      {estado && <EstadoCuentaCliente clienteId={c.id} onCerrar={() => setEstado(false)} />}
       <Mensaje error={error} />
       {!anonimo && (
         <div className="row">
@@ -157,6 +170,54 @@ export default function DatosCliente(p: { clienteId: string; motivoSugerido?: Mo
         />
       )}
     </Modal>
+  );
+}
+
+/** Límite de crédito propio del cliente (dueño, con PIN). No hace falta que ya tenga una cuenta. */
+function LimiteCredito(p: { clienteId: string }) {
+  const toast = useToast();
+  const [actual, setActual] = useState<number | null | undefined>(undefined);
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState("");
+  const [pin, setPin] = useState("");
+  const { ocupado, error, setError, enviar } = useEnvio();
+  const cargar = () => limiteCliente(p.clienteId).then(setActual, (e) => setError(textoError(e)));
+  useEffect(() => void cargar(), [p.clienteId]);
+  if (actual === undefined) return <Mensaje error={error} />;
+  if (!editando)
+    return (
+      <span className="row">
+        <span className="muted">Límite de crédito: {actual == null ? "el del negocio" : monto(actual)}</span>
+        <button onClick={() => (setValor(actual == null ? "" : conMiles(String(actual))), setEditando(true))}>Cambiar límite</button>
+      </span>
+    );
+  return (
+    <form
+      className="row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void enviar(async () => {
+          await fijarLimiteCredito(p.clienteId, valor.trim() ? (leerMontoEntero(valor) ?? 0) : null, pin);
+          await cargar();
+          setEditando(false);
+          toast.ok("Límite guardado.");
+        }).then((ok) => ok || setPin(""));
+      }}
+    >
+      <Field label="Límite de crédito" ayuda="Vacío: el del negocio. ¢0: sin crédito. No queda en la bitácora.">
+        <CampoMonto autoFocus valor={valor} onCambio={setValor} />
+      </Field>
+      <Field label="PIN del dueño">
+        <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+      </Field>
+      <Mensaje error={error} />
+      <button className="primary" disabled={!pin || ocupado}>
+        Guardar límite
+      </button>
+      <button type="button" onClick={() => setEditando(false)}>
+        Cancelar
+      </button>
+    </form>
   );
 }
 

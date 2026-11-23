@@ -90,13 +90,16 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("cuenta_abonar / liquidar", true, true, false),
     ("cuenta_entregar", true, true, false),
     ("cuenta_imprimir", true, true, false),
-    ("credito_alcanza", true, true, false),
+    ("credito_disponible", true, true, false),
     ("cuenta_listar / vencidas", false, true, false),
     ("cuenta_cancelar", false, true, false),
     ("cuenta_ajustar / condonar", false, true, false),
     ("abono_anular", false, true, false),
     ("cuenta_prorrogar", false, true, false),
     ("cliente_limite_credito", false, true, false),
+    ("cliente_limite_obtener", false, true, false),
+    ("cliente_estado_cuenta", false, true, false),
+    ("credito_opciones / guardar_opciones", false, true, false),
     ("reporte_rangos / ventas", false, true, false),
     ("respaldo_crear", false, true, false),
     ("respaldo_restaurar", false, true, false),
@@ -198,13 +201,16 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("cuenta_abonar / liquidar", denegado(cuentas::abonar(p, a, CAJA_1, x, 1, &[], "OP2", true).await));
     s("cuenta_entregar", denegado(cuentas::entregar(p, a, x).await));
     s("cuenta_imprimir", denegado(cuentas::imprimir(p, a, x, b"x").await));
-    s("credito_alcanza", denegado(cuentas::credito_alcanza_cliente(p, a, x, 1).await));
+    s("credito_disponible", denegado(cuentas::credito_disponible_cliente(p, a, x).await));
     s("cuenta_listar / vencidas", denegado(cuentas::listar(p, a, "abiertas").await));
     s("cuenta_cancelar", denegado(cuentas::cancelar(p, a, CAJA_1, x, "000000", "motivo largo", 0, 0).await));
     s("cuenta_ajustar / condonar", denegado(cuentas::ajustar(p, a, x, 1, "000000", "motivo largo").await));
     s("abono_anular", denegado(cuentas::anular_abono(p, a, CAJA_1, x, "000000", "motivo largo", 0).await));
-    s("cuenta_prorrogar", denegado(cuentas::prorrogar(p, a, x, "2099-01-01", "motivo largo").await));
+    s("cuenta_prorrogar", denegado(cuentas::prorrogar(p, a, x, "2099-01-01", "motivo largo", "000000").await));
     s("cliente_limite_credito", denegado(cuentas::fijar_limite(p, a, x, Some(1), "000000").await));
+    s("cliente_limite_obtener", denegado(cuentas::limite_cliente(p, a, x).await));
+    s("cliente_estado_cuenta", denegado(cuentas::estado_cuenta(p, a, x).await));
+    s("credito_opciones / guardar_opciones", denegado(cuentas::opciones_credito(p, a).await));
     s("reporte_rangos / ventas", denegado(crate::reportes::ventas(p, a, "2026-01-01", "2026-01-31").await));
     s("respaldo_crear", denegado(respaldo::crear(bd, a, "contrasena-larga").await));
     s("respaldo_restaurar", denegado(respaldo::restaurar(bd, a, "000000", b"x", "contrasena-larga", None).await));

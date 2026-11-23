@@ -7,7 +7,8 @@ import { EscPos } from "../escpos";
 import { escribirAvisoCorto, escribirEncabezado, escribirPie } from "../impresion";
 import { columnas, cortar, fechaHora, lr, lrLargo, monto, sep, sep2, type Doc, type TicketSettings, wrap } from "../tickets";
 
-export type TipoComprobante = "apartado" | "abono" | "cancelacion";
+/** "credito": la venta a crédito (además del tiquete), con condiciones y línea de firma del cliente. */
+export type TipoComprobante = "apartado" | "abono" | "cancelacion" | "credito";
 
 export interface OpcionesComprobante {
   tipo: TipoComprobante;
@@ -38,7 +39,8 @@ export function comprobanteCuenta(n: Negocio, d: CuentaDetalle, s: TicketSetting
   wrap("Cliente: " + k.cliente, c).forEach((l) => p.line(l));
   if (k.descripcion) wrap("Detalle: " + k.descripcion, c).forEach((l) => p.line(l));
   p.line(sep(c));
-  if (o.tipo === "apartado") {
+  const conDetalle = o.tipo === "apartado" || o.tipo === "credito";
+  if (conDetalle) {
     for (const l of d.lineas) {
       wrap(l.descripcion, c).forEach((w) => p.line(w));
       p.line(lr(`  ${l.cantidad} x ${monto(l.precioUnitario)}`, monto(l.cantidad * l.precioUnitario), c));
@@ -47,7 +49,14 @@ export function comprobanteCuenta(n: Negocio, d: CuentaDetalle, s: TicketSetting
     if (d.descuento) p.line(lr("Descuento", "-" + monto(d.descuento), c));
     p.line(sep(c));
   }
-  p.bold(true).line(lr("TOTAL", monto(k.total), c)).bold(false);
+  if (o.tipo === "credito") {
+    // La cuenta guarda lo que quedó por cobrar; el total y lo pagado hoy salen de la venta.
+    const venta = d.ventaTotal ?? k.total;
+    p.bold(true).line(lr("TOTAL", monto(venta), c)).bold(false);
+    p.line(lr("Pagado hoy", monto(venta - k.total), c));
+  } else {
+    p.bold(true).line(lr("TOTAL", monto(k.total), c)).bold(false);
+  }
   if (o.tipo === "abono" || o.tipo === "apartado") {
     const filas = d.abonos.filter((a) => !a.anulado && (o.operacionId ? a.operacionId === o.operacionId : false));
     for (const a of filas) lrLargo(`Abono ${a.forma}${a.referencia ? ` ref ${a.referencia}` : ""}`, monto(a.monto), c).forEach((l) => p.line(l));
@@ -63,17 +72,21 @@ export function comprobanteCuenta(n: Negocio, d: CuentaDetalle, s: TicketSetting
     p.line(lr("Devuelto", monto(d.devuelto), c));
     if (d.retenido) p.line(lr("Retenido", monto(d.retenido), c));
   } else {
-    p.line(lr("Total abonado", monto(k.abonado), c));
+    if (o.tipo !== "credito") p.line(lr("Total abonado", monto(k.abonado), c));
     p.bold(true).line(lr("SALDO", monto(k.saldo), c)).bold(false);
     if (k.saldo > 0 && k.fechaLimite) p.line(lr(credito ? "Pagar antes del:" : "Retirar antes del:", fechaCorta(k.fechaLimite), c));
   }
   p.line(lr("Atendió:", cortar(d.usuario, c - 9), c));
   p.line(sep2(c));
-  if (o.tipo === "apartado" && o.condiciones?.trim()) {
+  if (conDetalle && o.condiciones?.trim()) {
     wrap(o.condiciones.trim(), c).forEach((l) => p.line(l));
     p.line(sep(c));
   }
-  if (o.tipo === "apartado" && o.avisoPrivacidad) escribirAvisoCorto(p, n, c);
+  if (o.tipo === "credito") {
+    p.line("").line("").line("_".repeat(Math.min(c, 30))).line("Firma del cliente");
+    p.line(sep(c));
+  }
+  if (conDetalle && o.avisoPrivacidad) escribirAvisoCorto(p, n, c);
   if (o.textoNoFactura?.trim()) {
     p.align("center");
     wrap(o.textoNoFactura.trim(), c).forEach((l) => p.line(l));

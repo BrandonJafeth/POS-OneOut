@@ -338,6 +338,10 @@ pub mod simulada {
         con(|e| if trabada { e.trabadas.insert(destino.into()) } else { e.trabadas.remove(destino) });
     }
 
+    pub fn esta_trabada(destino: &str) -> bool {
+        con(|e| e.trabadas.contains(destino))
+    }
+
     pub fn trabajos(destino: &str) -> Vec<Vec<u8>> {
         con(|e| e.trabajos.get(destino).cloned().unwrap_or_default())
     }

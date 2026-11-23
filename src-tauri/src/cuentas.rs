@@ -45,6 +45,11 @@ pub struct Reglas {
     pub cancelacion: String,
     pub retencion_pct: i64,
     pub condiciones: String,
+    /// Crédito: plazo para pagar, cómo se cuentan los días y condiciones impresas. Los límites NO van
+    /// aquí (las reglas las ve el cajero): están en OpcionesCredito, solo para el dueño.
+    pub credito_plazo_dias: i64,
+    pub credito_plazo_tipo: String,
+    pub credito_condiciones: String,
 }
 
 pub async fn reglas_con(c: &mut SqliteConnection) -> Reglas {
@@ -58,7 +63,15 @@ pub async fn reglas_con(c: &mut SqliteConnection) -> Reglas {
         cancelacion: txt(config::valor_con(c, "apartado_cancelacion").await, "devolver"),
         retencion_pct: config::entero_con(c, "apartado_retencion_pct", 0).await.clamp(0, 100),
         condiciones: txt(config::valor_con(c, "apartado_condiciones").await, ""),
+        credito_plazo_dias: config::entero_con(c, "credito_plazo_dias", 30).await.clamp(1, 365),
+        credito_plazo_tipo: txt(config::valor_con(c, "credito_plazo_tipo").await, "calendario"),
+        credito_condiciones: txt(config::valor_con(c, "credito_condiciones").await, ""),
     }
+}
+
+/// Lo que el cliente todavía puede deber: límite menos lo que ya debe en créditos abiertos (nunca negativo).
+pub fn credito_disponible(limite: i64, saldo_actual: i64) -> i64 {
+    (limite - saldo_actual).max(0)
 }
 
 pub async fn reglas(pool: &SqlitePool, a: &Actor) -> Res<Reglas> {
@@ -191,6 +204,8 @@ pub struct CuentaDetalle {
     pub condonado: i64,
     pub devuelto: i64,
     pub retenido: i64,
+    /// Total de la venta ligada (crédito: la venta a crédito; apartado: la liquidación).
+    pub venta_total: Option<i64>,
     pub venta_id: Option<String>,
     pub venta_numero: Option<String>,
     pub usuario: String,
@@ -735,25 +750,29 @@ async fn limite_y_saldo(c: &mut SqliteConnection, cliente_id: &str) -> Res<(i64,
     Ok((limite, saldo))
 }
 
-/// El cajero solo sabe si alcanza; nunca el límite ni lo que debe el cliente (Ley 8968).
-pub async fn credito_alcanza_cliente(pool: &SqlitePool, a: &Actor, cliente_id: &str, monto: i64) -> Res<bool> {
+/// Crédito disponible del cliente, para avisarlo ANTES de cobrar. El cajero ve solo esto: ni el
+/// límite ni lo que debe en otras cuentas (Ley 8968). Rust vuelve a revisar al cobrar.
+pub async fn credito_disponible_cliente(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<i64> {
     a.exigir("cuentas", "vender a crédito")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let (limite, saldo) = limite_y_saldo(&mut c, cliente_id).await?;
-    Ok(credito_alcanza(limite, saldo, monto))
+    Ok(credito_disponible(limite, saldo))
 }
 
 /// Dentro del cobro a crédito (ventas::cobrar_opc): abre la cuenta por lo que queda por cobrar.
+/// Devuelve el id de la cuenta (para imprimir su comprobante).
 #[allow(clippy::too_many_arguments)]
-pub async fn abrir_credito(tx: &mut SqliteConnection, a: &Actor, t: &Turno, venta_id: &str, cliente_id: &str, lineas: &[Linea], catalogo: &[i64], por_cobrar: i64, fecha: &str) -> Res<()> {
+pub async fn abrir_credito(tx: &mut SqliteConnection, a: &Actor, t: &Turno, venta_id: &str, cliente_id: &str, lineas: &[Linea], catalogo: &[i64], por_cobrar: i64, fecha: &str) -> Res<String> {
     cliente_con_consentimiento(&mut *tx, cliente_id).await?;
     let (limite, saldo) = limite_y_saldo(&mut *tx, cliente_id).await?;
     if !credito_alcanza(limite, saldo, por_cobrar) {
         return Err("El crédito de este cliente no alcanza. Pida al dueño que revise su límite.".into());
     }
-    let dias = config::entero_con(&mut *tx, "credito_plazo_dias", 30).await.clamp(1, 365);
+    let rg = reglas_con(&mut *tx).await;
+    let h = caja::horario_con(&mut *tx).await;
     let desde = NaiveDate::parse_from_str(&t.dia, "%Y-%m-%d").map_err(e)?;
-    let limite_fecha = (desde + chrono::Duration::days(dias)).to_string();
+    // Misma regla que el apartado: en días de trabajo, o calendario sin caer en un día que no se trabaja.
+    let limite_fecha = fecha_limite(desde, rg.credito_plazo_dias, &rg.credito_plazo_tipo, &h).to_string();
     let (consecutivo, num) = siguiente_numero(&mut *tx, &t.caja_id, CREDITO, fecha).await?;
     let id = ulid();
     let sucursal = inventario::sucursal_de(&mut *tx, &t.caja_id).await?;
@@ -783,7 +802,90 @@ pub async fn abrir_credito(tx: &mut SqliteConnection, a: &Actor, t: &Turno, vent
     insertar_lineas(&mut *tx, &id, lineas, catalogo, fecha).await?;
     evento(&mut *tx, &id, "creada", por_cobrar, Some(&t.id), None, a, None, None, fecha).await?;
     bitacora::registrar(&mut *tx, Some(&a.id), "cuenta.crear", "cuenta", Some(&id), &json!({"tipo": CREDITO, "numero": num, "venta": venta_id, "porCobrar": por_cobrar})).await?;
+    Ok(id)
+}
+
+/// Opciones del crédito del negocio (solo el dueño las ve y las cambia).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(test, derive(TS))]
+#[serde(rename_all = "camelCase")]
+pub struct OpcionesCredito {
+    /// Límite de quien no tiene uno propio. 0 = solo venden a crédito los clientes con límite propio.
+    pub limite_defecto: i64,
+    pub plazo_dias: i64,
+    /// "calendario" o "laborables".
+    pub plazo_tipo: String,
+    pub condiciones: String,
+}
+
+pub async fn opciones_credito(pool: &SqlitePool, a: &Actor) -> Res<OpcionesCredito> {
+    a.exigir("cuentas.admin", "ver las opciones de crédito")?;
+    let mut c = pool.acquire().await.map_err(e)?;
+    let rg = reglas_con(&mut c).await;
+    Ok(OpcionesCredito {
+        limite_defecto: config::entero_con(&mut c, "credito_limite_defecto", 0).await,
+        plazo_dias: rg.credito_plazo_dias,
+        plazo_tipo: rg.credito_plazo_tipo,
+        condiciones: rg.credito_condiciones,
+    })
+}
+
+/// Guarda las opciones del crédito con el PIN del dueño. Se valida todo antes de escribir nada.
+pub async fn guardar_opciones_credito(pool: &SqlitePool, a: &Actor, o: &OpcionesCredito, pin: &str) -> Res<()> {
+    a.exigir("cuentas.admin", "cambiar las opciones de crédito")?;
+    let valores = [
+        ("credito_limite_defecto", json!(o.limite_defecto)),
+        ("credito_plazo_dias", json!(o.plazo_dias)),
+        ("credito_plazo_tipo", json!(o.plazo_tipo)),
+        ("credito_condiciones", json!(o.condiciones.trim())),
+    ];
+    for (k, v) in &valores {
+        config::validar(k, v)?;
+    }
+    usuarios::confirmar_dueno(pool, a, pin, "opciones de crédito").await?;
+    for (k, v) in &valores {
+        config::guardar(pool, a, k, v).await?;
+    }
     Ok(())
+}
+
+/// Límite propio de un cliente (None = usa el del negocio). Solo el dueño.
+pub async fn limite_cliente(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<Option<i64>> {
+    a.exigir("cuentas.admin", "ver el límite de crédito")?;
+    let l: Option<Option<i64>> = sqlx::query_scalar("SELECT limite_credito FROM clientes WHERE id = ?").bind(cliente_id).fetch_optional(pool).await.map_err(e)?;
+    l.ok_or_else(|| "Cliente no encontrado".to_string())
+}
+
+/// Estado de cuenta de un cliente: sus créditos (abiertos y pagados) y sus apartados abiertos, con
+/// abonos, y lo que debe en total. Solo el dueño.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(test, derive(TS))]
+#[serde(rename_all = "camelCase")]
+pub struct EstadoCuenta {
+    pub cliente: String,
+    pub cuentas: Vec<CuentaDetalle>,
+    /// Suma de los saldos de las cuentas abiertas.
+    pub total_adeudado: i64,
+}
+
+pub async fn estado_cuenta(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<EstadoCuenta> {
+    a.exigir("cuentas.admin", "ver el estado de cuenta")?;
+    let cliente: String = sqlx::query_scalar("SELECT nombre FROM clientes WHERE id = ?").bind(cliente_id).fetch_optional(pool).await.map_err(e)?.ok_or("Cliente no encontrado")?;
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM cuentas WHERE cliente_id = ? AND eliminado_en IS NULL
+           AND ((tipo = 'credito' AND estado IN ('abierta', 'pagada')) OR (tipo = 'apartado' AND estado = 'abierta'))
+         ORDER BY fecha",
+    )
+    .bind(cliente_id)
+    .fetch_all(pool)
+    .await
+    .map_err(e)?;
+    let mut cuentas = Vec::with_capacity(ids.len());
+    for id in &ids {
+        cuentas.push(obtener(pool, a, id).await?);
+    }
+    let total_adeudado = cuentas.iter().filter(|d| d.cuenta.estado == "abierta").map(|d| d.cuenta.saldo).sum();
+    Ok(EstadoCuenta { cliente, cuentas, total_adeudado })
 }
 
 /// Límite de crédito de un cliente (solo el dueño, con PIN). La bitácora no guarda el monto.
@@ -924,6 +1026,8 @@ pub async fn anular_abono(pool: &SqlitePool, a: &Actor, caja_id: &str, abono_id:
     Ok(())
 }
 
+pub const CONDONAR_SIN_CAJA: &str = "Para condonar, abra la caja primero (se registra una venta)";
+
 /// Perdona el saldo. Un apartado queda liquidado (la venta lleva lo condonado como descuento: pide la
 /// caja abierta); un crédito queda pagado (la venta ya se había registrado).
 #[allow(clippy::too_many_arguments)]
@@ -941,7 +1045,8 @@ pub async fn condonar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &s
     sqlx::query("UPDATE cuentas SET condonado = condonado + ?, saldo = 0, actualizado_en = ? WHERE id = ?").bind(saldo).bind(&fecha).bind(cuenta_id).execute(&mut *tx).await.map_err(e)?;
     let mut venta = None;
     if k.get::<String, _>("tipo") == APARTADO {
-        let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
+        // Liquidar registra una venta: necesita una caja abierta. Se dice claro qué hacer.
+        let t = caja::turno_para_vender(&mut tx, caja_id, a).await.map_err(|_| CONDONAR_SIN_CAJA.to_string())?;
         evento(&mut tx, cuenta_id, "condonacion", saldo, Some(&t.id), None, a, Some(&dueno), Some(&motivo), &fecha).await?;
         let (vid, _) = liquidar(&mut tx, a, &t, cuenta_id, &fecha).await?;
         let estado = if entregar { "entregada" } else { "pagada" };
@@ -976,35 +1081,38 @@ pub async fn ajustar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, cambio: i64,
         return Err("El saldo quedaría en 0 o menos: use Condonar".into());
     }
     let fecha = ahora_iso();
-    // Apartado: cambia el total (es la venta futura). Crédito: la venta ya se hizo; solo cambia lo que se debe.
-    let sql = if k.get::<String, _>("tipo") == APARTADO {
-        "UPDATE cuentas SET total = total + ?1, saldo = saldo + ?1, actualizado_en = ?2 WHERE id = ?3"
-    } else {
-        "UPDATE cuentas SET saldo = saldo + ?1, condonado = condonado - ?1, actualizado_en = ?2 WHERE id = ?3"
-    };
-    sqlx::query(sql).bind(cambio).bind(&fecha).bind(cuenta_id).execute(&mut *tx).await.map_err(e)?;
+    // Apartado y crédito: cambian el total de la cuenta (lo que se debía) y el saldo por igual. Lo
+    // condonado no se toca (solo lo cambia Condonar); el ajuste queda como su propio evento.
+    sqlx::query("UPDATE cuentas SET total = total + ?1, saldo = saldo + ?1, actualizado_en = ?2 WHERE id = ?3")
+        .bind(cambio)
+        .bind(&fecha)
+        .bind(cuenta_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(e)?;
     evento(&mut tx, cuenta_id, "ajuste", cambio, None, None, a, Some(&dueno), Some(&motivo), &fecha).await?;
     bitacora::registrar(&mut tx, Some(&a.id), "cuenta.ajustar", "cuenta", Some(cuenta_id), &json!({"cambio": cambio, "motivo": motivo, "autorizadoPor": dueno})).await?;
     tx.commit().await.map_err(e)?;
     Ok(())
 }
 
-/// Nueva fecha límite (no mueve dinero: sin PIN, con motivo).
-pub async fn prorrogar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, fecha_limite: &str, motivo: &str) -> Res<()> {
+/// Nueva fecha límite: cambia lo prometido al cliente, así que pide PIN del dueño y motivo.
+pub async fn prorrogar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, fecha_limite: &str, motivo: &str, pin: &str) -> Res<()> {
     a.exigir("cuentas.admin", "prorrogar apartados")?;
     let motivo = motivo_valido(motivo)?;
     let nueva = NaiveDate::parse_from_str(fecha_limite, "%Y-%m-%d").map_err(|_| "Fecha inválida".to_string())?;
     if nueva < ahora().date_naive() {
         return Err("La nueva fecha ya pasó".into());
     }
+    let dueno = usuarios::confirmar_dueno(pool, a, pin, "prorrogar").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let fecha = ahora_iso();
     let n = sqlx::query("UPDATE cuentas SET fecha_limite = ?, actualizado_en = ? WHERE id = ? AND estado = 'abierta'").bind(nueva.to_string()).bind(&fecha).bind(cuenta_id).execute(&mut *tx).await.map_err(e)?.rows_affected();
     if n == 0 {
         return Err("Solo se prorroga una cuenta abierta".into());
     }
-    evento(&mut tx, cuenta_id, "prorroga", 0, None, None, a, None, Some(&format!("{motivo} (hasta {nueva})")), &fecha).await?;
-    bitacora::registrar(&mut tx, Some(&a.id), "cuenta.prorrogar", "cuenta", Some(cuenta_id), &json!({"hasta": nueva.to_string()})).await?;
+    evento(&mut tx, cuenta_id, "prorroga", 0, None, None, a, Some(&dueno), Some(&format!("{motivo} (hasta {nueva})")), &fecha).await?;
+    bitacora::registrar(&mut tx, Some(&a.id), "cuenta.prorrogar", "cuenta", Some(cuenta_id), &json!({"hasta": nueva.to_string(), "motivo": motivo, "autorizadoPor": dueno})).await?;
     tx.commit().await.map_err(e)?;
     Ok(())
 }
@@ -1095,7 +1203,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<CuentaDetall
     a.exigir("cuentas", "ver apartados")?;
     let hoy = ahora().date_naive();
     let f = sqlx::query(&format!("{SELECT_FILA} WHERE k.id = ?")).bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Apartado no encontrado")?;
-    let x = sqlx::query("SELECT k.subtotal, k.descuento, k.redondeo, k.condonado, k.devuelto, k.retenido, k.venta_id, v.numero AS vnum, u.nombre AS usuario FROM cuentas k JOIN usuarios u ON u.id = k.usuario_id LEFT JOIN ventas v ON v.id = k.venta_id WHERE k.id = ?")
+    let x = sqlx::query("SELECT k.subtotal, k.descuento, k.redondeo, k.condonado, k.devuelto, k.retenido, k.venta_id, v.numero AS vnum, v.total AS vtotal, u.nombre AS usuario FROM cuentas k JOIN usuarios u ON u.id = k.usuario_id LEFT JOIN ventas v ON v.id = k.venta_id WHERE k.id = ?")
         .bind(id)
         .fetch_one(pool)
         .await
@@ -1150,6 +1258,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<CuentaDetall
         condonado: x.get("condonado"),
         devuelto: x.get("devuelto"),
         retenido: x.get("retenido"),
+        venta_total: x.get("vtotal"),
         venta_id: x.get("venta_id"),
         venta_numero: x.get("vnum"),
         usuario: x.get("usuario"),

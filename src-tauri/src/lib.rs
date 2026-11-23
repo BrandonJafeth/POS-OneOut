@@ -628,9 +628,33 @@ async fn cuenta_condonar(st: St<'_>, cuenta_id: String, pin: String, motivo: Str
 }
 
 #[tauri::command]
-async fn cuenta_prorrogar(st: St<'_>, cuenta_id: String, fecha_limite: String, motivo: String) -> Res<()> {
+async fn cuenta_prorrogar(st: St<'_>, cuenta_id: String, fecha_limite: String, motivo: String, pin: String) -> Res<()> {
     let a = st.actor().await?;
-    cuentas::prorrogar(st.pool()?, &a, &cuenta_id, &fecha_limite, &motivo).await
+    cuentas::prorrogar(st.pool()?, &a, &cuenta_id, &fecha_limite, &motivo, &pin).await
+}
+
+#[tauri::command]
+async fn credito_opciones(st: St<'_>) -> Res<cuentas::OpcionesCredito> {
+    let a = st.actor().await?;
+    cuentas::opciones_credito(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn credito_guardar_opciones(st: St<'_>, opciones: cuentas::OpcionesCredito, pin: String) -> Res<()> {
+    let a = st.actor().await?;
+    cuentas::guardar_opciones_credito(st.pool()?, &a, &opciones, &pin).await
+}
+
+#[tauri::command]
+async fn cliente_limite_obtener(st: St<'_>, cliente_id: String) -> Res<Option<i64>> {
+    let a = st.actor().await?;
+    cuentas::limite_cliente(st.pool()?, &a, &cliente_id).await
+}
+
+#[tauri::command]
+async fn cliente_estado_cuenta(st: St<'_>, cliente_id: String) -> Res<cuentas::EstadoCuenta> {
+    let a = st.actor().await?;
+    cuentas::estado_cuenta(st.pool()?, &a, &cliente_id).await
 }
 
 #[tauri::command]
@@ -660,9 +684,9 @@ async fn reporte_ventas(st: St<'_>, desde: String, hasta: String) -> Res<reporte
 }
 
 #[tauri::command]
-async fn credito_alcanza(st: St<'_>, cliente_id: String, monto: i64) -> Res<bool> {
+async fn credito_disponible(st: St<'_>, cliente_id: String) -> Res<i64> {
     let a = st.actor().await?;
-    cuentas::credito_alcanza_cliente(st.pool()?, &a, &cliente_id, monto).await
+    cuentas::credito_disponible_cliente(st.pool()?, &a, &cliente_id).await
 }
 
 #[tauri::command]
@@ -1073,6 +1097,11 @@ async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
         }
         "etiqueta" => a.exigir("productos", "imprimir etiquetas")?,
         "cierre" => a.exigir("caja.admin", "imprimir reportes de caja")?,
+        // Estado de cuenta de un cliente: solo el dueño; sale por la impresora de tiquetes.
+        "estado_cuenta" => {
+            a.exigir("cuentas.admin", "imprimir el estado de cuenta")?;
+            documento = "tiquete".into();
+        }
         _ => return Err("Ese documento se imprime desde su pantalla".into()),
     }
     impresoras::enviar(st.pool()?, caja::CAJA_1, &documento, &data).await
@@ -1310,7 +1339,11 @@ pub fn run() {
             cuenta_prorrogar,
             abono_anular,
             cliente_limite_credito,
-            credito_alcanza,
+            cliente_limite_obtener,
+            cliente_estado_cuenta,
+            credito_disponible,
+            credito_opciones,
+            credito_guardar_opciones,
             reporte_rangos,
             reporte_ventas,
             sistema_restaurar,

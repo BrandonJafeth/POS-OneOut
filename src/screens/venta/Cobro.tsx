@@ -52,6 +52,8 @@ export default function Cobro(p: {
   onCobrar(pagos: PagoEntrada[]): Promise<void>;
   /** Venta a crédito (solo si el negocio la usa y hay cliente): lo que falte queda por cobrar. */
   onCredito?(pagos: PagoEntrada[]): Promise<void>;
+  /** Cuánto crédito le queda al cliente (null = todavía no se sabe). El cajero no ve el límite. */
+  creditoDisponible?: number | null;
   onCerrar(): void;
 }) {
   const { config } = useSesion();
@@ -368,9 +370,15 @@ export default function Cobro(p: {
             Dividir pago
           </Button>
           <span style={{ flex: 1 }} />
+          {p.onCredito && r.faltante > 0 && p.creditoDisponible != null && (
+            <span className={p.creditoDisponible >= r.faltante ? "credito-disponible" : "credito-disponible falta"} aria-live="polite">
+              Crédito disponible: {monto(p.creditoDisponible)}
+              {p.creditoDisponible < r.faltante && " · no alcanza"}
+            </span>
+          )}
           {p.onCredito && r.faltante > 0 && (
             <Button
-              disabled={ocupado || sinMonto.length > 0}
+              disabled={ocupado || sinMonto.length > 0 || (p.creditoDisponible != null && p.creditoDisponible < r.faltante)}
               onClick={async () => {
                 setOcupado(true);
                 setError("");

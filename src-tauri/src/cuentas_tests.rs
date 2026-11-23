@@ -42,6 +42,9 @@ fn reglas_iguales_que_en_la_pantalla() {
     for x in c["creditoAlcanza"].as_array().unwrap() {
         assert_eq!(credito_alcanza(x["limite"].as_i64().unwrap(), x["saldo"].as_i64().unwrap(), x["nuevo"].as_i64().unwrap()), x["ok"].as_bool().unwrap(), "{x}");
     }
+    for x in c["creditoDisponible"].as_array().unwrap() {
+        assert_eq!(credito_disponible(x["limite"].as_i64().unwrap(), x["saldo"].as_i64().unwrap()), x["esperado"].as_i64().unwrap(), "{x}");
+    }
 }
 
 // ─────────── Ayudas ───────────
@@ -504,7 +507,7 @@ async fn condonar_liquida_con_descuento() {
     let t = cerrar_exacto(p, &ana).await;
     let z = z_cerrado(p, &ana, &t).await;
     assert_eq!((z.total_ventas, z.ventas_con_abonos, z.apartados.condonado), (9000, 9000, 500));
-    prorrogar(p, &ana, &r.cuenta_id, "2026-12-30", "Viaje").await.unwrap_err(); // ya entregada
+    prorrogar(p, &ana, &r.cuenta_id, "2026-12-30", "Viaje", PIN).await.unwrap_err(); // ya entregada
 }
 
 // ─────────── Crédito ───────────
@@ -526,9 +529,13 @@ async fn venta_a_credito_con_limite_y_abonos() {
     // Sin límite: no alcanza. El cajero no sabe el límite.
     assert!(ventas::cobrar_opc(p, &luis, CAJA_1, &esp.id, &est, &[pago(EF, 10000)], None, true).await.unwrap_err().contains("no alcanza"));
     assert!(fijar_limite(p, &luis, &cl.id, Some(50000), PIN).await.unwrap_err().contains("permiso"));
+    // Límite propio sin ninguna cuenta de crédito antes.
     fijar_limite(p, &ana, &cl.id, Some(25000), PIN).await.unwrap();
-    assert!(!credito_alcanza_cliente(p, &luis, &cl.id, 30000).await.unwrap());
+    // El cajero ve cuánto crédito le queda, no el límite ni lo que debe.
+    assert_eq!(credito_disponible_cliente(p, &luis, &cl.id).await.unwrap(), 25000);
     let r = ventas::cobrar_opc(p, &luis, CAJA_1, &esp.id, &est, &[pago(EF, 10000)], None, true).await.unwrap();
+    assert!(r.cuenta_id.is_some(), "la venta a crédito dice su cuenta (para imprimir el comprobante)");
+    assert_eq!(credito_disponible_cliente(p, &luis, &cl.id).await.unwrap(), 5000);
     let k = sqlx::query("SELECT id, numero, saldo, estado FROM cuentas WHERE venta_id = ?").bind(&r.venta_id).fetch_one(p).await.unwrap();
     assert_eq!((k.get::<String, _>("numero").as_str(), k.get::<i64, _>("saldo")), ("C-0001", 20000));
     // La venta sale hoy (y del inventario).
@@ -542,6 +549,68 @@ async fn venta_a_credito_con_limite_y_abonos() {
     // El bitácora no guarda el límite.
     let det: String = sqlx::query_scalar("SELECT detalle FROM bitacora WHERE accion = 'credito.limite'").fetch_one(p).await.unwrap();
     assert!(!det.contains("25000"), "{det}");
+}
+
+/// Opciones del dueño (con PIN), plazo en días de trabajo, estado de cuenta con varias cuentas,
+/// ajuste hacia arriba sin condonado negativo, reportes con la fila "A crédito" y prorrogar con PIN.
+#[tokio::test]
+async fn credito_completo_opciones_estado_de_cuenta_y_reportes() {
+    let (bd, _, ana, luis) = base_con_usuarios().await;
+    let p = &bd.pool;
+    reloj("2026-11-16T10:00:00-06:00"); // lunes
+    let pid = producto(p, 30000, 5).await;
+    let cl = cliente(p).await;
+    sqlx::query("UPDATE config SET valor = 'true' WHERE clave = 'usa_credito'").execute(p).await.unwrap();
+    let op = OpcionesCredito { limite_defecto: 100000, plazo_dias: 10, plazo_tipo: "laborables".into(), condiciones: "Pague antes de la fecha.".into() };
+    assert!(guardar_opciones_credito(p, &luis, &op, PIN).await.unwrap_err().contains("permiso"));
+    assert!(guardar_opciones_credito(p, &ana, &op, "000000").await.is_err());
+    assert!(guardar_opciones_credito(p, &ana, &OpcionesCredito { plazo_tipo: "semanas".into(), ..op.clone() }, PIN).await.is_err());
+    guardar_opciones_credito(p, &ana, &op, PIN).await.unwrap();
+    assert_eq!(opciones_credito(p, &ana).await.unwrap(), op);
+    assert_eq!(reglas(p, &luis).await.unwrap().credito_condiciones, "Pague antes de la fecha.");
+
+    abrir(p, &luis, CAJA_1, &total(10000)).await.unwrap();
+    // Sin límite propio: usa el del negocio (¢100.000).
+    assert_eq!(credito_disponible_cliente(p, &luis, &cl.id).await.unwrap(), 100000);
+    let est = Estado { lineas: vec![linea(&pid, 30000, 1)], cliente: Some(cl.clone()), ..Default::default() };
+    let esp = crear_espera(p, &luis, CAJA_1, &est).await.unwrap();
+    let r = ventas::cobrar_opc(p, &luis, CAJA_1, &esp.id, &est, &[pago(EF, 10000)], None, true).await.unwrap();
+    let cid = r.cuenta_id.unwrap();
+    // 10 días de trabajo desde el lunes 16 (sin domingos): viernes 27.
+    let d = obtener(p, &ana, &cid).await.unwrap();
+    assert_eq!((d.cuenta.fecha_limite.as_deref(), d.venta_total), (Some("2026-11-27"), Some(30000)));
+    abonar(p, &luis, CAJA_1, &cid, 5000, &[pago(EF, 5000)], &ulid(), false).await.unwrap();
+    // Ajuste hacia arriba: sube lo que se debe; lo condonado no queda negativo y lo abonado no cambia.
+    ajustar(p, &ana, &cid, 1000, PIN, "Faltó cobrar una bolsa").await.unwrap();
+    let d = obtener(p, &ana, &cid).await.unwrap();
+    assert_eq!((d.cuenta.saldo, d.condonado, d.cuenta.abonado), (16000, 0, 5000));
+    // Un apartado abierto del mismo cliente.
+    let ap = apartar(p, &luis, &cl, &pid, 30000, 1, 15000).await;
+
+    // Estado de cuenta: las dos cuentas, sus abonos y lo que debe en total.
+    assert!(estado_cuenta(p, &luis, &cl.id).await.unwrap_err().contains("permiso"));
+    let ec = estado_cuenta(p, &ana, &cl.id).await.unwrap();
+    assert_eq!(ec.cuentas.len(), 2);
+    assert_eq!(ec.total_adeudado, 16000 + 15000);
+    assert!(ec.cuentas.iter().all(|c| !c.abonos.is_empty()));
+    assert_eq!(limite_cliente(p, &ana, &cl.id).await.unwrap(), None);
+
+    // Prorrogar pide el PIN del dueño.
+    assert!(prorrogar(p, &ana, &ap.cuenta_id, "2026-12-30", "Viaje de la familia", "000000").await.is_err());
+    prorrogar(p, &ana, &ap.cuenta_id, "2026-12-30", "Viaje de la familia", PIN).await.unwrap();
+
+    // Reportes: la fila "A crédito (por cobrar)" entra y las formas suman lo vendido.
+    let t = cerrar_exacto(p, &ana).await;
+    let z = z_cerrado(p, &ana, &t).await;
+    cuadra_vendido_y_recibido(&z);
+    let rep = crate::reportes::ventas(p, &ana, "2026-11-16", "2026-11-16").await.unwrap();
+    let fila = |n: &str| rep.por_forma.iter().find(|f| f.forma == n).map(|f| f.ventas).unwrap_or(0);
+    assert_eq!(fila("A crédito (por cobrar)"), 20000);
+    assert_eq!(rep.por_forma.iter().map(|f| f.ventas).sum::<i64>(), rep.totales.ventas);
+    assert_eq!(rep.totales.ventas, 30000);
+
+    // Condonar un apartado con la caja cerrada: mensaje claro.
+    assert_eq!(condonar(p, &ana, CAJA_1, &ap.cuenta_id, PIN, "Cliente frecuente", true).await.unwrap_err(), CONDONAR_SIN_CAJA);
 }
 
 // ─────────── Permisos y Ley 8968 ───────────

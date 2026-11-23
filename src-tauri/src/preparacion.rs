@@ -95,6 +95,27 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
             obligatorio: true,
         });
     }
+    // Crédito activo: sin límite general nadie (sin límite propio) puede comprar a crédito, y el
+    // comprobante necesita sus condiciones.
+    if r.usa_credito {
+        let mut c = bd.pool.acquire().await.map_err(e)?;
+        let limite = crate::config::entero_con(&mut c, "credito_limite_defecto", 0).await;
+        drop(c);
+        let condiciones = !r.credito_condiciones.trim().is_empty();
+        v.push(Punto {
+            titulo: "Crédito",
+            listo: limite > 0 && condiciones,
+            detalle: format!(
+                "Límite general {}, {} días {}. {}{}Apartados → Opciones → Crédito.",
+                crate::util::colones(limite),
+                r.credito_plazo_dias,
+                if r.credito_plazo_tipo == "laborables" { "de trabajo" } else { "calendario" },
+                if limite > 0 { "" } else { "Falta el límite general (mayor que ¢0). " },
+                if condiciones { "" } else { "Falta escribir las condiciones del crédito. " }
+            ),
+            obligatorio: true,
+        });
+    }
     // WebView2 (el motor de la ventana): la app usa funciones de la versión 120 o más nueva.
     let wv = tauri::webview_version().unwrap_or_default();
     let mayor: u32 = wv.split('.').next().and_then(|x| x.parse().ok()).unwrap_or(0);

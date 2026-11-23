@@ -1,7 +1,7 @@
 // Prueba espejo: los mismos casos que src-tauri/src/cuentas_tests.rs (reglas_iguales_que_en_la_pantalla).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { abonoMinimo, creditoAlcanza, fechaLimite, validarAbono } from "../src/lib/cuentas";
+import { abonoMinimo, creditoAlcanza, creditoDisponible, fechaLimite, validarAbono } from "../src/lib/cuentas";
 import { comprobanteCuenta } from "../src/lib/cuentas/comprobante";
 import { interpret } from "../src/lib/preview";
 import { DEFAULT_SETTINGS } from "../src/lib/tickets";
@@ -48,5 +48,6 @@ describe("reglas de apartados (iguales que en Rust)", () => {
   });
   it("crédito alcanza", () => {
     for (const c of casos.creditoAlcanza) expect(creditoAlcanza(c.limite, c.saldo, c.nuevo), JSON.stringify(c)).toBe(c.ok);
+    for (const c of casos.creditoDisponible) expect(creditoDisponible(c.limite, c.saldo), JSON.stringify(c)).toBe(c.esperado);
   });
 });

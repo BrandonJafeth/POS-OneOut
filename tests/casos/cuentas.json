@@ -28,5 +28,11 @@
     { "limite": 0, "saldo": 0, "nuevo": 1, "ok": false },
     { "limite": 10000, "saldo": 9000, "nuevo": 1000, "ok": true },
     { "limite": 10000, "saldo": 9000, "nuevo": 1001, "ok": false }
+  ],
+  "creditoDisponible": [
+    { "limite": 50000, "saldo": 20000, "esperado": 30000 },
+    { "limite": 50000, "saldo": 60000, "esperado": 0 },
+    { "limite": 25000, "saldo": 25000, "esperado": 0 },
+    { "limite": 0, "saldo": 0, "esperado": 0 }
   ]
 }

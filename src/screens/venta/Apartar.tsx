@@ -86,7 +86,7 @@ export default function Apartar(p: {
         <Field label="Abona hoy" error={intento ? error : undefined} ayuda={!intento || !error ? `Queda debiendo ${monto(Math.max(0, p.total - abono))}.` : undefined}>
           <CampoMonto ref={campo} grande autoFocus valor={texto} onCambio={(t) => (setTexto(t), setIntento(false))} />
         </Field>
-        <Field label="Qué se aparta (opcional)" ayuda="Sale en el comprobante y sirve para buscarlo al abonar.">
+        <Field label="Qué se aparta (opcional)" ayuda="Describa el producto. No escriba datos personales del cliente.">
           {/* data-opcional: Enter en el monto cobra directo (F9 → Enter → Enter); aquí se llega con Tab o ↓. */}
           <input data-opcional value={detalle} maxLength={200} placeholder="Ej.: retablo de graduada, marco dorado" onChange={(e) => setDetalle(e.target.value)} />
         </Field>

@@ -117,7 +117,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 
 ### Apartados y crédito
 - Todo lo decide `cuentas.rs` en una transacción `BEGIN IMMEDIATE`: abono mínimo, plazo, saldo, límite de crédito, estados, existencia reservada y fechas (reloj de `util`). Un comando llamado directo rechaza lo inválido (la pantalla solo avisa).
-- El apartado y el crédito exigen un cliente con consentimiento vigente. El cajero ve el saldo de la cuenta que atiende, nunca totales ni el límite de crédito: `credito_alcanza` responde solo sí o no.
+- El apartado y el crédito exigen un cliente con consentimiento vigente. El cajero ve el saldo de la cuenta que atiende, nunca totales ni el límite de crédito: `credito_disponible` responde solo cuánto crédito le queda al cliente (límite − lo que debe, nunca negativo). El límite, el estado de cuenta y las opciones de crédito son solo del dueño; cambiar límites, opciones o una fecha límite (prorrogar) pide su PIN. El estado de cuenta se imprime por la impresora de tiquetes con el documento `estado_cuenta` (solo dueño).
 - Cada abono va al turno abierto donde se recibe; sin turno, se rechaza. `abonos.operacion_id` evita que un doble clic o un reintento cree dos abonos. Un abono no se modifica ni se borra (triggers): se anula, con PIN del dueño y motivo.
 - `cuenta_eventos` es solo-agregar (triggers) y el saldo nunca queda negativo (trigger). La prueba `el_z_cuadra_con_apartados_en_muchos_turnos` compara el efectivo esperado con un modelo independiente y comprueba que cada abono está en exactamente un Z; se verificó que detecta un error puesto a propósito en el cálculo de abonos.
 - Lo apartado no se vende sin el PIN del dueño (aunque se permita vender sin existencia).
@@ -240,13 +240,16 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `cuenta_abonar / liquidar` | ✔ | ✔ | — |
 | `cuenta_entregar` | ✔ | ✔ | — |
 | `cuenta_imprimir` | ✔ | ✔ | — |
-| `credito_alcanza` | ✔ | ✔ | — |
+| `credito_disponible` | ✔ | ✔ | — |
 | `cuenta_listar / vencidas` | — | ✔ | — |
 | `cuenta_cancelar` | — | ✔ | — |
 | `cuenta_ajustar / condonar` | — | ✔ | — |
 | `abono_anular` | — | ✔ | — |
 | `cuenta_prorrogar` | — | ✔ | — |
 | `cliente_limite_credito` | — | ✔ | — |
+| `cliente_limite_obtener` | — | ✔ | — |
+| `cliente_estado_cuenta` | — | ✔ | — |
+| `credito_opciones / guardar_opciones` | — | ✔ | — |
 | `reporte_rangos / ventas` | — | ✔ | — |
 | `respaldo_crear` | — | ✔ | — |
 | `respaldo_restaurar` | — | ✔ | — |

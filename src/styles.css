@@ -1670,6 +1670,28 @@ details.fiscal summary {
   color: var(--text);
 }
 
+/* Cobro con crédito: cuánto le queda al cliente, al lado de "Dejar … a crédito". */
+.credito-disponible {
+  align-self: center;
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.credito-disponible.falta {
+  color: var(--err);
+  font-weight: 600;
+}
+
+/* Estado de cuenta: una cuenta tras otra, separadas. */
+.estado-cuenta-bloque + .estado-cuenta-bloque {
+  margin-top: var(--e5);
+}
+
+.estado-cuenta-bloque h3 {
+  margin: 0;
+}
+
 /* Horario de caja: una hora para todos los días, alineada con su botón. */
 .horario-todos {
   align-items: flex-start;
