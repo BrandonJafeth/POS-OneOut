@@ -116,6 +116,20 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
             obligatorio: true,
         });
     }
+    // Proformas: siempre disponibles; solo informa cómo están (no detiene la entrega).
+    let mut c = bd.pool.acquire().await.map_err(e)?;
+    let vigencia = crate::config::entero_con(&mut c, "proforma_vigencia_dias", 8).await;
+    let condiciones_pf = crate::config::valor_con(&mut c, "proforma_condiciones").await.and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    drop(c);
+    v.push(Punto {
+        titulo: "Proformas",
+        listo: true,
+        detalle: format!(
+            "Válidas {vigencia} días. {}Proformas → Opciones (dueño).",
+            if condiciones_pf.trim().is_empty() { "Sin condiciones propias (sale solo la leyenda). " } else { "" }
+        ),
+        obligatorio: false,
+    });
     // WebView2 (el motor de la ventana): la app usa funciones de la versión 120 o más nueva.
     let wv = tauri::webview_version().unwrap_or_default();
     let mayor: u32 = wv.split('.').next().and_then(|x| x.parse().ok()).unwrap_or(0);

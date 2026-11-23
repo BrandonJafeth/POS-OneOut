@@ -253,6 +253,8 @@ export interface EstadoEspera {
   /** Dueño que autorizó un descuento por encima del tope, y hasta qué %. */
   /** Descuento sobre el tope autorizado por el dueño: token de un solo uso que emitió Rust. */
   autorizacion: { duenoId: string; pct: number; token?: string } | null;
+  /** Venta ligada a una proforma: al cobrar o apartar, la proforma pasa a "convertida". */
+  proforma?: { id: string; numero: string } | null;
 }
 
 export interface VentaEspera {

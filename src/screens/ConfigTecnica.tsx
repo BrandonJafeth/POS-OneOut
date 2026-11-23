@@ -199,6 +199,9 @@ const NOMBRE_PERMISO: Record<Permiso, string> = {
   cuentas: "Apartados y crédito: crear, buscar, abonar, entregar",
   "cuentas.admin": "Apartados: todos, cancelar, anular abonos, condonar, límites",
   "reportes.ventas": "Reportes de ventas e historial de cierres",
+  proformas: "Proformas: crear, buscar, imprimir, pasar a venta",
+  "proformas.anular": "Proformas: anular (con motivo)",
+  "proformas.admin": "Proformas: opciones y reporte",
 };
 
 function Permisos() {

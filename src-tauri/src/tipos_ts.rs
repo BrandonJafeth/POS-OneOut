@@ -31,6 +31,16 @@ fn tipos_de_typescript_al_dia() {
     escribir::<ResultadoAbono>(&dir, &mut c);
     escribir::<OpcionesCredito>(&dir, &mut c);
     escribir::<EstadoCuenta>(&dir, &mut c);
+    {
+        use crate::proformas as pf;
+        escribir::<pf::ProformaRef>(&dir, &mut c);
+        escribir::<pf::ProformaFila>(&dir, &mut c);
+        escribir::<pf::ProformaLinea>(&dir, &mut c);
+        escribir::<pf::ProformaDetalle>(&dir, &mut c);
+        escribir::<pf::AbrirProforma>(&dir, &mut c);
+        escribir::<pf::GrupoProformas>(&dir, &mut c);
+        escribir::<pf::ReporteProformas>(&dir, &mut c);
+    }
     use crate::reportes as r;
     escribir::<r::Rangos>(&dir, &mut c);
     escribir::<r::Totales>(&dir, &mut c);

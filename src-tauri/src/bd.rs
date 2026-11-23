@@ -48,6 +48,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (21, "apartados", include_str!("../../src/db/migraciones/0021_apartados.sql")),
     (22, "descripcion_apartado", include_str!("../../src/db/migraciones/0022_descripcion_apartado.sql")),
     (23, "code128_impresora", include_str!("../../src/db/migraciones/0023_code128_impresora.sql")),
+    (24, "proformas", include_str!("../../src/db/migraciones/0024_proformas.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a

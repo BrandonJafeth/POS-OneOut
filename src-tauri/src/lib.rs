@@ -30,6 +30,7 @@ mod permisos;
 mod pin;
 mod preparacion;
 mod printer;
+mod proformas;
 mod reportes;
 mod respaldo;
 mod sesion;
@@ -667,6 +668,50 @@ async fn abono_anular(st: St<'_>, abono_id: String, pin: String, motivo: String,
 async fn cliente_limite_credito(st: St<'_>, cliente_id: String, limite: Option<i64>, pin: String) -> Res<()> {
     let a = st.actor().await?;
     cuentas::fijar_limite(st.pool()?, &a, &cliente_id, limite, &pin).await
+}
+
+// ─────────── Proformas (proformas.rs) ───────────
+
+#[tauri::command]
+async fn proforma_guardar(st: St<'_>, espera_id: String, estado: calculo::Estado, reemplaza: Option<String>) -> Res<proformas::ProformaDetalle> {
+    let a = st.actor().await?;
+    proformas::guardar(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, reemplaza.as_deref()).await
+}
+
+#[tauri::command]
+async fn proforma_buscar(st: St<'_>, texto: String, filtro: String) -> Res<Vec<proformas::ProformaFila>> {
+    let a = st.actor().await?;
+    proformas::buscar(st.pool()?, &a, &texto, &filtro).await
+}
+
+#[tauri::command]
+async fn proforma_obtener(st: St<'_>, id: String) -> Res<proformas::ProformaDetalle> {
+    let a = st.actor().await?;
+    proformas::obtener(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn proforma_imprimir(st: St<'_>, id: String, datos: Vec<u8>) -> Res<bool> {
+    let a = st.actor().await?;
+    proformas::imprimir(st.pool()?, &a, &id, &datos).await
+}
+
+#[tauri::command]
+async fn proforma_anular(st: St<'_>, id: String, motivo: String) -> Res<()> {
+    let a = st.actor().await?;
+    proformas::anular(st.pool()?, &a, &id, &motivo).await
+}
+
+#[tauri::command]
+async fn proforma_abrir(st: St<'_>, id: String) -> Res<proformas::AbrirProforma> {
+    let a = st.actor().await?;
+    proformas::abrir_en_venta(st.pool()?, &a, &id).await
+}
+
+#[tauri::command]
+async fn proforma_reporte(st: St<'_>, desde: String, hasta: String) -> Res<proformas::ReporteProformas> {
+    let a = st.actor().await?;
+    proformas::reporte(st.pool()?, &a, &desde, &hasta).await
 }
 
 // ─────────── Reportes de ventas (reportes.rs, solo el dueño) ───────────
@@ -1344,6 +1389,13 @@ pub fn run() {
             credito_disponible,
             credito_opciones,
             credito_guardar_opciones,
+            proforma_guardar,
+            proforma_buscar,
+            proforma_obtener,
+            proforma_imprimir,
+            proforma_anular,
+            proforma_abrir,
+            proforma_reporte,
             reporte_rangos,
             reporte_ventas,
             sistema_restaurar,

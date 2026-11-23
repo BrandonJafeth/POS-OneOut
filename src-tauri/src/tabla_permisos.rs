@@ -100,6 +100,11 @@ pub const ESPERADA: &[(&str, bool, bool, bool)] = &[
     ("cliente_limite_obtener", false, true, false),
     ("cliente_estado_cuenta", false, true, false),
     ("credito_opciones / guardar_opciones", false, true, false),
+    ("proforma_guardar", true, true, false),
+    ("proforma_buscar / obtener / abrir", true, true, false),
+    ("proforma_imprimir", true, true, false),
+    ("proforma_anular", false, true, false),
+    ("proforma_reporte", false, true, false),
     ("reporte_rangos / ventas", false, true, false),
     ("respaldo_crear", false, true, false),
     ("respaldo_restaurar", false, true, false),
@@ -211,6 +216,11 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("cliente_limite_obtener", denegado(cuentas::limite_cliente(p, a, x).await));
     s("cliente_estado_cuenta", denegado(cuentas::estado_cuenta(p, a, x).await));
     s("credito_opciones / guardar_opciones", denegado(cuentas::opciones_credito(p, a).await));
+    s("proforma_guardar", denegado(crate::proformas::guardar(p, a, CAJA_1, x, &est, None).await));
+    s("proforma_buscar / obtener / abrir", denegado(crate::proformas::buscar(p, a, "", "").await));
+    s("proforma_imprimir", denegado(crate::proformas::imprimir(p, a, x, b"x").await));
+    s("proforma_anular", denegado(crate::proformas::anular(p, a, x, "motivo largo").await));
+    s("proforma_reporte", denegado(crate::proformas::reporte(p, a, "2026-01-01", "2026-01-31").await));
     s("reporte_rangos / ventas", denegado(crate::reportes::ventas(p, a, "2026-01-01", "2026-01-31").await));
     s("respaldo_crear", denegado(respaldo::crear(bd, a, "contrasena-larga").await));
     s("respaldo_restaurar", denegado(respaldo::restaurar(bd, a, "000000", b"x", "contrasena-larga", None).await));

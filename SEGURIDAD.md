@@ -250,6 +250,11 @@ Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_
 | `cliente_limite_obtener` | — | ✔ | — |
 | `cliente_estado_cuenta` | — | ✔ | — |
 | `credito_opciones / guardar_opciones` | — | ✔ | — |
+| `proforma_guardar` | ✔ | ✔ | — |
+| `proforma_buscar / obtener / abrir` | ✔ | ✔ | — |
+| `proforma_imprimir` | ✔ | ✔ | — |
+| `proforma_anular` | — | ✔ | — |
+| `proforma_reporte` | — | ✔ | — |
 | `reporte_rangos / ventas` | — | ✔ | — |
 | `respaldo_crear` | — | ✔ | — |
 | `respaldo_restaurar` | — | ✔ | — |

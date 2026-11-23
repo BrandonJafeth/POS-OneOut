@@ -7,7 +7,7 @@
 // lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
 import { flechasPestanas } from "../ui/pestanas";
 import { navegarCampos } from "../ui/teclado";
-import { Banknote, Bookmark, Check, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
+import { Banknote, Bookmark, Check, FileText, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
 import type { Permiso } from "../lib/permisos";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../app/sesion";
@@ -26,6 +26,9 @@ import { useEscaner } from "../lib/useEscaner";
 import { bruto, calcularTotales, conCantidad, conLinea, descuentoCatalogo, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
 import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
 import { imprimirTrasCobro } from "../lib/venta/trasCobro";
+import { guardarProforma, obtenerProforma, type ProformaDetalle } from "../db/proformas";
+import { coincide, imprimirProforma, siguienteVersion } from "../lib/proformas";
+import GuardarProforma from "./venta/GuardarProforma";
 import type { Banco, Departamento, EstadoEspera, FormaPago, LineaEspera, PagoEntrada, Producto, VentaEspera } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
@@ -46,7 +49,7 @@ import { AbrirCaja, NoVenta } from "./caja/Dialogos";
 import { fondoPildora, textoSobre } from "../ui/departamentos";
 import { seleccionarAlTocar } from "../ui/seleccionarAlTocar";
 
-type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | "apartar" | "apartados" | null;
+type Dialogo = "cobro" | "libre" | "cliente" | "descuento" | "noventa" | "atajos" | "apartar" | "apartados" | "proforma" | "proformaCambio" | null;
 
 /** Lo que muestra el botón "Atajos" (F1). Debe coincidir con el manejador de teclas de Venta y con Cobro. */
 const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso?: Permiso }[] }[] = [
@@ -79,6 +82,7 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
     lista: [
       { teclas: ["F9"], texto: "Apartar la venta (pide el cliente si no hay)", permiso: "cuentas" },
       { teclas: ["F10"], texto: "Buscar un apartado y abonar, liquidar o entregar", permiso: "cuentas" },
+      { teclas: ["F11"], texto: "Guardar como proforma (precio por escrito, no es una venta)", permiso: "proformas" },
     ],
   },
   {
@@ -151,6 +155,17 @@ export default function Venta() {
     if (dialogo !== "cobro" || !conCredito || !estado.cliente) return;
     creditoDisponible(estado.cliente.id).then(setDisponible, () => setDisponible(null));
   }, [dialogo, conCredito, estado.cliente?.id]);
+  // Proforma ligada a la pestaña (guardada aquí o abierta con "Pasar a venta"): si la venta cambia, se
+  // avisa; al cobrar o apartar se pregunta si se guarda una versión nueva o se cobra sin ligar.
+  const [pfLigada, setPfLigada] = useState<ProformaDetalle | null>(null);
+  useEffect(() => {
+    setPfLigada(null);
+    if (estado.proforma) obtenerProforma(estado.proforma.id).then(setPfLigada, () => setPfLigada(null));
+  }, [estado.proforma?.id]);
+  const noCoincide = !!(estado.proforma && pfLigada && !coincide(estado, { lineas: pfLigada.lineas, descuento: pfLigada.descuento }));
+  const [trasCambio, setTrasCambio] = useState<"cobro" | "apartar">("cobro");
+  /** Abre el cobro o el apartado; si la venta ya no es la proforma ligada, antes pregunta qué hacer. */
+  const convertir = (siguiente: "cobro" | "apartar") => (noCoincide ? (setTrasCambio(siguiente), setDialogo("proformaCambio")) : setDialogo(siguiente));
   // Si la configuración no deja vender sin existencia, se avisa antes de cobrar (Rust lo revisa de nuevo al cobrar).
   const [faltan, setFaltan] = useState<string[]>([]);
   const cantidades = estado.lineas.map((l) => `${l.productoId}:${l.cantidad}`).join();
@@ -469,10 +484,11 @@ export default function Venta() {
           if (!usaApartados) return;
           if (!estado.lineas.length) return vacia();
           if (!estado.cliente) return setTrasCliente(true), setDialogo("cliente");
-          setDialogo("apartar");
+          convertir("apartar");
         },
         F10: () => usaApartados && setDialogo("apartados"),
-        F12: () => (estado.lineas.length ? setDialogo("cobro") : vacia()),
+        F11: () => puede("proformas") && (estado.lineas.length ? setDialogo("proforma") : vacia()),
+        F12: () => (estado.lineas.length ? convertir("cobro") : vacia()),
       };
       if (atajos[e.key]) {
         e.preventDefault();
@@ -705,7 +721,7 @@ export default function Venta() {
                 aria-keyshortcuts={i < 9 ? `Control+${i + 1}` : undefined}
                 title={i < 9 ? `Ctrl+${i + 1}` : undefined}
               >
-                Venta {e.numero}
+                {e.estado.proforma ? `Proforma ${e.estado.proforma.numero}` : `Venta ${e.numero}`}
                 {e.usuarioId !== usuario.id && <span className="muted"> · {e.usuario.split(" ")[0]}</span>}
                 {e.id !== activaId && e.estado.lineas.length > 0 && <span className="muted"> · {monto(calcularTotales(e.estado, config.redondeo_total).total)}</span>}
               </button>
@@ -768,6 +784,7 @@ export default function Venta() {
         {estado.lineas.length > 0 && !lineaSel && <p className="tiquete-pista">Toque un producto del tiquete para darle descuento o quitarlo.</p>}
 
         <div className="tiquete-pie">
+          {noCoincide && estado.proforma && <Alert tono="aviso">La venta ya no coincide con la proforma {estado.proforma.numero}.</Alert>}
           {faltan.length > 0 && (
             <Alert tono="aviso" titulo="No hay suficiente existencia">
               {faltan.join(", ")}. Baje la cantidad, o cobre con el PIN del dueño.
@@ -781,7 +798,7 @@ export default function Venta() {
               {config.mostrar_iva && <Fila k="IVA incluido" v={monto(t.iva)} />}
             </div>
           )}
-          <Button variante="primario" tamano="xl" className="cobrar" atajo="F12" verAtajo disabled={!estado.lineas.length} onClick={() => setDialogo("cobro")}>
+          <Button variante="primario" tamano="xl" className="cobrar" atajo="F12" verAtajo disabled={!estado.lineas.length} onClick={() => convertir("cobro")}>
             Cobrar
             <span className="cobrar-monto">{monto(t.total)}</span>
           </Button>
@@ -794,9 +811,14 @@ export default function Venta() {
                 icono={Bookmark}
                 atajo="F9"
                 disabled={!estado.lineas.length}
-                onClick={() => (estado.cliente ? setDialogo("apartar") : (setTrasCliente(true), setDialogo("cliente")))}
+                onClick={() => (estado.cliente ? convertir("apartar") : (setTrasCliente(true), setDialogo("cliente")))}
               >
                 Apartar
+              </Button>
+            )}
+            {puede("proformas") && (
+              <Button icono={FileText} atajo="F11" disabled={!estado.lineas.length} onClick={() => setDialogo("proforma")} title="Guardar como proforma (precio por escrito, no es una venta)">
+                Proforma
               </Button>
             )}
             <span className="muted" style={{ alignSelf: "center", fontSize: 14 }}>
@@ -821,7 +843,8 @@ export default function Venta() {
           onCambio={(c) => {
             actualizar({ ...actual(), ...c });
             if (trasCliente && !c.cliente) setAviso("Para apartar, elija o cree el cliente (con su consentimiento).");
-            setDialogo(trasCliente && c.cliente ? "apartar" : null);
+            if (trasCliente && c.cliente) convertir("apartar");
+            else setDialogo(null);
             setTrasCliente(false);
           }}
         />
@@ -875,6 +898,55 @@ export default function Venta() {
           onCredito={conCredito ? (pagos) => cobrar(pagos, undefined, true) : undefined}
           creditoDisponible={disponible}
         />
+      )}
+      {dialogo === "proforma" && activa && (
+        <GuardarProforma
+          estado={estado}
+          total={t.total - t.redondeo}
+          version={noCoincide ? estado.proforma?.numero : undefined}
+          onCerrar={() => setDialogo(null)}
+          onGuardar={async (nombre) => {
+            const conNombre = { ...estado, nombreTiquete: estado.cliente ? estado.nombreTiquete : nombre };
+            const d = await guardarProforma(activa.id, conNombre, noCoincide ? estado.proforma?.id : null);
+            // La pestaña sigue abierta y queda ligada: si compra ya, se cobra con F12 y la convierte.
+            actualizar({ ...conNombre, proforma: { id: d.proforma.id, numero: d.proforma.numero } });
+            setPfLigada(d);
+            setDialogo(null);
+            try {
+              await imprimirProforma(d.proforma.id);
+              toast.ok(`Proforma ${d.proforma.numero} guardada`, `Válida hasta el ${d.proforma.vence.split("-").reverse().join("/")}.`);
+            } catch (e) {
+              toast.error(`Proforma ${d.proforma.numero} guardada, pero no se imprimió`, `${textoError(e)} Reimprímala desde Proformas.`);
+            }
+          }}
+        />
+      )}
+      {dialogo === "proformaCambio" && activa && estado.proforma && (
+        <Modal titulo={`La venta ya no coincide con la proforma ${estado.proforma.numero}`} onCerrar={() => setDialogo(null)} ancho={520}>
+          <p>Cambió algo (productos, cantidades o descuentos) después de guardar la proforma. ¿Qué hace?</p>
+          <div className="opciones-columna">
+            <Button
+              variante="primario"
+              autoFocus
+              onClick={async () => {
+                try {
+                  const d = await guardarProforma(activa.id, estado, estado.proforma!.id);
+                  actualizar({ ...estado, proforma: { id: d.proforma.id, numero: d.proforma.numero } });
+                  setPfLigada(d);
+                  setDialogo(trasCambio);
+                } catch (e) {
+                  setError(textoError(e));
+                  setDialogo(null);
+                }
+              }}
+            >
+              Guardar como nueva versión ({siguienteVersion(estado.proforma.numero)}) y {trasCambio === "cobro" ? "cobrar" : "apartar"}
+            </Button>
+            <Button onClick={() => (actualizar({ ...estado, proforma: null }), setDialogo(trasCambio))}>
+              {trasCambio === "cobro" ? "Cobrar" : "Apartar"} sin ligar a la proforma
+            </Button>
+          </div>
+        </Modal>
       )}
       {dialogo === "apartar" && estado.cliente && caja?.turno && reglas && (
         <Apartar total={t.total} cliente={estado.cliente.nombre} reglas={reglas} dia={caja.turno.dia} formas={formas} bancos={bancos} onApartar={apartar} onCerrar={() => setDialogo(null)} />

@@ -38,6 +38,7 @@ import Administracion from "./screens/Administracion";
 import Caja from "./screens/Caja";
 import CambiarPinObligatorio from "./screens/CambiarPinObligatorio";
 import Apartados from "./screens/Apartados";
+import Proformas from "./screens/Proformas";
 import Clientes from "./screens/Clientes";
 import Inventario from "./screens/Inventario";
 import { BORRADOR as BORRADOR_ENTRADA } from "./screens/inventario/Entrada";
@@ -56,7 +57,7 @@ import { ConfirmarProvider } from "./ui/Confirmar";
 import { ToastProvider } from "./ui/Toast";
 import { aplicarTema } from "./ui/tema";
 
-export type Pagina = "venta" | "caja" | "ventas" | "apartados" | "reportes" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
+export type Pagina = "venta" | "caja" | "ventas" | "apartados" | "proformas" | "reportes" | "productos" | "inventario" | "clientes" | "facturas" | "admin" | "config";
 
 interface Seccion {
   id: Pagina;
@@ -71,6 +72,7 @@ const PRINCIPAL: Seccion[] = [
   { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja"] },
   { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["venta"] },
   { id: "apartados", texto: "Apartados", icono: Bookmark, permisos: ["cuentas.admin"] },
+  { id: "proformas", texto: "Proformas", icono: FileText, permisos: ["proformas"] },
   { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
   { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario"] },
   { id: "reportes", texto: "Reportes", icono: ChartColumn, permisos: ["reportes.ventas"] },
@@ -297,6 +299,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     caja: <Caja />,
     ventas: <VentasHoy />,
     apartados: <Apartados />,
+    proformas: <Proformas />,
     reportes: <Reportes />,
     productos: <Productos />,
     inventario: <Inventario />,

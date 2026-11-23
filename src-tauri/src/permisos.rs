@@ -29,7 +29,7 @@ impl Rol {
     }
 }
 
-const CAJERO: &[&str] = &["venta", "caja", "clientes.basico", "facturas", "cuentas"];
+const CAJERO: &[&str] = &["venta", "caja", "clientes.basico", "facturas", "cuentas", "proformas"];
 const DUENO: &[&str] = &[
     "venta",
     "caja",
@@ -49,6 +49,10 @@ const DUENO: &[&str] = &[
     "cuentas",
     "cuentas.admin",
     "reportes.ventas",
+    // Proformas: el cajero crea, busca, imprime y convierte; anular y el reporte son del dueño.
+    "proformas",
+    "proformas.anular",
+    "proformas.admin",
 ];
 // El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
 // Impresoras: agregarlas, cambiar su conexión o formato, quitarlas y la gaveta ("impresoras") son

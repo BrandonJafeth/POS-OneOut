@@ -10,6 +10,7 @@ import { useSesion } from "../app/sesion";
 import Mensaje, { textoError } from "../components/Mensaje";
 import { obtenerNegocio } from "../db/negocio";
 import { buscarProductos } from "../db/productos";
+import { reporteProformas, type ReporteProformas } from "../db/proformas";
 import type { Rangos } from "../generados/Rangos";
 import type { Reporte } from "../generados/Reporte";
 import type { Totales } from "../generados/Totales";
@@ -31,7 +32,7 @@ import { useToast } from "../ui/Toast";
 import { DetalleTurno, Historial } from "./Caja";
 import ReportesInventario from "./inventario/Reportes";
 
-type Tab = "resumen" | "dias" | "departamentos" | "productos" | "usuarios" | "formas" | "horas" | "control" | "cobrar" | "utilidad" | "cierres" | "inventario" | "precios";
+type Tab = "resumen" | "dias" | "departamentos" | "productos" | "usuarios" | "formas" | "horas" | "control" | "cobrar" | "utilidad" | "cierres" | "inventario" | "precios" | "proformas";
 const GRUPOS: { titulo: string; tabs: [Tab, string][] }[] = [
   {
     titulo: "Ventas",
@@ -43,6 +44,7 @@ const GRUPOS: { titulo: string; tabs: [Tab, string][] }[] = [
       ["productos", "Productos"],
       ["formas", "Formas de pago"],
       ["usuarios", "Usuarios"],
+      ["proformas", "Proformas"],
     ],
   },
   {
@@ -134,6 +136,12 @@ export default function Reportes() {
     if (tab !== "precios" || precios) return;
     buscarProductos({ limite: 10_000 }).then((x) => setPrecios(x.filas), (e) => setError(textoError(e)));
   }, [tab, precios]);
+  // Proformas: no son ventas; su propio reporte por fecha de emisión.
+  const [rp, setRp] = useState<ReporteProformas | null>(null);
+  useEffect(() => {
+    if (tab !== "proformas" || !desde || !hasta || desde > hasta) return;
+    reporteProformas(desde, hasta).then(setRp, (e) => setError(textoError(e)));
+  }, [tab, desde, hasta]);
 
   useEffect(() => {
     invocar<Rangos>("reporte_rangos").then((x) => (setRangos(x), setDesde(x.mesDesde), setHasta(x.hoy)), (e) => setError(textoError(e)));
@@ -159,7 +167,15 @@ export default function Reportes() {
     : [];
   const rango = tramo(desde, hasta);
   const vista =
-    tab === "precios" ? (precios ? listaPrecios(precios) : null) : r && tab !== "cierres" && tab !== "inventario" ? armar(tab, r, conCuentas, compara, setTab) : null;
+    tab === "precios"
+      ? precios
+        ? listaPrecios(precios)
+        : null
+      : tab === "proformas"
+        ? rp && vistaProformas(rp)
+        : r && tab !== "cierres" && tab !== "inventario"
+          ? armar(tab, r, conCuentas, compara, setTab)
+          : null;
   const conRango = !SIN_RANGO.includes(tab);
 
   async function exportar(ext: "csv" | "pdf") {
@@ -420,6 +436,39 @@ function Top(p: { titulo: string; filas: { nombre: string; monto: number }[]; to
   );
 }
 
+/** Proformas emitidas en el rango (fecha de emisión): cuántas se convirtieron, vencieron o se anularon. */
+function vistaProformas(r: ReporteProformas): Vista {
+  type F = ReporteProformas["filas"][number];
+  const g = (x: { cantidad: number; monto: number }) => `${monto(x.monto)} · ${x.cantidad}`;
+  const pct = r.emitidas.cantidad ? PORCENTAJE.format(r.convertidas.cantidad / r.emitidas.cantidad) : "—";
+  return {
+    titulo: "Proformas",
+    resumen: [
+      { etiqueta: "Emitidas", valor: g(r.emitidas) },
+      { etiqueta: "Convertidas", valor: g(r.convertidas), nota: `${pct} de las emitidas` },
+      { etiqueta: "Vencidas sin convertir", valor: g(r.vencidas) },
+      { etiqueta: "Anuladas", valor: g(r.anuladas) },
+      { etiqueta: "Todavía vigentes", valor: g(r.vigentes), menor: true },
+    ],
+    extra: <p className="muted">Las proformas no son ventas: no suman a las ventas ni al cierre de caja.</p>,
+    tablas: [
+      {
+        titulo: "Proformas del período",
+        columnas: [
+          txt("Número", (x: F) => x.numero),
+          txt("Emitida", (x: F) => x.fecha, (x: F) => fechaHora(new Date(x.fecha)).slice(0, 16)),
+          txt("Cliente", (x: F) => x.cliente ?? ""),
+          txt("Estado", (x: F) => x.estado),
+          txt("Convertida en", (x: F) => x.convertidaEn ?? ""),
+          din("Total", (x: F) => x.total),
+        ],
+        filas: r.filas,
+        vacio: "No hay proformas en estas fechas.",
+      },
+    ],
+  };
+}
+
 function listaPrecios(filas: ProductoLista[]): Vista {
   type P = ProductoLista;
   return {
@@ -436,7 +485,7 @@ function listaPrecios(filas: ProductoLista[]): Vista {
   };
 }
 
-function armar(tab: Exclude<Tab, "cierres" | "inventario" | "precios">, r: Reporte, conCuentas: boolean, compara: Compara, irA: (t: Tab) => void): Vista {
+function armar(tab: Exclude<Tab, "cierres" | "inventario" | "precios" | "proformas">, r: Reporte, conCuentas: boolean, compara: Compara, irA: (t: Tab) => void): Vista {
   const total = r.totales.ventas;
   const parte = (m: number) => (total ? m / total : 0);
   const pct = <T,>(f: (x: T) => number): Columna<T> => ({ titulo: "Del total", valor: (x) => parte(f(x)), ver: (x) => (total ? PORCENTAJE.format(parte(f(x))) : "—"), numero: true });

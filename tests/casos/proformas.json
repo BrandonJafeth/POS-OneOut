@@ -1,0 +1,17 @@
+{
+  "_nota": "Mismos casos en Rust (proformas_tests.rs) y TS (tests/proformas.test.ts). Una línea: [producto o null, descripción, cantidad, descuento].",
+  "coincide": [
+    { "nombre": "igual", "venta": [["P1", "Cuaderno", 2, 0]], "ventaDesc": 0, "proforma": [["P1", "Cuaderno", 2, 0]], "proformaDesc": 0, "ok": true },
+    { "nombre": "otro orden", "venta": [["P2", "Lápiz", 1, 0], ["P1", "Cuaderno", 2, 0]], "ventaDesc": 0, "proforma": [["P1", "Cuaderno", 2, 0], ["P2", "Lápiz", 1, 0]], "proformaDesc": 0, "ok": true },
+    { "nombre": "otra cantidad", "venta": [["P1", "Cuaderno", 3, 0]], "ventaDesc": 0, "proforma": [["P1", "Cuaderno", 2, 0]], "proformaDesc": 0, "ok": false },
+    { "nombre": "otro descuento de línea", "venta": [["P1", "Cuaderno", 2, 100]], "ventaDesc": 0, "proforma": [["P1", "Cuaderno", 2, 0]], "proformaDesc": 0, "ok": false },
+    { "nombre": "otro descuento al total", "venta": [["P1", "Cuaderno", 2, 0]], "ventaDesc": 500, "proforma": [["P1", "Cuaderno", 2, 0]], "proformaDesc": 0, "ok": false },
+    { "nombre": "una línea de más", "venta": [["P1", "Cuaderno", 2, 0], ["P2", "Lápiz", 1, 0]], "ventaDesc": 0, "proforma": [["P1", "Cuaderno", 2, 0]], "proformaDesc": 0, "ok": false },
+    { "nombre": "precio libre por descripción", "venta": [[null, " Arreglo floral ", 1, 0]], "ventaDesc": 0, "proforma": [[null, "arreglo floral", 1, 0]], "proformaDesc": 0, "ok": true }
+  ],
+  "numero": [
+    { "consecutivo": 12, "version": 1, "esperado": "P-0012" },
+    { "consecutivo": 12, "version": 2, "esperado": "P-0012-2" },
+    { "consecutivo": 7, "version": 3, "esperado": "P-0007-3" }
+  ]
+}

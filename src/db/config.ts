@@ -72,6 +72,13 @@ export interface ConfigApp {
   inventario_motivos_ajuste: string[];
   /** La importación genera códigos internos a los productos que no tienen (por defecto no). */
   importacion_codigos_internos: boolean;
+  /** Proformas: días de vigencia, cómo se cuentan, qué precio se cobra al convertir una vigente, condiciones
+   *  impresas y días tras los que se borra el nombre escrito (Ley 8968). */
+  proforma_vigencia_dias: number;
+  proforma_vigencia_tipo: "calendario" | "laborables";
+  proforma_precio_al_convertir: "proforma" | "actual";
+  proforma_condiciones: string;
+  proforma_retencion_nombre_dias: number;
 }
 
 /** Valores por defecto si una clave falta en la base (los mismos que siembra la migración). */
@@ -117,6 +124,11 @@ export const CONFIG_DEFECTO: ConfigApp = {
   venta_mostrar_existencia: false,
   inventario_motivos_ajuste: ["Conteo", "Daño", "Merma", "Regalo", "Error de registro", "Otro"],
   importacion_codigos_internos: false,
+  proforma_vigencia_dias: 8,
+  proforma_vigencia_tipo: "laborables",
+  proforma_precio_al_convertir: "proforma",
+  proforma_condiciones: "",
+  proforma_retencion_nombre_dias: 30,
 };
 
 /** Todas las claves tal como están en la base (para el editor técnico). */

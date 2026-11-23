@@ -48,6 +48,7 @@ fn permiso_de(clave: &str) -> &'static [&'static str] {
         // Política de apartados y crédito: la decide el dueño. Activar el módulo (usa_*) es del técnico.
         "abono_minimo_pct" => &["cuentas.admin", "config.tecnica"],
         c if c.starts_with("apartado_") || c.starts_with("credito_") => &["cuentas.admin", "config.tecnica"],
+        c if c.starts_with("proforma_") => &["proformas.admin", "config.tecnica"],
         _ => &["config.tecnica"],                                  // todo lo demás: técnico
     }
 }
@@ -115,9 +116,19 @@ pub(crate) fn validar(clave: &str, v: &Value) -> Res<()> {
             Some("calendario" | "laborables") => Ok(()),
             _ => Err(format!("«{clave}»: \"calendario\" o \"laborables\"")),
         },
-        "credito_condiciones" => match v.as_str() {
+        "proforma_vigencia_dias" => entero(1, 365),
+        "proforma_retencion_nombre_dias" => entero(0, 3650),
+        "proforma_vigencia_tipo" => match v.as_str() {
+            Some("calendario" | "laborables") => Ok(()),
+            _ => Err("«proforma_vigencia_tipo»: \"calendario\" o \"laborables\"".into()),
+        },
+        "proforma_precio_al_convertir" => match v.as_str() {
+            Some("proforma" | "actual") => Ok(()),
+            _ => Err("«proforma_precio_al_convertir»: \"proforma\" o \"actual\"".into()),
+        },
+        "proforma_condiciones" | "credito_condiciones" => match v.as_str() {
             Some(t) if t.chars().count() <= 300 && !t.chars().any(|c| c.is_control() && c != '\n') => Ok(()),
-            _ => Err("Las condiciones del crédito: texto de hasta 300 letras".into()),
+            _ => Err(format!("«{clave}»: texto de hasta 300 letras")),
         },
         "apartado_cancelacion" => match v.as_str() {
             Some("devolver" | "retener") => Ok(()),

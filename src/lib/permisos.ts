@@ -24,13 +24,16 @@ export type Permiso =
   | "inventario" // existencias, entradas, ajustes, conteos, proveedores y costos (solo el dueño)
   | "cuentas" // apartados y crédito: crear, buscar, abonar, entregar
   | "cuentas.admin" // todos los apartados, cancelar, anular abonos, condonar, límites de crédito
-  | "reportes.ventas"; // reportes de ventas e historial de cierres (solo el dueño: llevan clientes)
+  | "reportes.ventas" // reportes de ventas e historial de cierres (solo el dueño: llevan clientes)
+  | "proformas" // crear, buscar, imprimir, editar (nueva versión) y pasar a venta
+  | "proformas.anular" // anular una proforma (con motivo)
+  | "proformas.admin"; // opciones de proformas y su reporte
 
 // Copia de src-tauri/src/permisos.rs: Rust es quien decide; aquí solo se usa para mostrar u ocultar.
 // Ley 8968: el técnico administra el sistema pero NO ve datos de clientes (ni el respaldo).
 // Y no maneja dinero: no vende ni toca la caja.
 export const PERMISOS: Record<Rol, readonly Permiso[]> = {
-  cajero: ["venta", "caja", "clientes.basico", "facturas", "cuentas"],
+  cajero: ["venta", "caja", "clientes.basico", "facturas", "cuentas", "proformas"],
   dueno: [
     "venta",
     "caja",
@@ -50,6 +53,9 @@ export const PERMISOS: Record<Rol, readonly Permiso[]> = {
     "cuentas",
     "cuentas.admin",
     "reportes.ventas",
+    "proformas",
+    "proformas.anular",
+    "proformas.admin",
   ],
   tecnico: [
     "productos",

@@ -238,7 +238,7 @@ fn numero(tipo: &str, n: i64) -> String {
     format!("{}-{n:04}", if tipo == CREDITO { "C" } else { "A" })
 }
 
-async fn cliente_con_consentimiento(c: &mut SqliteConnection, id: &str) -> Res<()> {
+pub(crate) async fn cliente_con_consentimiento(c: &mut SqliteConnection, id: &str) -> Res<()> {
     let ok: Option<i64> = sqlx::query_scalar("SELECT 1 FROM clientes WHERE id = ? AND anonimizado_en IS NULL AND consentimiento_datos = 1").bind(id).fetch_optional(&mut *c).await.map_err(e)?;
     ok.map(|_| ()).ok_or_else(|| "El cliente no tiene el consentimiento para guardar sus datos: créelo de nuevo con la casilla del aviso".into())
 }
@@ -462,7 +462,9 @@ pub async fn crear_apartado_con(
     cliente_con_consentimiento(&mut tx, &cliente.id).await?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
     caja::reloj_atrasado(&mut tx, "apartar").await?;
-    let (lineas, catalogo) = ventas::lineas_de_catalogo(&mut tx, &est.lineas).await?;
+    // Apartar una venta ligada a una proforma también la convierte (en esta transacción).
+    let conv = crate::proformas::preparar_conversion(&mut tx, est).await?;
+    let (lineas, catalogo) = ventas::lineas_de_catalogo_con(&mut tx, &est.lineas, conv.as_ref().map(|c| &c.permitidos).unwrap_or(&Default::default())).await?;
     let e2 = Estado { lineas, ..est.clone() };
     // Sin existencia libre (descontando lo ya apartado) solo se aparta si el negocio vende sin existencia.
     let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
@@ -480,7 +482,10 @@ pub async fn crear_apartado_con(
     }
     // El total del apartado se redondea como en efectivo: así cualquier abono en efectivo cierra exacto.
     let tot = calculo::totales(&e2, paso);
-    let autorizado_por = ventas::revisar_tope(&tot, &catalogo, tope, est, espera_id)?;
+    let autorizado_por = match conv.as_ref().and_then(|c| c.autorizado_por.clone()) {
+        Some(d) => Some(d),
+        None => ventas::revisar_tope(&tot, &catalogo, tope, est, espera_id)?,
+    };
     if tot.total <= 0 {
         return Err("Un apartado de ¢0 no tiene sentido: regístrelo como venta".into());
     }
@@ -547,6 +552,9 @@ pub async fn crear_apartado_con(
     .await
     .map_err(e)?;
     insertar_lineas(&mut tx, &cuenta_id, &e2.lineas, &catalogo, &fecha).await?;
+    if let Some(c) = &conv {
+        crate::proformas::marcar_convertida(&mut tx, a, c, None, Some(&cuenta_id)).await?;
+    }
     evento(&mut tx, &cuenta_id, "creada", tot.total, Some(&t.id), None, a, autorizado_por.as_deref(), None, &fecha).await?;
     let (_, abonado, efectivo) = insertar_abonos(&mut tx, &cuenta_id, &t, a, &rp, &fs, operacion_id, &fecha).await?;
     bitacora::registrar(&mut tx, Some(&a.id), "cuenta.crear", "cuenta", Some(&cuenta_id), &json!({"tipo": APARTADO, "numero": num, "total": tot.total, "abono": abonado})).await?;

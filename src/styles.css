@@ -1683,6 +1683,13 @@ details.fiscal summary {
   font-weight: 600;
 }
 
+/* Dos o más decisiones apiladas en un diálogo (cada una, un botón ancho). */
+.opciones-columna {
+  display: grid;
+  gap: var(--e3);
+  margin-top: var(--e4);
+}
+
 /* Estado de cuenta: una cuenta tras otra, separadas. */
 .estado-cuenta-bloque + .estado-cuenta-bloque {
   margin-top: var(--e5);

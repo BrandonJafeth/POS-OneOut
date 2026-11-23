@@ -8,6 +8,12 @@ import { crearEspera, descartarEspera, guardarEspera, listarEsperas } from "../.
 import { estadoVacio } from "../../lib/venta/calculo";
 import type { EstadoEspera, VentaEspera } from "../../tipos";
 
+/** Pestaña que se activa al entrar a Venta (la que abrió "Pasar a venta" desde Proformas). */
+let pendiente: string | null = null;
+export function activarAlEntrar(esperaId: string) {
+  pendiente = esperaId;
+}
+
 export function useEsperas(onError: (msg: string) => void) {
   const { actor } = useSesion();
   const [esperas, setEsperas] = useState<VentaEspera[]>([]);
@@ -29,7 +35,8 @@ export function useEsperas(onError: (msg: string) => void) {
       let l = await listarEsperas();
       if (!l.length) l = [await crearEspera(actor, estadoVacio())];
       poner(l);
-      setActivaId(l[0].id);
+      setActivaId(l.find((x) => x.id === pendiente)?.id ?? l[0].id);
+      pendiente = null;
     })().catch((e) => onError(textoError(e)));
   }, []);
 

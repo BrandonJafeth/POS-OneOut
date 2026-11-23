@@ -52,6 +52,9 @@ pub struct Estado {
     pub nombre_tiquete: Option<String>,
     pub requiere_factura: bool,
     pub autorizacion: Option<Autorizacion>,
+    /// Venta ligada a una proforma: al cobrar o apartar, la proforma pasa a "convertida" (proformas.rs).
+    #[serde(default)]
+    pub proforma: Option<crate::proformas::ProformaRef>,
 }
 
 pub fn redondear(n: i64, paso: i64) -> i64 {

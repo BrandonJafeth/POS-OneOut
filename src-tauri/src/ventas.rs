@@ -304,6 +304,16 @@ pub async fn faltantes(pool: &SqlitePool, a: &Actor, caja_id: &str, lineas: &[(O
 /// pantalla. Devuelve las líneas corregidas y, por línea, la parte en colones del descuento fijo del
 /// producto (no cuenta contra el tope del rol). La usan el cobro, el apartado y la venta a crédito.
 pub(crate) async fn lineas_de_catalogo(tx: &mut SqliteConnection, entrada: &[calculo::Linea]) -> Res<(Vec<calculo::Linea>, Vec<i64>)> {
+    lineas_de_catalogo_con(tx, entrada, &Default::default()).await
+}
+
+/// Igual, pero `permitidos` (producto → precio y % de descuento de una proforma vigente) reemplaza al
+/// precio del catálogo para esos productos: se cobra lo que se prometió por escrito.
+pub(crate) async fn lineas_de_catalogo_con(
+    tx: &mut SqliteConnection,
+    entrada: &[calculo::Linea],
+    permitidos: &std::collections::HashMap<String, (i64, i64)>,
+) -> Res<(Vec<calculo::Linea>, Vec<i64>)> {
     let mut lineas = entrada.to_vec();
     // Descuento fijo del producto (lo puso el dueño en el catálogo): no cuenta contra el tope del rol.
     // Por línea, en colones: se guarda aparte para que el Z no se lo cargue al cajero.
@@ -319,14 +329,14 @@ pub(crate) async fn lineas_de_catalogo(tx: &mut SqliteConnection, entrada: &[cal
             if p.get::<i64, _>("activo") != 1 {
                 return Err(format!("\"{}\" está desactivado y ya no se vende: quítelo de la venta", l.descripcion));
             }
-            if p.get::<i64, _>("precio") != l.precio_unitario {
+            let (precio, pct) = permitidos.get(pid).copied().unwrap_or((p.get("precio"), p.get("descuento_pct")));
+            if precio != l.precio_unitario {
                 return Err(format!("\"{}\": el precio cambió, vuelva a agregarlo", l.descripcion));
             }
             l.descripcion = p.get("nombre");
             l.tasa_iva = p.get("tasa_iva");
             l.exento = p.get::<i64, _>("exento") == 1;
             l.departamento_id = p.get("departamento_id");
-            let pct: i64 = p.get("descuento_pct");
             if pct != l.descuento_catalogo {
                 return Err(format!("\"{}\": el descuento del producto cambió, vuelva a agregarlo", l.descripcion));
             }
@@ -378,7 +388,9 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
     caja::reloj_atrasado(&mut tx, "cobrar").await?;
-    let (lineas, catalogo) = lineas_de_catalogo(&mut tx, &est.lineas).await?;
+    // Venta ligada a una proforma: se convierte en esta misma transacción (proformas.rs).
+    let conv = crate::proformas::preparar_conversion(&mut tx, est).await?;
+    let (lineas, catalogo) = lineas_de_catalogo_con(&mut tx, &est.lineas, conv.as_ref().map(|c| &c.permitidos).unwrap_or(&Default::default())).await?;
     let e2 = Estado { lineas, ..est.clone() };
     // Inventario: precio libre (sin producto) y servicios (sin control) no mueven existencia.
     let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
@@ -404,7 +416,11 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     let fs = formas(&mut tx).await?;
     let con_efectivo = (pagos.is_empty() && !credito) || pagos.iter().any(|p| fs.iter().any(|f| f.id == p.forma_pago_id && f.da_vuelto));
     let tot = calculo::totales(&e2, if con_efectivo { paso } else { 1 });
-    let autorizado_por = revisar_tope(&tot, &catalogo, tope, est, espera_id)?;
+    // El descuento autorizado en la proforma vale si se cobra a su precio y con sus mismos descuentos.
+    let autorizado_por = match conv.as_ref().and_then(|c| c.autorizado_por.clone()) {
+        Some(d) => Some(d),
+        None => revisar_tope(&tot, &catalogo, tope, est, espera_id)?,
+    };
     if (est.requiere_factura || credito) && est.cliente.is_none() {
         return Err(if credito { "Para vender a crédito, elija el cliente".into() } else { "Para factura electrónica, elija o cree el cliente".into() });
     }
@@ -469,6 +485,9 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         .await
         .map_err(e)?;
     inventario::descontar_venta(&mut tx, &venta_id, &sucursal, &a.id, &t.id, &controladas, &fecha).await?;
+    if let Some(c) = &conv {
+        crate::proformas::marcar_convertida(&mut tx, a, c, Some(&venta_id), None).await?;
+    }
     let cuenta_id = if credito {
         let cliente = est.cliente.as_ref().map(|c| c.id.as_str()).unwrap_or_default();
         Some(crate::cuentas::abrir_credito(&mut tx, a, &t, &venta_id, cliente, &e2.lineas, &catalogo, rp.faltante, &fecha).await?)
