@@ -3,7 +3,7 @@
 Cada instalador entregado, con su SHA-256. Antes de instalar, compare (PowerShell, en la carpeta del instalador):
 
 ```powershell
-Get-FileHash ".\Punto de Venta_0.9.2_x64-setup.exe" -Algorithm SHA256
+Get-FileHash ".\Punto de Venta_0.9.3_x64-setup.exe" -Algorithm SHA256
 ```
 
 Ningún instalador repite número de versión: con el SHA-256 de una versión anotado aquí, `build.rs` no deja
@@ -12,6 +12,23 @@ compilar otro instalador con ese número (hay que subir la versión).
 Si el hash no coincide, **no lo instale**: avise al técnico. Los instaladores no están firmados; Windows
 SmartScreen avisa «Windows protegió su PC» → **Más información → Ejecutar de todas formas**. No desactive el
 antivirus.
+
+## 0.9.3 — permisos configurables y bloqueo por inactividad (2026-11-24)
+
+| | |
+|---|---|
+| Archivo | `Punto de Venta_0.9.3_x64-setup.exe` (NSIS, por usuario, 4,65 MiB) |
+| SHA-256 | `ea8be3d6b180ed40384ab24e47066ee350a13bbb7e60b5c571265cf6486ea5b6` |
+| Commit | `dbcbd0c` (rama `entrega-0.9.3`; el commit siguiente solo anota este hash) |
+| Migraciones | 1 a 25 |
+| Respaldo | `POSBAK02` (fixture `tests/fixtures/respaldo-v0.9.3-m25.posbak`, con una versión de permisos propia) |
+| Pruebas | `cargo test --lib` 190 ok (1 ignorada: genera fixture) · `npm test` 226 ok · `tsc` sin errores · e2e 10 de 10 (apartado y permisos) |
+
+Cambios desde 0.9.2:
+- Permisos por rol y por cajero (Administración → Permisos): 80 acciones, política no / sí / motivo / PIN del dueño con límites, excepciones, plantillas, historial, volver a una versión y PDF para firmar. Al actualizar, la versión 1 es igual a la 0.9.2.
+- Anulación por el cajero A/B/C con comprobante, sección en el Z y aviso al dueño.
+- Bloqueo por inactividad configurable (1 a 60 min, técnico hasta 15): bloquea sin cerrar la sesión ni perder trabajo.
+- Los topes de descuento, salida sin PIN, vender sin existencia, ver existencias e inactividad pasaron de la configuración a los permisos (con su valor).
 
 ## 0.9.2 — crédito completo, huecos de cuentas y proformas (2026-11-23)
 
