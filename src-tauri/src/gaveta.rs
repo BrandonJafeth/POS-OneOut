@@ -10,7 +10,6 @@ use crate::bitacora;
 use crate::caja;
 use crate::config;
 use crate::impresoras;
-use crate::permisos::Rol;
 use crate::sesion::Actor;
 use crate::usuarios;
 use crate::util::{ahora_iso, e, texto, ulid, Res};
@@ -20,7 +19,7 @@ use sqlx::{Row, SqlitePool};
 
 /// Abre la gaveta por una venta con efectivo recién cobrada (una sola vez por venta).
 pub async fn por_venta(pool: &SqlitePool, a: &Actor, venta_id: &str) -> Res<()> {
-    a.exigir("venta", "abrir la gaveta")?;
+    a.exigir("venta.vender", "abrir la gaveta")?;
     if !config::booleano(pool, "abrir_gaveta_efectivo", true).await {
         return Err("La caja está configurada para no abrir la gaveta con las ventas.".into());
     }
@@ -54,7 +53,7 @@ pub async fn por_venta(pool: &SqlitePool, a: &Actor, venta_id: &str) -> Res<()> 
 /// Abono (o primer abono de un apartado) con efectivo, en su turno abierto, una sola vez por
 /// operación: mismo camino que la venta (un abono es dinero que entra a la gaveta).
 pub async fn por_abono(pool: &SqlitePool, a: &Actor, operacion_id: &str) -> Res<()> {
-    a.exigir("cuentas", "abrir la gaveta")?;
+    a.exigir("cuentas.abonar", "abrir la gaveta")?;
     if !config::booleano(pool, "abrir_gaveta_efectivo", true).await {
         return Err("La caja está configurada para no abrir la gaveta con las ventas.".into());
     }
@@ -105,7 +104,7 @@ pub const PIN_GAVETA: &str = "PIN_GAVETA";
 /// límite del turno (caja_no_venta_umbral, el mismo de la alerta del cierre) es libre; desde ahí,
 /// cada una necesita el PIN del dueño (el dueño no). Límite 0 = sin PIN nunca.
 pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str, nota: &str, pin: Option<&str>) -> Res<()> {
-    a.exigir("caja", "abrir la gaveta")?;
+    a.exigir("caja.no_venta", "abrir la gaveta")?;
     let motivo = texto(motivo, 60, "el motivo", true)?;
     let nota = texto(nota, 200, "el detalle", false)?;
     let lista = caja::motivos_no_venta(pool).await;
@@ -115,7 +114,8 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
     if motivo.to_lowercase().starts_with("otro") && nota.chars().count() < 3 {
         return Err("Escriba el motivo".into());
     }
-    let umbral = config::entero(pool, "caja_no_venta_umbral", 5).await;
+    // Política «caja.no_venta»: cuántas sin PIN por turno (el aviso del Z sigue en caja_no_venta_umbral).
+    let pol = a.politica("caja.no_venta");
     // Fuera de la transacción: autorizar_dueno escribe (intentos fallidos) y la transacción tiene la base tomada.
     let previas: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM gaveta_aperturas g JOIN caja_turnos t ON t.id = g.turno_id WHERE g.caja_id = ? AND t.estado = 'abierto' AND g.causa = 'no_venta'",
@@ -124,7 +124,11 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
     .fetch_one(pool)
     .await
     .map_err(e)?;
-    let autorizado = if a.rol != Rol::Dueno && umbral > 0 && previas >= umbral {
+    let pasa = pol.nivel == crate::acciones::Nivel::Pin || pol.limites.cantidad_turno.is_some_and(|u| u > 0 && previas >= u);
+    if pasa && pol.nivel != crate::acciones::Nivel::Pin && pol.limites.al_pasar == crate::acciones::AlPasar::Bloquear {
+        return Err(format!("Ya van {previas} aperturas sin venta en este turno: no se puede abrir otra vez."));
+    }
+    let autorizado = if pasa {
         match pin.filter(|p| !p.is_empty()) {
             None => return Err(format!("{PIN_GAVETA}: ya van {previas} aperturas sin venta en este turno. Para abrirla otra vez hace falta el PIN del dueño.")),
             Some(p) => Some(usuarios::autorizar_dueno(pool, p, "abrir la gaveta sin venta", &a.id).await?),
@@ -159,7 +163,7 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
 /// Al cerrar la caja: abre la gaveta una vez para contar el efectivo. Solo quien puede cerrar ese
 /// turno. No es "sin venta": no cuenta para el límite ni para la alerta del cierre.
 pub async fn para_cierre(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<()> {
-    a.exigir("caja", "abrir la gaveta")?;
+    a.exigir("caja.cerrar", "abrir la gaveta")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_abierto(&mut tx, caja_id).await?.ok_or("La caja no está abierta")?;
     let comp = caja::compartido(&mut tx).await;
@@ -188,7 +192,7 @@ pub async fn para_cierre(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<()>
 
 /// Orden del dueño: abre la gaveta con su PIN (sirve aunque la caja esté cerrada).
 pub async fn orden_dueno(pool: &SqlitePool, a: &Actor, caja_id: &str, pin: &str, motivo: &str) -> Res<()> {
-    a.exigir("caja", "abrir la gaveta")?;
+    a.exigir("caja.gaveta_sin_venta", "abrir la gaveta")?;
     let motivo = texto(motivo, 120, "el motivo", true)?;
     if motivo.chars().count() < 3 {
         return Err("Escriba el motivo".into());
@@ -236,7 +240,7 @@ pub struct Apertura {
 
 /// Vista del dueño: todas las aperturas sin venta, por fechas (día local) y usuario.
 pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, hasta: &str, usuario_id: Option<&str>) -> Res<Vec<Apertura>> {
-    a.exigir("caja.admin", "ver las aperturas de gaveta")?;
+    a.exigir("caja.historial", "ver las aperturas de gaveta")?;
     let filas = sqlx::query(
         "SELECT g.*, u.nombre AS usuario, ua.nombre AS autorizado, t.dia FROM gaveta_aperturas g JOIN usuarios u ON u.id = g.usuario_id
          LEFT JOIN usuarios ua ON ua.id = g.autorizado_por LEFT JOIN caja_turnos t ON t.id = g.turno_id
@@ -317,7 +321,10 @@ mod tests {
         let (bd, _, dueno, cajero) = base_con_usuarios().await;
         let p = &bd.pool;
         dos_impresoras(p, &dueno, "GAVPIN").await;
-        sqlx::query("INSERT OR REPLACE INTO config (clave, valor) VALUES ('caja_no_venta_umbral', '2')").execute(p).await.unwrap();
+        // Política «caja.no_venta» del cajero: 2 por turno sin PIN.
+        let cajero = crate::politica::con(&cajero, |d| {
+            d.cajero.get_mut("caja.no_venta").unwrap().limites.cantidad_turno = Some(2);
+        });
         abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
         // Hasta el límite, libre (la orden del dueño no cuenta).
         orden_dueno(p, &cajero, CAJA_1, "246813", "Poner fondo").await.unwrap();
@@ -338,9 +345,16 @@ mod tests {
         let d = detalle(p, &dueno, &t).await.unwrap();
         assert_eq!(d.resumen.no_ventas.len(), 5); // 1 orden del dueño + 4 sin venta; la del cierre no
         assert!(d.resumen.no_ventas.iter().all(|x| x.causa != "cierre"));
-        // Límite 0: nunca pide PIN.
-        sqlx::query("UPDATE config SET valor = '0' WHERE clave = 'caja_no_venta_umbral'").execute(p).await.unwrap();
+        // Sin límite: nunca pide PIN.
+        let cajero = crate::politica::con(&cajero, |d| d.cajero.get_mut("caja.no_venta").unwrap().limites.cantidad_turno = None);
         no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "", None).await.unwrap();
+        // «Bloquear» al pasar: ni con PIN.
+        let cajero = crate::politica::con(&cajero, |d| {
+            let l = &mut d.cajero.get_mut("caja.no_venta").unwrap().limites;
+            l.cantidad_turno = Some(1);
+            l.al_pasar = crate::acciones::AlPasar::Bloquear;
+        });
+        assert!(no_venta(p, &cajero, CAJA_1, "Cambio de billetes", "", Some("246813")).await.unwrap_err().contains("no se puede"));
     }
 
     /// La migración 18 reconstruye la tabla: las aperturas de antes siguen ahí, sin poder cambiarse ni

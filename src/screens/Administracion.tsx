@@ -1,5 +1,5 @@
 // Administración (dueño/técnico): fuera del flujo del cajero. Tarjetas grandes → subpantalla.
-import { ArrowLeft, Building2, DatabaseBackup, FolderTree, Landmark, Printer, ScrollText, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Building2, DatabaseBackup, FolderTree, Landmark, Printer, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSesion } from "../app/sesion";
 import type { Permiso } from "../lib/permisos";
@@ -9,20 +9,22 @@ import Departamentos from "./Departamentos";
 import Impresoras from "./Impresoras";
 import Historial from "./Historial";
 import Negocio from "./Negocio";
+import Permisos from "./Permisos";
 import Respaldo from "./Respaldo";
 import Usuarios from "./Usuarios";
 
-type Sub = "usuarios" | "departamentos" | "negocio" | "impresoras" | "caja" | "respaldo" | "bitacora";
+type Sub = "usuarios" | "permisos" | "departamentos" | "negocio" | "impresoras" | "caja" | "respaldo" | "bitacora";
 
 // permisos: basta uno.
 const ACCESOS: { id: Sub; texto: string; detalle: string; icono: LucideIcon; permisos: Permiso[]; pantalla: ReactNode }[] = [
-  { id: "usuarios", texto: "Usuarios", detalle: "Cajeros, PIN y accesos", icono: UserCog, permisos: ["usuarios"], pantalla: <Usuarios /> },
-  { id: "departamentos", texto: "Departamentos", detalle: "Nombres, orden y color en la venta", icono: FolderTree, permisos: ["departamentos"], pantalla: <Departamentos /> },
-  { id: "negocio", texto: "Datos del negocio", detalle: "Teléfono, logo, pie del tiquete y aviso de privacidad", icono: Building2, permisos: ["negocio"], pantalla: <Negocio /> },
+  { id: "usuarios", texto: "Usuarios", detalle: "Cajeros, PIN y accesos", icono: UserCog, permisos: ["usuarios.administrar"], pantalla: <Usuarios /> },
+  { id: "permisos", texto: "Permisos", detalle: "Qué puede hacer cada rol y cada cajero, anulaciones y bloqueo", icono: ShieldCheck, permisos: ["seguridad.editar"], pantalla: <Permisos /> },
+  { id: "departamentos", texto: "Departamentos", detalle: "Nombres, orden y color en la venta", icono: FolderTree, permisos: ["departamentos.editar"], pantalla: <Departamentos /> },
+  { id: "negocio", texto: "Datos del negocio", detalle: "Teléfono, logo, pie del tiquete y aviso de privacidad", icono: Building2, permisos: ["negocio.contacto"], pantalla: <Negocio /> },
   { id: "impresoras", texto: "Impresoras", detalle: "Tiquetes, cierres, etiquetas y gaveta", icono: Printer, permisos: ["impresoras.asignar"], pantalla: <Impresoras /> },
-  { id: "caja", texto: "Caja y cierre", detalle: "Turno compartido, cierre Z y no venta", icono: Landmark, permisos: ["caja.admin", "config.tecnica"], pantalla: <ConfigCaja /> },
-  { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permisos: ["respaldo"], pantalla: <Respaldo /> },
-  { id: "bitacora", texto: "Bitácora", detalle: "Quién hizo qué y cuándo: anulaciones, gaveta, cambios", icono: ScrollText, permisos: ["reportes"], pantalla: <Historial /> },
+  { id: "caja", texto: "Caja y cierre", detalle: "Turno compartido, cierre Z y no venta", icono: Landmark, permisos: ["caja.opciones"], pantalla: <ConfigCaja /> },
+  { id: "respaldo", texto: "Respaldo", detalle: "Copia cifrada de toda la información", icono: DatabaseBackup, permisos: ["respaldo.crear"], pantalla: <Respaldo /> },
+  { id: "bitacora", texto: "Bitácora", detalle: "Quién hizo qué y cuándo: anulaciones, gaveta, cambios", icono: ScrollText, permisos: ["bitacora.ver"], pantalla: <Historial /> },
 ];
 
 export default function Administracion() {

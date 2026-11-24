@@ -56,7 +56,7 @@ export function AbrirCaja(p: { estado: EstadoCaja; onCerrar(): void; onAbierta()
   // Conteo ciego: el resultado de la comparación se ve solo después de confirmar.
   const [abierta, setAbierta] = useState<Turno | null>(null);
   const ap = p.estado.apertura;
-  const admin = puede(useSesion().actor.rol, "caja.admin");
+  const admin = puede(useSesion().actor.rol, "caja.ver_totales");
 
   if (noLaborable && !confirmado && ap) {
     return (

@@ -139,7 +139,7 @@ export interface Proveedor {
 export const listarInventario = (filtro: { texto?: string; departamentoId?: string; filtro?: FiltroInventario; limite?: number; desplazamiento?: number }) =>
   invocar<{ filas: FilaInventario[]; total: number }>("inventario_lista", { filtro });
 export const estadoInventario = (ids: string[]) => invocar<FilaInventario[]>("inventario_estado", { ids });
-/** Cajero: solo si la configuración venta_mostrar_existencia lo permite. Nunca trae el costo. */
+/** Cajero: solo si su política «venta.ver_existencia» lo permite. Nunca trae el costo. */
 export const existenciaVenta = (ids: string[]) => invocar<{ productoId: string; existencia: number }[]>("inventario_existencia", { ids });
 export const alertasInventario = () => invocar<number>("inventario_alertas");
 export const guardarInventarioProducto = (productoId: string, controla: boolean, minimo: number, costo: number | null) =>

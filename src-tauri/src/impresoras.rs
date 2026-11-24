@@ -82,7 +82,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<Vec<Impr
 
 /// Lo que detecta el sistema (impresoras de Windows, puertos COM, impresoras USB).
 pub fn detectar(a: &Actor) -> Res<printer::Detectadas> {
-    a.exigir("impresoras", "buscar impresoras")?;
+    a.exigir("impresoras.configurar", "buscar impresoras")?;
     Ok(printer::detectar())
 }
 
@@ -112,7 +112,7 @@ fn baudios_defecto() -> i64 {
 }
 
 pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, d: &Datos) -> Res<String> {
-    a.exigir("impresoras", "configurar impresoras")?;
+    a.exigir("impresoras.configurar", "configurar impresoras")?;
     let nombre = texto(&d.nombre, 40, "el nombre de la impresora", true)?;
     if !["windows", "serial", "usb"].contains(&d.conexion.as_str()) {
         return Err("Elija el tipo de conexión".into());
@@ -189,7 +189,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, d: &Datos) -> 
 }
 
 pub async fn eliminar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
-    a.exigir("impresoras", "quitar impresoras")?;
+    a.exigir("impresoras.configurar", "quitar impresoras")?;
     let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let n = sqlx::query("UPDATE impresoras SET eliminado_en = ?, gaveta = 0, actualizado_en = ? WHERE id = ? AND eliminado_en IS NULL").bind(&ahora).bind(&ahora).bind(id).execute(&mut *tx).await.map_err(e)?.rows_affected();
@@ -402,7 +402,7 @@ pub mod tests {
     /// Las configura el técnico de la base (es el único que puede), sea quien sea `_quien`.
     pub async fn dos_impresoras(p: &SqlitePool, _quien: &Actor, prefijo: &str) -> (String, String) {
         let tecnico = crate::usuarios::tecnico_id(p).await.unwrap().expect("la base de prueba trae técnico");
-        let dueno = &Actor { id: tecnico, rol: crate::permisos::Rol::Tecnico, nombre: "Técnico".into() };
+        let dueno = &Actor::nuevo(tecnico, crate::permisos::Rol::Tecnico, "Técnico");
         let (a, b) = (format!("{prefijo}-TIQ"), format!("{prefijo}-ETQ"));
         printer::simulada::instalar("windows", &a);
         printer::simulada::instalar("windows", &b);

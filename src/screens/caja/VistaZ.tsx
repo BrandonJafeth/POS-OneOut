@@ -277,6 +277,24 @@ export default function VistaZ({ d, denominaciones }: { d: Detalle; denominacion
         </>
       )}
 
+      {!!r.anulacionesSinPin?.length && (
+        <>
+          <h3>Anulaciones por cajero sin PIN</h3>
+          <ul className="caja-movs">
+            {r.anulacionesSinPin.map((x, i) => (
+              <li key={i}>
+                <span>{hora(x.fecha)}</span>
+                <span>
+                  Tiquete {x.numero} · {x.motivo}
+                  <span className="muted"> · {x.usuario}</span>
+                </span>
+                <span>{monto(x.total)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       {r.cortes.length > 0 && (
         <>
           <h3>Cortes</h3>

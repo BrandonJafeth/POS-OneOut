@@ -191,9 +191,9 @@ async fn ventas_en_espera_sobreviven_a_cerrar_la_app() {
     let dir = std::env::temp_dir().join(format!("pos-espera-{}", ulid()));
     let bd = crate::bd::Bd::abrir(&dir, None).await.unwrap();
     let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-    let tec = crate::sesion::Actor { id: t.id, rol: crate::permisos::Rol::Tecnico, nombre: "T".into() };
+    let tec = crate::sesion::Actor::nuevo(t.id, crate::permisos::Rol::Tecnico, "T");
     let c = crate::usuarios::crear(&bd.pool, &tec, "Luis", crate::permisos::Rol::Cajero, "2580").await.unwrap();
-    let luis = crate::sesion::Actor { id: c.id, rol: crate::permisos::Rol::Cajero, nombre: "Luis".into() };
+    let luis = crate::sesion::Actor::nuevo(c.id, crate::permisos::Rol::Cajero, "Luis");
     let mut e = Estado::default();
     e.lineas.push(linea(1500, 2, 0));
     let esp = crear_espera(&bd.pool, &luis, CAJA_1, &e).await.unwrap();
@@ -327,9 +327,9 @@ async fn corte_de_luz_a_mitad_de_un_cobro() {
     let dir = std::env::temp_dir().join(format!("pos-corte-{}", ulid()));
     let bd = crate::bd::Bd::abrir(&dir, None).await.unwrap();
     let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-    let tec = crate::sesion::Actor { id: t.id, rol: crate::permisos::Rol::Tecnico, nombre: "T".into() };
+    let tec = crate::sesion::Actor::nuevo(t.id, crate::permisos::Rol::Tecnico, "T");
     let c = crate::usuarios::crear(&bd.pool, &tec, "Luis", crate::permisos::Rol::Cajero, "2580").await.unwrap();
-    let luis = crate::sesion::Actor { id: c.id, rol: crate::permisos::Rol::Cajero, nombre: "Luis".into() };
+    let luis = crate::sesion::Actor::nuevo(c.id, crate::permisos::Rol::Cajero, "Luis");
     let pid = producto(&bd.pool, 1000).await;
     abrir(&bd.pool, &luis, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
     let antes: i64 = sqlx::query_scalar("SELECT consecutivo_siguiente FROM cajas WHERE id = ?").bind(CAJA_1).fetch_one(&bd.pool).await.unwrap();

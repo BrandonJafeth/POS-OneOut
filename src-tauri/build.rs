@@ -25,7 +25,16 @@ fn main() {
             "La versión {version} ya se entregó (ENTREGAS.md tiene su SHA-256). Suba la versión en tauri.conf.json, Cargo.toml y package.json."
         );
     }
-    tauri_build::build()
+    // Manifiesto de Windows (Common Controls v6) puesto por el enlazador y no por tauri_build: así
+    // también lo lleva el ejecutable de pruebas, que con el runtime simulado de Tauri (tabla_comandos)
+    // no arranca sin él (STATUS_ENTRYPOINT_NOT_FOUND). Es el mismo manifiesto que pone tauri_build.
+    let mut attrs = tauri_build::Attributes::new();
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
+        attrs = attrs.windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+    }
+    tauri_build::try_build(attrs).expect("tauri_build")
 }
 
 /// La sección "## X.Y.Z — …" de ENTREGAS.md ya tiene un SHA-256 escrito (64 hex).

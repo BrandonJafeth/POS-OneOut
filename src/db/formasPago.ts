@@ -38,7 +38,7 @@ export async function listarBancos(opc: { incluirInactivos?: boolean } = {}): Pr
 }
 
 function exigir(actor: Actor) {
-  if (!puede(actor.rol, "config.tecnica")) throw new SinPermiso("configurar formas de pago");
+  if (!puede(actor.rol, "pagos.formas")) throw new SinPermiso("configurar formas de pago");
 }
 
 export async function guardarFormaPago(actor: Actor, f: Omit<FormaPago, "id"> & { id?: string }): Promise<string> {

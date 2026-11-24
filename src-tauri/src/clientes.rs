@@ -127,13 +127,13 @@ async fn exigir_no_repetido(c: &mut sqlx::SqliteConnection, l: &Limpios, excluir
 
 /// Alta (cajero o dueño). `consentimiento` es la casilla "El cliente fue informado y acepta".
 pub async fn crear(pool: &SqlitePool, a: &Actor, d: &Datos, consentimiento: bool, version_aviso: &str) -> Res<Basico> {
-    a.exigir("clientes.basico", "registrar clientes")?;
+    a.exigir("clientes.crear", "registrar clientes")?;
     if !consentimiento {
         return Err("Sin el consentimiento del cliente no se pueden guardar sus datos".into());
     }
     let l = validar(d)?;
     // Mínimos datos por rol: las notas son del dueño (el cajero ve nombre, teléfono, cédula y correo).
-    if l.notas.is_some() && !crate::permisos::puede(a.rol, "clientes") {
+    if l.notas.is_some() && !a.puede("clientes.editar") {
         return Err("Las notas del cliente solo las escribe el dueño".into());
     }
     let version = texto(version_aviso, 20, "versión del aviso", true)?;
@@ -173,7 +173,7 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, d: &Datos, consentimiento: bool
 
 /// Para la venta: solo nombre, teléfono y cédula, buscando por nombre, teléfono o cédula.
 pub async fn buscar_basico(pool: &SqlitePool, a: &Actor, t: &str, limite: i64) -> Res<Vec<Basico>> {
-    a.exigir("clientes.basico", "buscar clientes")?;
+    a.exigir("clientes.crear", "buscar clientes")?;
     let t = t.trim();
     if t.is_empty() {
         return Ok(vec![]);
@@ -198,14 +198,14 @@ pub async fn buscar_basico(pool: &SqlitePool, a: &Actor, t: &str, limite: i64) -
 }
 
 pub async fn basico(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Basico>> {
-    a.exigir("clientes.basico", "ver clientes")?;
+    a.exigir("clientes.crear", "ver clientes")?;
     let f = sqlx::query("SELECT id, nombre, telefono, cedula FROM clientes WHERE id = ? AND anonimizado_en IS NULL").bind(id).fetch_optional(pool).await.map_err(e)?;
     Ok(f.as_ref().map(a_basico))
 }
 
 /// Un dato para pegar en el facturador externo. La bitácora anota QUÉ campo, nunca el valor.
 pub async fn dato_para_factura(pool: &SqlitePool, a: &Actor, id: &str, campo: &str) -> Res<Option<String>> {
-    a.exigir("clientes.basico", "copiar datos del cliente")?;
+    a.exigir("facturas.ver", "copiar datos del cliente")?;
     let sql = match campo {
         "nombre" => "SELECT nombre FROM clientes WHERE id = ? AND anonimizado_en IS NULL",
         "cedula" => "SELECT cedula FROM clientes WHERE id = ? AND anonimizado_en IS NULL",
@@ -220,14 +220,14 @@ pub async fn dato_para_factura(pool: &SqlitePool, a: &Actor, id: &str, campo: &s
 }
 
 pub async fn tiene_correo(pool: &SqlitePool, a: &Actor, id: &str) -> Res<bool> {
-    a.exigir("clientes.basico", "ver clientes")?;
+    a.exigir("facturas.ver", "ver clientes")?;
     let v: Option<Option<String>> = sqlx::query_scalar("SELECT correo FROM clientes WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)?;
     Ok(v.flatten().is_some())
 }
 
 /// Lista completa (dueño). Cada consulta queda en bitácora, sin el texto buscado.
 pub async fn listar(pool: &SqlitePool, a: &Actor, filtro: &str, incluir_anonimizados: bool) -> Res<Vec<Value>> {
-    a.exigir("clientes", "ver la lista de clientes")?;
+    a.exigir("clientes.ver_todos", "ver la lista de clientes")?;
     let f = filtro.trim();
     let filas = sqlx::query("SELECT * FROM clientes WHERE (?1 OR anonimizado_en IS NULL) AND (?2 = '' OR nombre_busqueda LIKE '%' || ?2 || '%') ORDER BY nombre_busqueda LIMIT 500")
         .bind(incluir_anonimizados)
@@ -243,7 +243,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, filtro: &str, incluir_anonimiz
 
 /// Todos los datos de un cliente (derecho de acceso). Queda en bitácora.
 pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value>> {
-    a.exigir("clientes", "ver los datos del cliente")?;
+    a.exigir("clientes.ver_todos", "ver los datos del cliente")?;
     let Some(f) = sqlx::query("SELECT * FROM clientes WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)? else {
         return Ok(None);
     };
@@ -255,7 +255,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Option<Value
 
 /// Rectificación (dueño). En bitácora van solo los NOMBRES de los campos cambiados.
 pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, d: &Datos) -> Res<()> {
-    a.exigir("clientes", "corregir datos del cliente")?;
+    a.exigir("clientes.editar", "corregir datos del cliente")?;
     let l = validar(d)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let f = sqlx::query("SELECT * FROM clientes WHERE id = ?").bind(id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Cliente no encontrado")?;
@@ -305,7 +305,7 @@ async fn cuentas_de(pool: &SqlitePool, id: &str) -> Res<Vec<Map<String, Value>>>
 
 /// Apartados o créditos abiertos con saldo: mientras existan, no se puede anonimizar.
 pub async fn cuentas_con_saldo(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Vec<Map<String, Value>>> {
-    a.exigir("clientes", "ver clientes")?;
+    a.exigir("clientes.ver_todos", "ver clientes")?;
     // Abiertas con saldo, y apartados pagados sin entregar (hay productos del cliente en la tienda).
     Ok(cuentas_de(pool, id)
         .await?
@@ -319,7 +319,7 @@ pub async fn cuentas_con_saldo(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Ve
 
 /// "Exportar mis datos" (derecho de acceso). Queda en bitácora con el formato.
 pub async fn para_exportar(pool: &SqlitePool, a: &Actor, id: &str, formato: &str) -> Res<Value> {
-    a.exigir("clientes", "exportar datos de clientes")?;
+    a.exigir("clientes.exportar", "exportar datos de clientes")?;
     if formato != "csv" && formato != "pdf" {
         return Err("Formato inválido".into());
     }
@@ -335,7 +335,7 @@ pub async fn para_exportar(pool: &SqlitePool, a: &Actor, id: &str, formato: &str
 /// Anonimiza de verdad: borra nombre, teléfono, correo, cédula, tipo y notas (también las notas
 /// de sus apartados). El id, ventas y abonos quedan con sus montos. Solo el dueño, con PIN y motivo.
 pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motivo: &str) -> Res<()> {
-    a.exigir("clientes", "anonimizar clientes")?;
+    a.exigir("clientes.anonimizar", "anonimizar clientes")?;
     if !MOTIVOS.contains(&motivo) {
         return Err("Elija el motivo".into());
     }
@@ -345,7 +345,7 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
         Some(Some(_)) => return Err("El cliente ya está anonimizado".into()),
         _ => {}
     }
-    usuarios::confirmar_dueno(pool, a, pin, "anonimizar cliente").await?;
+    usuarios::confirmar_dueno(pool, a, "clientes.anonimizar", pin, "anonimizar cliente").await?;
     let pendientes = cuentas_con_saldo(pool, a, id).await?.len();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     // Hacienda necesita sus datos para la factura: primero se hace (o se marca), después se anonimiza.
@@ -384,7 +384,7 @@ pub async fn anonimizar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str, motiv
 
 /// Clientes sin saldos ni movimientos en los últimos meses de retención. Solo SUGIERE.
 pub async fn sugerencias_retencion(pool: &SqlitePool, a: &Actor) -> Res<Vec<Basico>> {
-    a.exigir("clientes", "ver clientes")?;
+    a.exigir("clientes.ver_todos", "ver clientes")?;
     let meses = config::entero(pool, "retencion_clientes_meses", 36).await.clamp(1, 240) as u32;
     let ahora = crate::util::ahora().with_timezone(&chrono::Utc);
     let limite = ahora.checked_sub_months(chrono::Months::new(meses)).unwrap_or(ahora);

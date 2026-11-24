@@ -92,11 +92,6 @@ export function calcularTotales(e: EstadoEspera, paso: number): Totales {
   };
 }
 
-/** % máximo que puede dar `rol` sin autorización (config descuento_max_pct). */
-export function topeDescuento(rol: string, config: Record<string, number>): number {
-  return config[rol] ?? 0;
-}
-
 /** ¿Hace falta el PIN del dueño? Sí, si el descuento pasa el tope del rol y no hay autorización que lo cubra. */
 export function necesitaAutorizacion(e: EstadoEspera, pct: number, tope: number): boolean {
   const ε = 1e-9;

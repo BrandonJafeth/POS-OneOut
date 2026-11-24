@@ -25,7 +25,7 @@ async fn n(bd: &Bd, sql: &str) -> Res<i64> {
 }
 
 pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
-    a.exigir("config.tecnica", "preparar la instalación")?;
+    a.exigir("sistema.preparar", "preparar la instalación")?;
     let mut v = vec![];
     let negocio: (String, String) = sqlx::query_as("SELECT COALESCE(nombre_comercial, ''), COALESCE(cedula, '') FROM negocio WHERE id = 1").fetch_optional(&bd.pool).await.map_err(e)?.unwrap_or_default();
     v.push(Punto {
@@ -66,6 +66,23 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
             if confirmado { "" } else { "Es el horario de fábrica: ponga y guarde el real del negocio. " }
         ),
         obligatorio: true,
+    });
+    // Permisos (0.9.3): la tabla vigente se imprime y la firma el dueño; el tiempo de bloqueo se le
+    // confirma. Solo informa (no detiene la entrega).
+    let i = &a.seg.datos.inactividad;
+    use crate::permisos::Rol;
+    v.push(Punto {
+        titulo: "Permisos y bloqueo por inactividad",
+        listo: a.seg.rota_en.is_none(),
+        detalle: format!(
+            "Versión {} de los permisos{}. Bloqueo: cajero {} min, dueño {} min, técnico {} min. Revise la tabla con el dueño, imprímala (Administración → Permisos → PDF para firmar) y guárdela firmada; confirme con él el tiempo de bloqueo.",
+            a.seg.version,
+            if a.seg.rota_en.is_some() { " (¡la cadena estaba alterada!)" } else { "" },
+            i.minutos(Rol::Cajero),
+            i.minutos(Rol::Dueno),
+            i.minutos(Rol::Tecnico)
+        ),
+        obligatorio: false,
     });
     let siguiente = n(bd, "SELECT MIN(consecutivo_siguiente) FROM cajas WHERE eliminado_en IS NULL").await?;
     v.push(Punto { titulo: "Número del próximo tiquete", listo: true, detalle: format!("{siguiente}. Si venía de otro sistema, que siga al último tiquete entregado. Administración → Caja y cierre."), obligatorio: false });
@@ -168,7 +185,7 @@ mod tests {
             assert_eq!(c, 0, "{t}");
         }
         let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let lista = revisar(&bd, &tec).await.unwrap();
         let punto = |t: &str| lista.iter().find(|p| p.titulo == t).unwrap().listo;
         assert!(!punto("Usuario del dueño") && !punto("Impresoras") && !punto("Respaldo automático") && !punto("Productos"));
@@ -183,7 +200,7 @@ mod tests {
         assert!(!lista.iter().find(|p| p.titulo == "Sin usuarios de prueba").unwrap().listo);
         // Solo el técnico.
         let d = crate::usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let ana = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let ana = Actor::nuevo(d.id, Rol::Dueno, "Ana");
         assert!(revisar(&bd, &ana).await.is_err());
         // El dueño guarda el horario de Chaguí (lun–vie 19:00, sáb 18:00, dom no): ya está listo.
         let chagui = serde_json::json!(["19:00", "19:00", "19:00", "19:00", "19:00", "18:00", null]);

@@ -52,6 +52,15 @@ thread_local! {
     static RELOJ: std::cell::Cell<Option<(DateTime<FixedOffset>, i64)>> = const { std::cell::Cell::new(None) };
 }
 
+/// Segundos que la prueba de punta a punta adelantó el reloj (solo desarrollo con POS_RELOJ_PRUEBA).
+#[cfg(debug_assertions)]
+static ADELANTO_SEG: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+#[cfg(debug_assertions)]
+pub fn avanzar_reloj_prueba(segundos: i64) {
+    ADELANTO_SEG.fetch_add(segundos.clamp(0, 24 * 3600), std::sync::atomic::Ordering::SeqCst);
+}
+
 pub fn ahora() -> DateTime<FixedOffset> {
     if let Some((f, n)) = RELOJ.with(|r| r.get()) {
         RELOJ.with(|r| r.set(Some((f, n + 1))));
@@ -69,7 +78,8 @@ pub fn ahora() -> DateTime<FixedOffset> {
     if let Some(f) = std::env::var("POS_RELOJ_PRUEBA").ok().and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
         static INICIO: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         let pasado = INICIO.get_or_init(std::time::Instant::now).elapsed();
-        return f + chrono::Duration::from_std(pasado).unwrap_or_default();
+        let extra = chrono::Duration::seconds(ADELANTO_SEG.load(std::sync::atomic::Ordering::SeqCst));
+        return f + chrono::Duration::from_std(pasado).unwrap_or_default() + extra;
     }
     Local::now().fixed_offset()
 }

@@ -33,7 +33,7 @@ export const CAMPOS_CONTACTO: readonly CampoNegocio[] = [
 ];
 
 export function puedeEditarCampo(actor: Actor, campo: CampoNegocio): boolean {
-  return puede(actor.rol, CAMPOS_CONTACTO.includes(campo) ? "negocio" : "negocio.legal");
+  return puede(actor.rol, CAMPOS_CONTACTO.includes(campo) ? "negocio.contacto" : "negocio.legal");
 }
 
 export async function obtenerNegocio(): Promise<Negocio> {

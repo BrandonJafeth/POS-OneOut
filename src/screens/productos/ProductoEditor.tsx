@@ -199,7 +199,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   async function eliminar() {
     if (!id) return;
     // Si tiene unidades, que el dueño sepa que dejan de contarse en el inventario.
-    const inv = puede("inventario") ? (await estadoInventario([id]).catch(() => []))[0] : undefined;
+    const inv = puede("inventario.ver") ? (await estadoInventario([id]).catch(() => []))[0] : undefined;
     const conUnidades = inv?.controla && inv.existencia !== 0 ? ` Tiene ${inv.existencia} unidad(es) en inventario: dejan de contarse en el inventario valorizado (su kardex se conserva).` : "";
     if (!(await confirmar({ titulo: `¿Eliminar "${nombre}"?`, texto: `Deja de aparecer en el catálogo y en la venta. Las ventas anteriores no cambian.${conUnidades}`, aceptar: "Eliminar producto", peligro: true }))) return;
     try {
@@ -270,7 +270,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             Descuento %
             <input className="small" inputMode="numeric" placeholder="0" value={descuento} onChange={(e) => setDescuento(e.target.value.replace(/\D/g, "").slice(0, 3))} />
           </label>
-          {!id && puede("inventario") && (
+          {!id && puede("inventario.ver") && (
             <label className="campo">
               Unidades que hay
               <input className="small" inputMode="numeric" placeholder="0" value={existencia} onChange={(e) => setExistencia(e.target.value.replace(/\D/g, "").slice(0, 6))} />

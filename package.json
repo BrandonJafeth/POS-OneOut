@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "0.9.2",
+  "version": "0.9.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "e2e:build": "tauri build --debug --no-bundle",
-    "e2e": "npm run e2e:build && node tests/e2e/apartado.e2e.mjs"
+    "e2e": "npm run e2e:build && node tests/e2e/apartado.e2e.mjs && node tests/e2e/permisos.e2e.mjs"
   },
   "dependencies": {
     "@fontsource-variable/public-sans": "^5.3.0",

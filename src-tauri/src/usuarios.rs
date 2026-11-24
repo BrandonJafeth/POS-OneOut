@@ -105,7 +105,7 @@ pub async fn crear_tecnico_inicial(pool: &SqlitePool, p: &str) -> Res<Usuario> {
 }
 
 pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str) -> Res<Usuario> {
-    a.exigir("usuarios", "crear usuarios")?;
+    a.exigir("usuarios.administrar", "crear usuarios")?;
     if !administrables(a.rol).contains(&rol) {
         return Err(sin_permiso("crear ese tipo de usuario"));
     }
@@ -129,14 +129,16 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str
     Ok(obtener(pool, &id).await?.ok_or("Usuario no encontrado")?.0)
 }
 
-/// Sin un dueño activo nadie anula, autoriza descuentos, reabre la caja ni restaura respaldos.
+/// Sin un dueño activo con su propio PIN nadie anula, autoriza descuentos, reabre la caja, restaura
+/// respaldos ni confirma permisos. Un dueño con el cambio de PIN pendiente no autoriza nada todavía
+/// (autorizar_dueno lo excluye): no cuenta como el que queda.
 async fn no_quedar_sin_dueno(c: &mut sqlx::SqliteConnection, u: &Usuario) -> Res<()> {
     if u.rol != Rol::Dueno || !u.activo {
         return Ok(());
     }
-    let otros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL AND id <> ?").bind(&u.id).fetch_one(c).await.map_err(e)?;
+    let otros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL AND id <> ?").bind(&u.id).fetch_one(c).await.map_err(e)?;
     if otros == 0 {
-        return Err(format!("{} es el único dueño activo: cree otro dueño antes. Sin dueño nadie puede anular ventas, autorizar descuentos ni reabrir la caja.", u.nombre));
+        return Err(format!("{} es el único dueño activo que puede autorizar: cree otro dueño (y que entre una vez para cambiar su clave) antes. Sin dueño nadie puede anular ventas, autorizar descuentos ni reabrir la caja.", u.nombre));
     }
     Ok(())
 }
@@ -290,20 +292,19 @@ async fn freno_autorizacion(pool: &SqlitePool, ahora: chrono::DateTime<chrono::U
     Ok(())
 }
 
-/// Para acciones solo del dueño: además de ser dueño, confirma con su PIN cada vez.
-pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<String> {
-    if a.rol != Rol::Dueno {
-        return Err(sin_permiso(contexto));
-    }
+/// Acciones que SIEMPRE se confirman con el PIN de un dueño (reabrir, corte, anonimizar, ajustes…):
+/// quien tenga la acción (politica) y, además, el PIN de un dueño en el momento. Darle la acción a un
+/// cajero no le quita el PIN.
+pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, accion: &str, p: &str, contexto: &str) -> Res<String> {
+    a.exigir(accion, contexto)?;
     autorizar_dueno(pool, p, contexto, &a.id).await
 }
 
 /// Para acciones grandes del dueño o el técnico (importar el catálogo): el usuario de la sesión
 /// vuelve a escribir SU PIN. Mismo freno que autorizar_dueno (freno_autorizacion).
 pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<()> {
-    if a.rol == Rol::Cajero {
-        return Err(sin_permiso(contexto));
-    }
+    // Quién puede (importar el catálogo) ya lo revisó la política de la acción.
+    let _ = contexto;
     let _turno = PIN_EN_CURSO.lock().await;
     freno_autorizacion(pool, crate::util::ahora().with_timezone(&chrono::Utc)).await?;
     let hash: Option<String> = sqlx::query_scalar("SELECT pin_hash FROM usuarios WHERE id = ? AND activo = 1 AND eliminado_en IS NULL")
@@ -328,17 +329,17 @@ pub mod tests {
     pub async fn base_con_usuarios() -> (Bd, Actor, Actor, Actor) {
         let bd = Bd::memoria().await.unwrap();
         let t = crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "Técnico".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "Técnico");
         let d = crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let c = crear(&bd.pool, &tec, "Luis", Rol::Cajero, "2580").await.unwrap();
         // Ana entra por primera vez y pone su propio PIN (si no, su PIN no autoriza nada).
-        let ana = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
+        let ana = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
         cambiar_pin(&bd.pool, &ana, &d.id, "246813").await.unwrap();
         (
             bd,
             tec,
             ana,
-            Actor { id: c.id, rol: Rol::Cajero, nombre: "Luis".into() },
+            Actor::nuevo(c.id, Rol::Cajero, "Luis"),
         )
     }
 
@@ -352,7 +353,7 @@ pub mod tests {
         let o = crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
         let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "864209", 0).await.unwrap() else { panic!() };
         assert!(usuario.debe_cambiar_pin);
-        let otra = Actor { id: o.id.clone(), rol: Rol::Dueno, nombre: "Otra".into() };
+        let otra = Actor::nuevo(o.id.clone(), Rol::Dueno, "Otra");
         cambiar_pin(&bd.pool, &otra, &o.id, "975318").await.unwrap();
         let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "975318", 0).await.unwrap() else { panic!() };
         assert!(!usuario.debe_cambiar_pin);
@@ -422,8 +423,10 @@ pub mod tests {
         let (bd, tec, ana, _) = base_con_usuarios().await;
         assert!(editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap_err().contains("único dueño"));
         assert!(eliminar(&bd.pool, &tec, &ana.id).await.unwrap_err().contains("único dueño"));
-        // Con otro dueño activo, sí.
-        crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        // Otro dueño que todavía no puso su PIN no cuenta (no autoriza nada); ya con su PIN, sí.
+        let otra = crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        assert!(editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap_err().contains("único dueño"));
+        cambiar_pin(&bd.pool, &Actor::nuevo(otra.id.clone(), Rol::Dueno, "Otra"), &otra.id, "864209").await.unwrap();
         editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap();
     }
 
@@ -432,6 +435,6 @@ pub mod tests {
         let (bd, _, dueno, cajero) = base_con_usuarios().await;
         assert!(crear(&bd.pool, &cajero, "X", Rol::Cajero, "8642").await.unwrap_err().contains("permiso"));
         assert!(eliminar(&bd.pool, &cajero, &dueno.id).await.unwrap_err().contains("permiso"));
-        assert!(confirmar_dueno(&bd.pool, &cajero, "246813", "reabrir").await.unwrap_err().contains("permiso"));
+        assert!(confirmar_dueno(&bd.pool, &cajero, "caja.reabrir", "246813", "reabrir").await.unwrap_err().contains("permiso"));
     }
 }

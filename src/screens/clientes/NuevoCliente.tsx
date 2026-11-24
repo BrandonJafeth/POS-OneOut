@@ -25,7 +25,7 @@ export default function NuevoCliente(p: { onCreado(c: ClienteBasico): void; onCe
   }, []);
 
   // Cédula y correo (opcionales) sirven para la factura electrónica; las notas, solo el dueño.
-  const completo = puede("clientes");
+  const completo = puede("clientes.editar");
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();

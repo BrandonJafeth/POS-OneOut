@@ -63,7 +63,7 @@ function aProducto(f: Record<string, unknown>): Producto {
 }
 
 function permitir(actor: Actor) {
-  if (!puede(actor.rol, "productos")) throw new SinPermiso("modificar productos");
+  if (!puede(actor.rol, "productos.editar")) throw new SinPermiso("modificar productos");
 }
 
 /** Para LIKE: % y _ del usuario se buscan literalmente. */

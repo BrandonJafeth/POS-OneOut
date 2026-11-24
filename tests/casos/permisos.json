@@ -1,0 +1,3100 @@
+{
+  "catalogo": [
+    "venta.vender",
+    "venta.descuento",
+    "venta.precio_libre",
+    "venta.sin_existencia",
+    "venta.apartadas",
+    "venta.quitar_linea",
+    "venta.descartar_espera",
+    "venta.ver_existencia",
+    "ventas.ver",
+    "ventas.reimprimir",
+    "ventas.anular",
+    "ventas.cambiar_pago",
+    "facturas.ver",
+    "facturas.marcar",
+    "caja.ver",
+    "caja.abrir",
+    "caja.cerrar",
+    "caja.cerrar_otro",
+    "caja.ver_totales",
+    "caja.reabrir",
+    "caja.entrada",
+    "caja.salida",
+    "caja.corte",
+    "caja.no_venta",
+    "caja.gaveta_sin_venta",
+    "caja.historial",
+    "caja.reimprimir_z",
+    "caja.corregir_dia",
+    "caja.consecutivo",
+    "caja.opciones",
+    "cuentas.crear",
+    "cuentas.abonar",
+    "cuentas.ver_todas",
+    "cuentas.cancelar",
+    "cuentas.anular_abono",
+    "cuentas.ajustar",
+    "cuentas.condonar",
+    "cuentas.prorrogar",
+    "credito.vender",
+    "credito.limite",
+    "cuentas.opciones",
+    "proformas.crear",
+    "proformas.convertir",
+    "proformas.anular",
+    "proformas.admin",
+    "proformas.opciones",
+    "productos.crear",
+    "productos.editar",
+    "productos.desactivar",
+    "productos.favoritos",
+    "productos.etiquetas",
+    "productos.importar",
+    "departamentos.editar",
+    "departamentos.estructura",
+    "inventario.ver",
+    "inventario.entradas",
+    "inventario.ajustes",
+    "inventario.conteo",
+    "inventario.reportes",
+    "inventario.opciones",
+    "clientes.crear",
+    "clientes.ver_todos",
+    "clientes.editar",
+    "clientes.exportar",
+    "clientes.anonimizar",
+    "reportes.ver",
+    "reportes.exportar",
+    "usuarios.administrar",
+    "negocio.contacto",
+    "negocio.legal",
+    "pagos.formas",
+    "impresoras.configurar",
+    "impresoras.asignar",
+    "config.tecnica",
+    "respaldo.crear",
+    "respaldo.restaurar",
+    "bitacora.ver",
+    "seguridad.editar",
+    "seguridad.inactividad",
+    "sistema.preparar"
+  ],
+  "inactividad": [
+    {
+      "cajero": 10,
+      "dueno": 10,
+      "inactividad": {
+        "cajero": null,
+        "dueno": null,
+        "general": 10,
+        "tecnico": null
+      },
+      "tecnico": 10
+    },
+    {
+      "cajero": 30,
+      "dueno": 30,
+      "inactividad": {
+        "cajero": null,
+        "dueno": null,
+        "general": 30,
+        "tecnico": null
+      },
+      "tecnico": 15
+    },
+    {
+      "cajero": 5,
+      "dueno": 60,
+      "inactividad": {
+        "cajero": 5,
+        "dueno": 60,
+        "general": 30,
+        "tecnico": 12
+      },
+      "tecnico": 12
+    },
+    {
+      "cajero": 1,
+      "dueno": 1,
+      "inactividad": {
+        "cajero": null,
+        "dueno": null,
+        "general": 1,
+        "tecnico": null
+      },
+      "tecnico": 1
+    }
+  ],
+  "normal": {
+    "cajero": {
+      "bitacora.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.abrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.cerrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.cerrar_otro": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.consecutivo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.corregir_dia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.corte": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.entrada": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.gaveta_sin_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "caja.historial": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.no_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.reabrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.reimprimir_z": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "caja.salida": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": 20000,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.ver_totales": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.anonimizar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "clientes.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.ver_todos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "config.tecnica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "credito.limite": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "credito.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.abonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.ajustar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.anular_abono": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.cancelar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.condonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.prorrogar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.ver_todas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "departamentos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "departamentos.estructura": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "facturas.marcar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "facturas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "impresoras.asignar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "impresoras.configurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.ajustes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.conteo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.entradas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.reportes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "negocio.contacto": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "negocio.legal": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "pagos.formas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.desactivar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.etiquetas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.favoritos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.importar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.admin": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.convertir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "reportes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "reportes.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "respaldo.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "respaldo.restaurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "seguridad.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "seguridad.inactividad": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "sistema.preparar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "usuarios.administrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.apartadas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "venta.descartar_espera": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.descuento": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": 10.0,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.precio_libre": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.quitar_linea": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.sin_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.ver_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.cambiar_pago": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.reimprimir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "ventas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      }
+    },
+    "dueno": {
+      "bitacora.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.abrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.cerrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.cerrar_otro": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.consecutivo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.corregir_dia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "caja.corte": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.entrada": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.gaveta_sin_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "caja.historial": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.no_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.reabrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "caja.reimprimir_z": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "caja.salida": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": 20000,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.ver_totales": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "clientes.anonimizar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "clientes.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "clientes.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "clientes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "clientes.ver_todos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "config.tecnica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "credito.limite": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "credito.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.abonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.ajustar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "cuentas.anular_abono": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "cuentas.cancelar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "cuentas.condonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "cuentas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.prorrogar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "cuentas.ver_todas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "departamentos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "departamentos.estructura": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "facturas.marcar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "facturas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "impresoras.asignar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "impresoras.configurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.ajustes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.conteo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.entradas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.reportes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "negocio.contacto": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "negocio.legal": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "pagos.formas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "productos.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.desactivar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.etiquetas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.favoritos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.importar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.admin": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.convertir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "reportes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "reportes.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "respaldo.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "respaldo.restaurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "seguridad.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "seguridad.inactividad": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "sistema.preparar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "usuarios.administrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.apartadas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      },
+      "venta.descartar_espera": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.descuento": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.precio_libre": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.quitar_linea": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.sin_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.ver_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "ventas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "ventas.cambiar_pago": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": true,
+        "nivel": "pin"
+      },
+      "ventas.reimprimir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "ventas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      }
+    },
+    "tecnico": {
+      "bitacora.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.abrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.cerrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.cerrar_otro": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.consecutivo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.corregir_dia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.corte": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.entrada": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.gaveta_sin_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.historial": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.no_venta": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "caja.reabrir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.reimprimir_z": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.salida": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "caja.ver_totales": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.anonimizar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "clientes.ver_todos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "config.tecnica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "credito.limite": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "credito.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.abonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.ajustar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.anular_abono": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.cancelar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.condonar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "cuentas.prorrogar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "cuentas.ver_todas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "departamentos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "departamentos.estructura": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "facturas.marcar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "facturas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "impresoras.asignar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "impresoras.configurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "inventario.ajustes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.conteo": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.entradas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.reportes": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "inventario.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "negocio.contacto": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "negocio.legal": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "pagos.formas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.desactivar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.etiquetas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.favoritos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "productos.importar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "proformas.admin": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.convertir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "proformas.opciones": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "reportes.exportar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "reportes.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "respaldo.crear": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "respaldo.restaurar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "seguridad.editar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "seguridad.inactividad": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "sistema.preparar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "usuarios.administrar": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
+      "venta.apartadas": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.descartar_espera": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.descuento": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.precio_libre": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.quitar_linea": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.sin_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.vender": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "venta.ver_existencia": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.anular": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.cambiar_pago": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.reimprimir": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
+      "ventas.ver": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      }
+    }
+  },
+  "topes": [
+    {
+      "bloquear": true,
+      "pct": 0.0,
+      "politica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      }
+    },
+    {
+      "bloquear": false,
+      "pct": 0.0,
+      "politica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "pin"
+      }
+    },
+    {
+      "bloquear": false,
+      "pct": 100.0,
+      "politica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      }
+    },
+    {
+      "bloquear": false,
+      "pct": 15.0,
+      "politica": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": 15.0,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      }
+    },
+    {
+      "bloquear": true,
+      "pct": 5.0,
+      "politica": {
+        "limites": {
+          "alPasar": "bloquear",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": 5.0,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      }
+    }
+  ]
+}

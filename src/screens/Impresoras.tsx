@@ -50,7 +50,7 @@ export default function Impresoras() {
   const toast = useToast();
   const confirmar = useConfirmar();
   // Técnico: agrega, cambia y quita impresoras (soporte). Dueño: las ve, las prueba y asigna documentos.
-  const tecnico = useSesion().puede("impresoras");
+  const tecnico = useSesion().puede("impresoras.configurar");
 
   const cargar = async () => setLista(await listarImpresoras());
   const buscar = async () => setDetectadas(await detectarImpresoras());

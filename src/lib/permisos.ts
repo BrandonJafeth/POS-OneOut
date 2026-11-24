@@ -1,82 +1,60 @@
-// Qué puede hacer cada rol. Hoy es fijo en código; más adelante "Permisos por rol" en
-// Configuración técnica podrá sobrescribirlo desde config.
+// Permisos en la pantalla: SOLO para mostrar u ocultar. Quien decide es Rust (politica.rs). La
+// política efectiva del usuario de la sesión llega de `sesion_permisos` (acción → política) y se
+// vuelve a pedir cuando cambia la configuración (evento «seguridad-cambiada»).
+import type { Politica } from "../generados/Politica";
 import type { Rol } from "../tipos";
 
-export type Permiso =
-  | "venta"
-  | "caja" // abrir, entradas/salidas, cerrar y ver su propio turno
-  | "caja.admin" // todos los turnos, reabrir, revisar diferencias, umbrales de caja
-  | "productos" // ver, crear y editar productos y sus códigos
-  | "productos.importar"
-  | "departamentos" // nombre, orden, activo
-  | "departamentos.estructura" // crear y cambiar códigos
-  | "usuarios"
-  | "negocio" // teléfono, correo, encabezado extra, pie
-  | "negocio.legal" // nombre, razón social, cédula, régimen, dirección, logo
-  | "config.tecnica"
-  | "reportes"
-  | "clientes.basico" // buscar/crear cliente en la venta: solo nombre, teléfono y cédula
-  | "clientes" // lista completa, datos del cliente, exportar, anonimizar
-  | "respaldo" // el respaldo lleva datos de clientes
-  | "facturas" // pendientes de factura electrónica (muestra datos del cliente)
-  | "impresoras" // agregar, cambiar conexión/formato, quitar impresoras y la gaveta (técnico)
-  | "impresoras.asignar" // ver las impresoras, probarlas y elegir a cuál va cada documento
-  | "inventario" // existencias, entradas, ajustes, conteos, proveedores y costos (solo el dueño)
-  | "cuentas" // apartados y crédito: crear, buscar, abonar, entregar
-  | "cuentas.admin" // todos los apartados, cancelar, anular abonos, condonar, límites de crédito
-  | "reportes.ventas" // reportes de ventas e historial de cierres (solo el dueño: llevan clientes)
-  | "proformas" // crear, buscar, imprimir, editar (nueva versión) y pasar a venta
-  | "proformas.anular" // anular una proforma (con motivo)
-  | "proformas.admin"; // opciones de proformas y su reporte
+/** Id de una acción del catálogo (src-tauri/src/acciones.rs). La prueba espejo revisa que existan. */
+export type Accion = string;
+/** Compatibilidad con el nombre viejo. */
+export type Permiso = Accion;
 
-// Copia de src-tauri/src/permisos.rs: Rust es quien decide; aquí solo se usa para mostrar u ocultar.
-// Ley 8968: el técnico administra el sistema pero NO ve datos de clientes (ni el respaldo).
-// Y no maneja dinero: no vende ni toca la caja.
-export const PERMISOS: Record<Rol, readonly Permiso[]> = {
-  cajero: ["venta", "caja", "clientes.basico", "facturas", "cuentas", "proformas"],
-  dueno: [
-    "venta",
-    "caja",
-    "caja.admin",
-    "productos",
-    "productos.importar",
-    "departamentos",
-    "usuarios",
-    "negocio",
-    "reportes",
-    "clientes.basico",
-    "clientes",
-    "respaldo",
-    "facturas",
-    "impresoras.asignar",
-    "inventario",
-    "cuentas",
-    "cuentas.admin",
-    "reportes.ventas",
-    "proformas",
-    "proformas.anular",
-    "proformas.admin",
-  ],
-  tecnico: [
-    "productos",
-    "productos.importar",
-    "departamentos",
-    "departamentos.estructura",
-    "usuarios",
-    "negocio",
-    "negocio.legal",
-    "config.tecnica",
-    "reportes",
-    "impresoras",
-    "impresoras.asignar",
-  ],
-};
+let actuales: Record<string, Politica | undefined> = {};
+let motivos: string[] = [];
+let umbral = 3;
 
-export function puede(rol: Rol, permiso: Permiso): boolean {
-  return PERMISOS[rol].includes(permiso);
+/** La app guarda aquí lo que respondió Rust para el usuario de la sesión. */
+export function establecerPermisos(p: Record<string, Politica | undefined>, motivosAnulacion: string[] = [], umbralAnulaciones = 3) {
+  actuales = p;
+  motivos = motivosAnulacion;
+  umbral = umbralAnulaciones;
 }
 
-/** Roles que `rol` puede crear o administrar (además de cambiar su propio PIN). */
+/** Más anulaciones sin PIN que esto en un día: el día se marca en Cierres de caja. */
+export function umbralAnulaciones(): number {
+  return umbral;
+}
+
+/** Motivos de anulación de la lista configurable (opción C del cajero). */
+export function motivosAnulacion(): string[] {
+  return motivos;
+}
+
+export function politicaDe(accion: Accion): Politica | undefined {
+  return actuales[accion];
+}
+
+/** ¿Se muestra? `rol` queda por compatibilidad: la política ya es la del usuario de la sesión. */
+export function puede(_rol: Rol | undefined, accion: Accion): boolean {
+  return estado(politicaDe(accion)) !== "oculto";
+}
+
+/** Cómo se muestra una acción: oculta, libre, con motivo o con PIN del dueño. */
+export function estado(p: Politica | undefined): "oculto" | "libre" | "motivo" | "pin" {
+  if (!p || p.nivel === "no") return "oculto";
+  if (p.nivel === "pin") return "pin";
+  if (p.nivel === "motivo" || p.motivo) return "motivo";
+  return "libre";
+}
+
+/** Tope de descuento (igual que ventas::tope_descuento en Rust: prueba espejo). */
+export function topeDescuento(p: Politica | undefined): { pct: number; bloquear: boolean } {
+  if (!p || p.nivel === "no") return { pct: 0, bloquear: true };
+  if (p.nivel === "pin") return { pct: 0, bloquear: false };
+  return { pct: p.limites.pctMax ?? 100, bloquear: p.limites.alPasar === "bloquear" };
+}
+
+/** Roles que `rol` puede crear o administrar (además de cambiar su propio PIN). Regla fija. */
 export function rolesAdministrables(rol: Rol): Rol[] {
   if (rol === "tecnico") return ["dueno", "cajero"];
   if (rol === "dueno") return ["cajero"];

@@ -1,4 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Bookmark,
   Boxes,
@@ -31,8 +32,10 @@ import { cerrarSesion, estadoSistema, tocarSesion } from "./db/usuarios";
 import { alertasInventario } from "./db/inventario";
 import { cuentasVencidas } from "./db/cuentas";
 import { pendientesFactura } from "./db/ventas";
-import { alPerderSesion, SESION_EXPIRADA } from "./lib/invocar";
-import { puede, type Permiso } from "./lib/permisos";
+import { alPedirAutorizacion, alPerderSesion, SESION_BLOQUEADA, SESION_EXPIRADA, type PedidoAutorizacion } from "./lib/invocar";
+import { establecerPermisos, puede, type Permiso } from "./lib/permisos";
+import { anulacionesVistas, avisosDueno, estadoSesion, permisosSesion, type Avisos } from "./db/seguridad";
+import { AvisoInactividad, PedirAutorizacion, VeloBloqueo } from "./components/Seguridad";
 import { fechaHora } from "./lib/tickets";
 import Administracion from "./screens/Administracion";
 import Caja from "./screens/Caja";
@@ -68,19 +71,19 @@ interface Seccion {
 
 // Lo del día a día. Lo avanzado va aparte, abajo.
 const PRINCIPAL: Seccion[] = [
-  { id: "venta", texto: "Venta", icono: ShoppingCart, permisos: ["venta"] },
-  { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja"] },
-  { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["venta"] },
-  { id: "apartados", texto: "Apartados", icono: Bookmark, permisos: ["cuentas.admin"] },
-  { id: "proformas", texto: "Proformas", icono: FileText, permisos: ["proformas"] },
-  { id: "productos", texto: "Productos", icono: Package, permisos: ["productos"] },
-  { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario"] },
-  { id: "reportes", texto: "Reportes", icono: ChartColumn, permisos: ["reportes.ventas"] },
-  { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes"] },
-  { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas"] },
+  { id: "venta", texto: "Venta", icono: ShoppingCart, permisos: ["venta.vender"] },
+  { id: "caja", texto: "Caja", icono: Landmark, permisos: ["caja.ver"] },
+  { id: "ventas", texto: "Ventas del día", icono: ReceiptText, permisos: ["ventas.ver"] },
+  { id: "apartados", texto: "Apartados", icono: Bookmark, permisos: ["cuentas.ver_todas"] },
+  { id: "proformas", texto: "Proformas", icono: FileText, permisos: ["proformas.crear"] },
+  { id: "productos", texto: "Productos", icono: Package, permisos: ["productos.editar", "productos.crear"] },
+  { id: "inventario", texto: "Inventario", icono: Boxes, permisos: ["inventario.ver"] },
+  { id: "reportes", texto: "Reportes", icono: ChartColumn, permisos: ["reportes.ver"] },
+  { id: "clientes", texto: "Clientes", icono: Users, permisos: ["clientes.ver_todos"] },
+  { id: "facturas", texto: "Facturas pendientes", icono: FileText, permisos: ["facturas.ver"] },
 ];
 const AVANZADO: Seccion[] = [
-  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios", "negocio", "departamentos", "respaldo", "impresoras.asignar", "reportes"] },
+  { id: "admin", texto: "Administración", icono: Settings2, permisos: ["usuarios.administrar", "negocio.contacto", "departamentos.editar", "respaldo.crear", "impresoras.asignar", "bitacora.ver", "seguridad.editar"] },
   { id: "config", texto: "Técnico", icono: Wrench, permisos: ["config.tecnica"] },
 ];
 
@@ -106,6 +109,19 @@ export default function App() {
   const [config, setConfig] = useState<ConfigApp | null>(null);
   const [nombreNegocio, setNombreNegocio] = useState("");
   const [avisoLogin, setAvisoLogin] = useState("");
+  // Bloqueo por inactividad: la pantalla sigue montada debajo del velo (no se pierde nada).
+  const [bloqueo, setBloqueo] = useState<{ id: string; nombre: string } | null>(null);
+  const [, setVersionPermisos] = useState(0);
+  const [pedido, setPedido] = useState<{ p: PedidoAutorizacion; listo(r: { pin?: string; motivo?: string } | null): void } | null>(null);
+  const faseRef = useRef(fase);
+  faseRef.current = fase;
+
+  /** La política efectiva del usuario (Rust): con esto se muestra u oculta. */
+  const cargarPermisos = useCallback(async () => {
+    const r = await permisosSesion();
+    establecerPermisos(r.acciones, r.motivosAnulacion, r.umbralAvisoAnulaciones);
+    setVersionPermisos(r.version);
+  }, []);
 
   /** Antes de entrar solo se sabe lo que Rust deja ver sin sesión: nombre, tema y si falta el técnico. */
   const cargarSistema = useCallback(async () => {
@@ -124,21 +140,45 @@ export default function App() {
     cargarSistema().catch((e) => setFase({ f: "error", mensaje: textoError(e) }));
   }, []);
 
-  // Rust cerró la sesión (inactividad): de vuelta a la entrada.
+  // Rust bloqueó la sesión (inactividad): velo encima, sin desmontar nada. Si la cerró: a la entrada.
   useEffect(
     () =>
       alPerderSesion((m) => {
+        const f = faseRef.current;
+        if (m === SESION_BLOQUEADA && f.f === "dentro") return setBloqueo({ id: f.usuario.id, nombre: f.usuario.nombre });
         if (m !== SESION_EXPIRADA) return;
         borrarBorradores();
+        setBloqueo(null);
         setConfig(null);
-        setAvisoLogin("La sesión se cerró por inactividad.");
+        setAvisoLogin("La sesión se cerró.");
         setFase({ f: "login" });
       }),
     [],
   );
+  // Una acción pide PIN del dueño o motivo (política): diálogo y lib/invocar reintenta.
+  useEffect(() => alPedirAutorizacion((p) => new Promise((listo) => setPedido({ p, listo: (r) => (setPedido(null), listo(r)) }))), []);
+  // Cambiaron los permisos (otra persona guardó): se vuelven a pedir sin cerrar sesión.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const quitar = listen("seguridad-cambiada", () => {
+      if (faseRef.current.f === "dentro" && !faseRef.current.usuario.debeCambiarPin) void cargarPermisos().catch(() => undefined);
+    });
+    return () => void quitar.then((f) => f());
+  }, []);
 
-  const entrar = useCallback(async (usuario: Usuario, minutos: number) => {
+  const entrar = useCallback(async (usuario: Usuario, minutos: number, continua = false) => {
     setAvisoLogin("");
+    const f = faseRef.current;
+    // Mismo usuario después del bloqueo: sigue donde estaba (Rust lo confirmó con `continua`).
+    if (continua && f.f === "dentro" && f.usuario.id === usuario.id) {
+      setBloqueo(null);
+      await cargarPermisos();
+      return;
+    }
+    // Otra persona: nada de la pantalla anterior (ni el borrador de la entrada, que lleva costos).
+    if (f.f === "dentro") borrarBorradores();
+    setBloqueo(null);
+    if (!usuario.debeCambiarPin) await cargarPermisos();
     // Con PIN pendiente de cambio Rust no deja leer nada: la configuración se carga después del cambio.
     if (!usuario.debeCambiarPin) {
       const c = await leerConfig();
@@ -211,19 +251,28 @@ export default function App() {
         <Login nombreNegocio={nombreNegocio} onEntrar={(u, m) => entrar(u, m).catch((e) => setFase({ f: "error", mensaje: textoError(e) }))} />
       </>
     );
-  else contenido = <Dentro key={fase.usuario.id} usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} />;
+  else
+    contenido = (
+      <>
+        <Dentro key={fase.usuario.id} usuario={fase.usuario} minutos={fase.minutos} config={config} nombreNegocio={nombreNegocio} recargarConfig={recargarConfig} salir={salir} bloqueada={!!bloqueo} />
+        {bloqueo && <VeloBloqueo nombreNegocio={nombreNegocio} usuario={bloqueo} onEntrar={(u, m, c) => void entrar(u, m, c).catch((e) => setFase({ f: "error", mensaje: textoError(e) }))} />}
+      </>
+    );
 
   // La clave por usuario desmonta avisos y confirmaciones del usuario anterior al cambiar de usuario.
   const clave = fase.f === "dentro" ? fase.usuario.id : "fuera";
   return (
     <ConfirmarProvider key={clave}>
-      <ToastProvider>{contenido}</ToastProvider>
+      <ToastProvider>
+        {contenido}
+        {pedido && <PedirAutorizacion pedido={pedido.p} onListo={pedido.listo} />}
+      </ToastProvider>
     </ConfirmarProvider>
   );
 }
 
-function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(aviso?: string): void }) {
-  const usaCaja = puede(p.usuario.rol, "caja");
+function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombreNegocio: string; recargarConfig(): Promise<void>; salir(aviso?: string): void; bloqueada: boolean }) {
+  const usaCaja = puede(p.usuario.rol, "caja.ver");
   const [caja, setCaja] = useState<EstadoCaja | null>(null);
   const recargarCaja = useCallback(async () => {
     if (usaCaja) setCaja(await estadoCaja());
@@ -245,14 +294,14 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
   // Aviso discreto al dueño (nunca al cajero en la venta): productos en su mínimo o por debajo.
   const [bajoMinimo, setBajoMinimo] = useState(0);
   useEffect(() => {
-    if (!sesion.puede("inventario")) return;
+    if (!sesion.puede("inventario.ver")) return;
     alertasInventario().then(setBajoMinimo, () => setBajoMinimo(0));
   }, [pagina]);
 
   // Apartados o créditos vencidos: aviso al dueño (sin acción automática).
   const [vencidas, setVencidas] = useState(0);
   useEffect(() => {
-    if (!sesion.puede("cuentas.admin") || !(p.config.usa_apartados || p.config.usa_credito)) return;
+    if (!sesion.puede("cuentas.ver_todas") || !(p.config.usa_apartados || p.config.usa_credito)) return;
     cuentasVencidas().then(setVencidas, () => setVencidas(0));
   }, [pagina]);
 
@@ -260,32 +309,51 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
     void recargarCaja().catch(() => undefined);
   }, [pagina]);
 
-  // Inactividad: cada tanto se avisa a Rust que hubo uso; sin uso por N minutos, se bloquea.
-  const ultimo = useRef(Date.now());
+  // Inactividad (lo decide Rust con su reloj): la pantalla solo informa la actividad real
+  // (teclado, incluido el lector; mouse; táctil) y pregunta cuánto falta, sin renovar el plazo.
+  const [avisoBloqueo, setAvisoBloqueo] = useState(false);
   useEffect(() => {
+    if (p.bloqueada) return;
     let avisado = 0;
     const actividad = () => {
-      ultimo.current = Date.now();
-      if (Date.now() - avisado > 60_000) {
+      setAvisoBloqueo(false);
+      if (Date.now() - avisado > 10_000) {
         avisado = Date.now();
         void tocarSesion().catch(() => undefined);
       }
     };
-    const t = setInterval(() => {
-      if (Date.now() - ultimo.current > p.minutos * 60_000) p.salir("La sesión se cerró por inactividad.");
-    }, 15_000);
+    const revisar = () =>
+      void estadoSesion()
+        .then((e) => {
+          if (!e) return;
+          // Bloqueada: el siguiente comando lo confirma y lib/invocar pone el velo.
+          if (e.bloqueada) return void tocarSesion().catch(() => undefined);
+          // Un minuto antes (con un tiempo de 1 minuto, a la mitad).
+          setAvisoBloqueo(e.restanteMs <= Math.min(60_000, (e.minutos * 60_000) / 2));
+        })
+        .catch(() => undefined);
+    const t = setInterval(revisar, 5_000);
     window.addEventListener("keydown", actividad, true);
     window.addEventListener("pointerdown", actividad, true);
+    window.addEventListener("touchstart", actividad, true);
     return () => {
       clearInterval(t);
       window.removeEventListener("keydown", actividad, true);
       window.removeEventListener("pointerdown", actividad, true);
+      window.removeEventListener("touchstart", actividad, true);
     };
-  }, [p.minutos, p.salir]);
+  }, [p.bloqueada]);
+
+  // Aviso al dueño: anulaciones sin PIN desde la última vez y cambios alterados en los permisos.
+  const [avisos, setAvisos] = useState<Avisos | null>(null);
+  useEffect(() => {
+    if (p.usuario.rol !== "dueno") return;
+    avisosDueno().then(setAvisos, () => setAvisos(null));
+  }, []);
 
   // Contador de facturas pendientes en el menú: que no se olvide ninguna.
   useEffect(() => {
-    if (!sesion.puede("facturas")) return;
+    if (!sesion.puede("facturas.ver")) return;
     pendientesFactura(sesion.actor).then((l) => setFacturas(l.length), () => setFacturas(0));
   }, [pagina]);
 
@@ -347,7 +415,7 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
 
   return (
     <SesionCtx.Provider value={sesion}>
-      <div className="app">
+      <div className="app" inert={p.bloqueada}>
         <aside className="lateral" aria-label="Menú">
           <div className="lateral-marca">{p.nombreNegocio || "Punto de venta"}</div>
           {usaCaja && caja && (
@@ -388,8 +456,26 @@ function Dentro(p: { usuario: Usuario; minutos: number; config: ConfigApp; nombr
           </div>
         </aside>
         <main className="contenido">
+          {avisoBloqueo && !p.bloqueada && <AvisoInactividad />}
+          {avisos && avisos.seguridadAlterada && (
+            <Alert tono="error" titulo="Los permisos fueron alterados">
+              Alguien cambió la configuración de permisos fuera del programa. Se usa la última versión válida. Avise al técnico.
+            </Alert>
+          )}
+          {avisos && avisos.anulacionesSinPin > 0 && (
+            <Alert tono="aviso" titulo={avisos.anulacionesSinPin === 1 ? "Hubo 1 anulación sin PIN" : `Hubo ${avisos.anulacionesSinPin} anulaciones sin PIN`}>
+              <div className="fila">
+                <Button onClick={() => (setPagina("reportes"), void anulacionesVistas().then(() => setAvisos({ ...avisos, anulacionesSinPin: 0 })))}>
+                  Ver el detalle
+                </Button>
+                <Button variante="fantasma" onClick={() => void anulacionesVistas().then(() => setAvisos({ ...avisos, anulacionesSinPin: 0 }))}>
+                  Entendido
+                </Button>
+              </div>
+            </Alert>
+          )}
           {acercaDe && <AcercaDe onCerrar={() => setAcercaDe(false)} />}
-          {sesion.puede("respaldo") && <AvisoRespaldo pagina={pagina} />}
+          {sesion.puede("respaldo.crear") && <AvisoRespaldo pagina={pagina} />}
           {/* key: al cambiar de sección, un error anterior no se queda pegado. */}
           <ErrorPantalla key={pagina}>{paginas[pagina]}</ErrorPantalla>
         </main>

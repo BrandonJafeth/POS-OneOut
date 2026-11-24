@@ -26,7 +26,6 @@ export interface ConfigApp {
   /** Múltiplo al que se redondea el total (1 = sin redondeo). */
   redondeo_total: number;
   /** % máximo de descuento por rol sin PIN de dueño. */
-  descuento_max_pct: Record<string, number>;
   denominaciones_rapidas: number[];
   abrir_gaveta_efectivo: boolean;
   /** Se imprime al final del tiquete. Vacío = no se imprime. */
@@ -43,7 +42,6 @@ export interface ConfigApp {
   /** ¢: desde esta diferencia el cierre de caja exige nota y queda para revisión del dueño. */
   caja_umbral_diferencia: number;
   /** ¢: salidas de efectivo mayores piden el PIN del dueño. */
-  caja_salida_max_sin_pin: number;
   /** Otros usuarios pueden vender en el turno abierto por otra persona (el turno es de la caja). */
   caja_turno_compartido: boolean;
   /** Días laborables con su hora de cierre ("HH:MM"), de lunes a domingo; null = no se trabaja. */
@@ -64,11 +62,8 @@ export interface ConfigApp {
   pin_min_dueno: number;
   pin_min_cajero: number;
   /** Minutos sin uso tras los que se bloquea la sesión. */
-  sesion_inactividad_min: number;
   /** Vender sin existencia (queda negativa). false = hace falta el PIN del dueño. */
-  permitir_vender_sin_existencia: boolean;
   /** La tarjeta del producto en la venta muestra la existencia. */
-  venta_mostrar_existencia: boolean;
   inventario_motivos_ajuste: string[];
   /** La importación genera códigos internos a los productos que no tienen (por defecto no). */
   importacion_codigos_internos: boolean;
@@ -96,7 +91,6 @@ export const CONFIG_DEFECTO: ConfigApp = {
   retencion_clientes_meses: 36,
   aviso_privacidad_en_tiquete: false,
   redondeo_total: 5,
-  descuento_max_pct: { cajero: 10, dueno: 100, tecnico: 100 },
   denominaciones_rapidas: [1000, 2000, 5000, 10000, 20000],
   abrir_gaveta_efectivo: true,
   texto_no_factura: "Este tiquete no es una factura electrónica",
@@ -106,7 +100,6 @@ export const CONFIG_DEFECTO: ConfigApp = {
   color_acento: "",
   color_fondo: "",
   caja_umbral_diferencia: 1000,
-  caja_salida_max_sin_pin: 20000,
   caja_turno_compartido: true,
   caja_horario: ["18:30", "18:30", "18:30", "18:30", "18:30", "17:30", null],
   caja_z_detalle_completo: false,
@@ -119,9 +112,6 @@ export const CONFIG_DEFECTO: ConfigApp = {
   caja_motivos: { salida: ["Retiro de dinero", "Gasto menor", "Pago a proveedor", "Adelanto"], entrada: ["Ingreso de cambio", "Otro ingreso"] },
   pin_min_dueno: 6,
   pin_min_cajero: 4,
-  sesion_inactividad_min: 10,
-  permitir_vender_sin_existencia: true,
-  venta_mostrar_existencia: false,
   inventario_motivos_ajuste: ["Conteo", "Daño", "Merma", "Regalo", "Error de registro", "Otro"],
   importacion_codigos_internos: false,
   proforma_vigencia_dias: 8,

@@ -49,6 +49,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (22, "descripcion_apartado", include_str!("../../src/db/migraciones/0022_descripcion_apartado.sql")),
     (23, "code128_impresora", include_str!("../../src/db/migraciones/0023_code128_impresora.sql")),
     (24, "proformas", include_str!("../../src/db/migraciones/0024_proformas.sql")),
+    (25, "seguridad_versiones", include_str!("../../src/db/migraciones/0025_seguridad_versiones.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
@@ -312,6 +313,8 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
     reparar_sumas(pool).await?;
     Migrator::new(Lista(MIGRACIONES.len())).await.map_err(e)?.run(pool).await.map_err(e)?;
     bitacora::encadenar_pendientes(pool).await?;
+    // Permisos: la versión 1 (igual a la 0.9.2) si la base todavía no tiene ninguna.
+    crate::politica::asegurar_inicial(pool).await?;
     Ok(())
 }
 
@@ -442,7 +445,7 @@ mod tests {
     use crate::permisos::Rol;
 
     fn actor(rol: Rol) -> Actor {
-        Actor { id: "U".into(), rol, nombre: "x".into() }
+        Actor::nuevo("U", rol, "x")
     }
 
     /// Una base migrada con los .sql en LF tiene que seguir abriendo con un build hecho desde un

@@ -1,5 +1,4 @@
-// Roles y permisos. Es la fuente que DECIDE (el frontend solo esconde botones con su copia en
-// src/lib/permisos.ts). Mantener ambas listas iguales.
+// Roles. Qué puede hacer cada uno lo decide politica.rs (acciones configurables por rol y usuario).
 
 use serde::{Deserialize, Serialize};
 
@@ -27,58 +26,6 @@ impl Rol {
             Rol::Tecnico => "tecnico",
         }
     }
-}
-
-const CAJERO: &[&str] = &["venta", "caja", "clientes.basico", "facturas", "cuentas", "proformas"];
-const DUENO: &[&str] = &[
-    "venta",
-    "caja",
-    "caja.admin",
-    "productos",
-    "productos.importar",
-    "departamentos",
-    "usuarios",
-    "negocio",
-    "reportes",
-    "clientes.basico",
-    "clientes",
-    "respaldo",
-    "facturas",
-    "impresoras.asignar",
-    "inventario",
-    "cuentas",
-    "cuentas.admin",
-    "reportes.ventas",
-    // Proformas: el cajero crea, busca, imprime y convierte; anular y el reporte son del dueño.
-    "proformas",
-    "proformas.anular",
-    "proformas.admin",
-];
-// El técnico configura el sistema; no vende, no maneja caja ni ve datos de clientes.
-// Impresoras: agregarlas, cambiar su conexión o formato, quitarlas y la gaveta ("impresoras") son
-// del técnico (soporte). El dueño ve las que hay, las prueba y elige a cuál va cada documento
-// ("impresoras.asignar"). Imprimir puede cualquiera.
-const TECNICO: &[&str] = &[
-    "productos",
-    "productos.importar",
-    "departamentos",
-    "departamentos.estructura",
-    "usuarios",
-    "negocio",
-    "negocio.legal",
-    "config.tecnica",
-    "reportes",
-    "impresoras",
-    "impresoras.asignar",
-];
-
-pub fn puede(rol: Rol, permiso: &str) -> bool {
-    match rol {
-        Rol::Cajero => CAJERO,
-        Rol::Dueno => DUENO,
-        Rol::Tecnico => TECNICO,
-    }
-    .contains(&permiso)
 }
 
 /// Roles que `rol` puede crear o administrar (además de cambiar su propio PIN).

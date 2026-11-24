@@ -137,8 +137,23 @@ export async function corregirPago(_actor: Actor, pagoId: string, cambio: Cambio
  * Turno abierto: PIN del dueño y motivo. Turno cerrado: solo el dueño; `devolucionEfectivo`
  * (opcional) sale de la caja de hoy como salida.
  */
-export async function anularVenta(_actor: Actor, ventaId: string, pin: string, motivo: string, devolucionEfectivo = 0): Promise<void> {
-  await invocar("venta_anular", { ventaId, pin, motivo, devolucionEfectivo });
+/** Lo que devuelve Rust al anular: para el comprobante y el aviso. */
+export interface Anulada {
+  numero: string;
+  total: number;
+  motivo: string;
+  usuario: string;
+  fecha: string;
+  /** "A" (dueño), "B" (cajero con PIN) o "C" (cajero sin PIN, con controles). */
+  politica: "A" | "B" | "C";
+  sinPin: boolean;
+  comprobante: boolean;
+  factura: string | null;
+}
+
+/** Rust decide la política (A/B/C) y si hace falta el PIN; si falta, lib/invocar lo pide y reintenta. */
+export async function anularVenta(_actor: Actor, ventaId: string, pin: string, motivo: string, devolucionEfectivo = 0): Promise<Anulada> {
+  return invocar<Anulada>("venta_anular", { ventaId, pin, motivo, devolucionEfectivo });
 }
 
 // ─────────── Factura electrónica externa ───────────

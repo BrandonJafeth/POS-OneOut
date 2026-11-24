@@ -8,7 +8,7 @@ import { cambiosDePrecio, categoriasSinMapear, crearPlan, leerPrecio, type Conte
 import { contienePalabra, pluralesSinRegla, porCategorias, porPalabras, REGLAS_DEFECTO, reglasValidas, sugerenciaNombre } from "../src/lib/importar/reglas";
 import { isValidEan13 } from "../src/lib/ean13";
 import { leerCsvWeb } from "../src/lib/importar/web";
-import { puede } from "../src/lib/permisos";
+import { normalPuede } from "./permisosNormal";
 import type { Actor } from "../src/tipos";
 import { baseDePrueba } from "./driverNode";
 
@@ -311,10 +311,10 @@ describe("plan de importación", () => {
 
 describe("permisos", () => {
   it("un cajero no puede importar (ni ver Productos)", () => {
-    expect(puede("cajero", "productos.importar")).toBe(false);
-    expect(puede("cajero", "productos")).toBe(false);
-    expect(puede("dueno", "productos.importar")).toBe(true);
-    expect(puede("tecnico", "productos.importar")).toBe(true);
+    expect(normalPuede("cajero", "productos.importar")).toBe(false);
+    expect(normalPuede("cajero", "productos.editar")).toBe(false);
+    expect(normalPuede("dueno", "productos.importar")).toBe(true);
+    expect(normalPuede("tecnico", "productos.importar")).toBe(true);
   });
 });
 

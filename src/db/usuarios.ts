@@ -58,15 +58,15 @@ export async function eliminarUsuario(_actor: Actor, id: string): Promise<void> 
 }
 
 export type ResultadoLogin =
-  | { ok: true; usuario: Usuario; minutosInactividad: number }
+  | { ok: true; usuario: Usuario; minutosInactividad: number; continua: boolean }
   | { ok: false; esperaMs: number; intentos: number };
 
 type Respuesta =
-  | { resultado: "ok"; usuario: Omit<Usuario, "activo">; minutosInactividad: number }
+  | { resultado: "ok"; usuario: Omit<Usuario, "activo">; minutosInactividad: number; continua?: boolean }
   | { resultado: "rechazado"; esperaMs: number; intentos: number };
 
 function aLogin(r: Respuesta): ResultadoLogin {
-  if (r.resultado === "ok") return { ok: true, usuario: { ...r.usuario, activo: true }, minutosInactividad: r.minutosInactividad };
+  if (r.resultado === "ok") return { ok: true, usuario: { ...r.usuario, activo: true }, minutosInactividad: r.minutosInactividad, continua: !!r.continua };
   return { ok: false, esperaMs: r.esperaMs, intentos: r.intentos };
 }
 
@@ -84,7 +84,7 @@ export async function cerrarSesion(): Promise<void> {
   await invocar("sesion_cerrar");
 }
 
-/** Hubo actividad en la pantalla: Rust renueva el plazo de inactividad. */
+/** Hubo actividad real (teclado, lector, mouse, táctil): lo único que renueva el plazo en Rust. */
 export async function tocarSesion(): Promise<void> {
   await invocar("sesion_tocar");
 }

@@ -6,7 +6,7 @@
 // Las pestañas viven en useEsperas, el catálogo en useCatalogo y las reglas de dinero en
 // lib/venta/calculo.ts; aquí queda lo que une todo con la pantalla.
 import { flechasPestanas } from "../ui/pestanas";
-import { navegarCampos } from "../ui/teclado";
+import { pantallaBloqueada, navegarCampos } from "../ui/teclado";
 import { Banknote, Bookmark, Check, FileText, Inbox, Landmark, LockOpen, Plus, Printer, ReceiptText, ScanBarcode, Search, ShoppingCart, Star, Trash2, UserRound, X, Percent, Minus, Keyboard } from "lucide-react";
 import type { Permiso } from "../lib/permisos";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +23,8 @@ import { conMiles, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
 import { ulid } from "../lib/ulid";
 import { useEscaner } from "../lib/useEscaner";
-import { bruto, calcularTotales, conCantidad, conLinea, descuentoCatalogo, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion, topeDescuento } from "../lib/venta/calculo";
+import { bruto, calcularTotales, conCantidad, conLinea, descuentoCatalogo, estadoVacio, importeLinea, leerDescuento, necesitaAutorizacion } from "../lib/venta/calculo";
+import { politicaDe, topeDescuento } from "../lib/permisos";
 import { abrirGavetaVenta, imprimirVenta } from "../lib/venta/imprimir";
 import { imprimirTrasCobro } from "../lib/venta/trasCobro";
 import { guardarProforma, obtenerProforma, type ProformaDetalle } from "../db/proformas";
@@ -63,7 +64,7 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
       { teclas: ["Enter"], texto: "Agregar el producto elegido" },
       { teclas: ["Esc"], texto: "Borrar la búsqueda" },
       { teclas: ["F4"], texto: "Venta simple (algo sin código, solo el monto)" },
-      { teclas: ["F7"], texto: "Cliente o factura", permiso: "clientes.basico" },
+      { teclas: ["F7"], texto: "Cliente o factura", permiso: "clientes.crear" },
     ],
   },
   {
@@ -80,9 +81,9 @@ const ATAJOS: { grupo: string; lista: { teclas: string[]; texto: string; permiso
   {
     grupo: "Apartados",
     lista: [
-      { teclas: ["F9"], texto: "Apartar la venta (pide el cliente si no hay)", permiso: "cuentas" },
-      { teclas: ["F10"], texto: "Buscar un apartado y abonar, liquidar o entregar", permiso: "cuentas" },
-      { teclas: ["F11"], texto: "Guardar como proforma (precio por escrito, no es una venta)", permiso: "proformas" },
+      { teclas: ["F9"], texto: "Apartar la venta (pide el cliente si no hay)", permiso: "cuentas.crear" },
+      { teclas: ["F10"], texto: "Buscar un apartado y abonar, liquidar o entregar", permiso: "cuentas.crear" },
+      { teclas: ["F11"], texto: "Guardar como proforma (precio por escrito, no es una venta)", permiso: "proformas.crear" },
     ],
   },
   {
@@ -129,26 +130,27 @@ export default function Venta() {
   const [abonado, setAbonado] = useState<{ r: ResultadoAbono; nuevo: boolean; errorImpresion?: string; errorGaveta?: string } | null>(null);
   const operacion = useRef("");
   useEffect(() => {
-    if (puede("cuentas")) reglasCuentas().then(setReglas, () => setReglas(null));
+    if (puede("cuentas.crear")) reglasCuentas().then(setReglas, () => setReglas(null));
   }, []);
-  const usaApartados = !!reglas?.usaApartados && puede("cuentas");
+  const usaApartados = !!reglas?.usaApartados && puede("cuentas.crear");
   const tabs = useEsperas(setError);
   const { esperas, activa, activaId, setActivaId, actual, actualizar } = tabs;
   const { productos, total: totalCatalogo, cargando, buscando, sel, setSel, orden, cambiarOrden, grilla, finGrilla, alternarFavorito } = useCatalogo(texto, filtro, setError);
-  // Existencia en las tarjetas: solo si la configuración lo pide (por defecto no, para no saturar).
+  // Existencia en las tarjetas: solo si la política lo deja ver (por defecto no, para no saturar).
+  const verExistencia = puede("venta.ver_existencia");
   const [existencias, setExistencias] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (!config.venta_mostrar_existencia || !productos.length) return setExistencias({});
+    if (!verExistencia || !productos.length) return setExistencias({});
     existenciaVenta(productos.slice(0, 500).map((p) => p.id)).then(
       (l) => setExistencias(Object.fromEntries(l.map((x) => [x.productoId, x.existencia]))),
       () => setExistencias({}),
     );
-  }, [productos, config.venta_mostrar_existencia]);
+  }, [productos, verExistencia]);
 
   const estado = activa?.estado ?? estadoVacio();
   // Crédito disponible del cliente elegido: se pide al abrir el cobro (Rust vuelve a revisar al cobrar).
   // Sin cliente o sin crédito en el negocio, nada cambia en el cobro.
-  const conCredito = !!(reglas?.usaCredito && estado.cliente && puede("cuentas"));
+  const conCredito = !!(reglas?.usaCredito && estado.cliente && puede("credito.vender"));
   const [disponible, setDisponible] = useState<number | null>(null);
   useEffect(() => {
     setDisponible(null);
@@ -166,20 +168,23 @@ export default function Venta() {
   const [trasCambio, setTrasCambio] = useState<"cobro" | "apartar">("cobro");
   /** Abre el cobro o el apartado; si la venta ya no es la proforma ligada, antes pregunta qué hacer. */
   const convertir = (siguiente: "cobro" | "apartar") => (noCoincide ? (setTrasCambio(siguiente), setDialogo("proformaCambio")) : setDialogo(siguiente));
-  // Si la configuración no deja vender sin existencia, se avisa antes de cobrar (Rust lo revisa de nuevo al cobrar).
+  // Si la política no deja vender sin existencia, se avisa antes de cobrar (Rust lo revisa de nuevo al cobrar).
+  const libreSinExistencia = politicaDe("venta.sin_existencia")?.nivel === "si";
   const [faltan, setFaltan] = useState<string[]>([]);
   const cantidades = estado.lineas.map((l) => `${l.productoId}:${l.cantidad}`).join();
   useEffect(() => {
-    if (config.permitir_vender_sin_existencia || !estado.lineas.some((l) => l.productoId)) return setFaltan([]);
+    if (libreSinExistencia || !estado.lineas.some((l) => l.productoId)) return setFaltan([]);
     let vivo = true;
     const espera = setTimeout(() => faltantesVenta(estado.lineas).then((l) => vivo && setFaltan(l), () => vivo && setFaltan([])), 200);
     return () => {
       vivo = false;
       clearTimeout(espera);
     };
-  }, [cantidades, config.permitir_vender_sin_existencia]);
+  }, [cantidades, libreSinExistencia]);
   const t = useMemo(() => calcularTotales(estado, config.redondeo_total), [estado, config.redondeo_total]);
-  const tope = topeDescuento(actor.rol, config.descuento_max_pct);
+  // Tope de descuento de la política del usuario (Rust lo revisa igual al cobrar).
+  const topeP = topeDescuento(politicaDe("venta.descuento"));
+  const tope = topeP.pct;
   const confirmar = useConfirmar();
   const [confirmando, setConfirmando] = useState(false);
   const modal = dialogo !== null || pendiente !== null || cobrada !== null || abonado !== null || confirmando;
@@ -213,8 +218,9 @@ export default function Venta() {
   /** Igual que actualizar, pero si el descuento pasa el tope del rol, pide antes el PIN del dueño. */
   function actualizarConTope(nuevo: EstadoEspera) {
     const pct = calcularTotales(nuevo, config.redondeo_total).pctDescuento;
-    if (necesitaAutorizacion(nuevo, pct, tope)) setPendiente(nuevo);
-    else actualizar(nuevo);
+    if (!necesitaAutorizacion(nuevo, pct, tope)) return actualizar(nuevo);
+    if (topeP.bloquear) return setError(tope > 0 ? `El descuento pasa su máximo de ${tope} %: no se puede dar.` : "No tiene permiso para dar descuentos.");
+    setPendiente(nuevo);
   }
 
   function agregarLinea(l: LineaEspera) {
@@ -464,6 +470,7 @@ export default function Venta() {
   // ── Atajos de teclado (la lista visible está en ATAJOS, abajo: si cambia uno, cambiar los dos)
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
+      if (pantallaBloqueada()) return;
       // Con la caja cerrada no hay venta en pantalla: un F4 dejaría un diálogo escondido que aparece al abrir.
       if (cerrada) return;
       if (cobrada && (e.key === "Enter" || e.key === "Escape")) {
@@ -477,7 +484,7 @@ export default function Venta() {
         F2: () => void nuevaEspera(),
         F3: () => buscador.current?.select(),
         F4: () => setDialogo("libre"),
-        F7: () => puede("clientes.basico") && setDialogo("cliente"),
+        F7: () => puede("clientes.crear") && setDialogo("cliente"),
         F8: () => (estado.lineas.length ? setDialogo("descuento") : vacia()),
         // Apartar: sin cliente, primero el cliente (y sigue solo al elegirlo).
         F9: () => {
@@ -487,7 +494,7 @@ export default function Venta() {
           convertir("apartar");
         },
         F10: () => usaApartados && setDialogo("apartados"),
-        F11: () => puede("proformas") && (estado.lineas.length ? setDialogo("proforma") : vacia()),
+        F11: () => puede("proformas.crear") && (estado.lineas.length ? setDialogo("proforma") : vacia()),
         F12: () => (estado.lineas.length ? convertir("cobro") : vacia()),
       };
       if (atajos[e.key]) {
@@ -533,7 +540,7 @@ export default function Venta() {
     return m;
   }, [estado.lineas]);
   const articulos = estado.lineas.reduce((s, l) => s + l.cantidad, 0);
-  const puedeFavoritos = puede("productos");
+  const puedeFavoritos = puede("productos.favoritos");
 
   if (caja && cerrada)
     return (
@@ -559,7 +566,7 @@ export default function Venta() {
             <>
               <h1>La caja está cerrada</h1>
               <p className="muted">Ábrala contando el fondo para empezar a vender.</p>
-              {puede("caja") ? (
+              {puede("caja.ver") ? (
                 <Button variante="primario" tamano="lg" icono={LockOpen} ancho onClick={() => setAbrirCaja(true)}>
                   Abrir caja
                 </Button>
@@ -737,7 +744,7 @@ export default function Venta() {
           </button>
         </div>
 
-        {puede("clientes.basico") && (
+        {puede("clientes.crear") && (
           <div className="tiquete-cliente">
             <Button
               icono={UserRound}
@@ -816,7 +823,7 @@ export default function Venta() {
                 Apartar
               </Button>
             )}
-            {puede("proformas") && (
+            {puede("proformas.crear") && (
               <Button icono={FileText} atajo="F11" disabled={!estado.lineas.length} onClick={() => setDialogo("proforma")} title="Guardar como proforma (precio por escrito, no es una venta)">
                 Proforma
               </Button>

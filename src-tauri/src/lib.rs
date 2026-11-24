@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+mod acciones;
 mod bd;
 mod bitacora;
 mod caja;
@@ -23,16 +24,24 @@ mod casos_raros;
 #[cfg(test)]
 mod tabla_permisos;
 #[cfg(test)]
+mod tabla_comandos;
+#[cfg(test)]
+mod permisos_tests;
+#[cfg(test)]
+mod anulacion_tests;
+#[cfg(test)]
 mod tipos_ts;
 mod inventario;
 mod negocio;
 mod permisos;
+mod politica;
 mod pin;
 mod preparacion;
 mod printer;
 mod proformas;
 mod reportes;
 mod respaldo;
+mod seguridad;
 mod sesion;
 mod usuarios;
 mod util;
@@ -63,6 +72,8 @@ struct App {
     sesion: Sesion,
     /// El usuario entró con un PIN que debe cambiar: hasta hacerlo, no puede hacer otra cosa.
     debe_cambiar_pin: AtomicBool,
+    /// Configuración de seguridad vigente, en memoria: se vuelve a leer solo al agregar una versión.
+    seguridad: std::sync::RwLock<std::sync::Arc<politica::Vigente>>,
 }
 
 impl App {
@@ -72,13 +83,50 @@ impl App {
     fn pool(&self) -> Res<&sqlx::SqlitePool> {
         Ok(&self.bd()?.pool)
     }
-    async fn actor(&self) -> Res<Actor> {
-        let a = self.sesion.actor().await?;
+    fn seg(&self) -> std::sync::Arc<politica::Vigente> {
+        self.seguridad.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+    /// Vuelve a leer la configuración de seguridad (al abrir y después de agregar una versión).
+    async fn recargar_seguridad(&self) -> Res<()> {
+        let v = politica::cargar(self.pool()?).await?;
+        *self.seguridad.write().unwrap_or_else(|p| p.into_inner()) = std::sync::Arc::new(v);
+        Ok(())
+    }
+    /// Entrada de todo comando con sesión: bloqueo por inactividad, cambio de PIN pendiente y la
+    /// política del comando (acciones::COMANDOS → politica::efectiva). Un comando sin acción se niega.
+    /// El guardia que devuelve evita que la sesión se bloquee mientras el comando corre.
+    async fn comando(&self, cmd: &str) -> Res<(Actor, sesion::Guardia)> {
+        let (a, g) = self.sesion.actor(&self.seg()).await?;
         if self.debe_cambiar_pin.load(Ordering::SeqCst) {
             return Err("DEBE_CAMBIAR_PIN".into());
         }
-        Ok(a)
+        puerta(self, &a, cmd).await?;
+        Ok((a, g))
     }
+}
+
+/// La puerta común: niega lo que la política no permite y, para las acciones que no manejan su
+/// propio PIN o motivo, pide una autorización de un solo uso (seguridad_autorizar).
+async fn puerta(st: &App, a: &Actor, cmd: &str) -> Res<()> {
+    use acciones::{Destino, Nivel};
+    let id = match acciones::destino(cmd) {
+        None => return Err(permisos::sin_permiso("usar esta función")),
+        Some(Destino::Accion(id)) => id,
+        Some(_) => return Ok(()),
+    };
+    let accion = acciones::buscar(id).ok_or_else(|| permisos::sin_permiso("usar esta función"))?;
+    let p = a.politica(id);
+    if p.nivel == Nivel::No {
+        return Err(permisos::sin_permiso(&accion.nombre.to_lowercase()));
+    }
+    if accion.propia || p.nivel == Nivel::Si {
+        return Ok(());
+    }
+    let ap = politica::aplicar(a, id, &politica::Contexto::default())?;
+    let aut = ap;
+    let mut tx = st.pool()?.begin_with("BEGIN IMMEDIATE").await.map_err(util::e)?;
+    bitacora::registrar(&mut tx, Some(&a.id), "permiso.autorizado", "accion", Some(id), &json!({"comando": cmd, "nivel": p.nivel, "motivo": aut.motivo, "autorizo": aut.autorizo, "version": a.seg.version})).await?;
+    tx.commit().await.map_err(util::e)
 }
 
 type St<'a> = State<'a, App>;
@@ -188,13 +236,22 @@ async fn entrar(st: &App, id: &str, pin: &str) -> Res<Value> {
     let ahora = util::ahora().timestamp_millis();
     match usuarios::iniciar_sesion(pool, id, pin, ahora).await? {
         usuarios::Login::Ok { usuario } => {
-            let minutos = config::entero(pool, "sesion_inactividad_min", 10).await;
-            st.sesion.iniciar(Actor { id: usuario.id.clone(), rol: usuario.rol, nombre: usuario.nombre.clone() }, minutos).await;
-            st.debe_cambiar_pin.store(usuario.debe_cambiar_pin, Ordering::SeqCst);
+            // Desbloqueo: si es el mismo usuario de la sesión bloqueada, sigue donde estaba; si es
+            // otro, la sesión anterior se descarta (la pantalla vuelve a armarse desde cero).
+            let mismo = st.sesion.usuario().await.is_some_and(|(sid, _, _, bloqueada)| bloqueada && sid == usuario.id);
+            let accion = if mismo {
+                st.sesion.desbloquear(&usuario.id).await;
+                "sesion.desbloqueo"
+            } else {
+                st.sesion.iniciar(Actor::nuevo(usuario.id.clone(), usuario.rol, usuario.nombre.clone())).await;
+                st.debe_cambiar_pin.store(usuario.debe_cambiar_pin, Ordering::SeqCst);
+                "login.ok"
+            };
+            let minutos = st.seg().datos.inactividad.minutos(usuario.rol);
             let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(util::e)?;
-            bitacora::registrar(&mut tx, Some(&usuario.id), "login.ok", "usuario", Some(&usuario.id), &json!({})).await?;
+            bitacora::registrar(&mut tx, Some(&usuario.id), accion, "usuario", Some(&usuario.id), &json!({})).await?;
             tx.commit().await.map_err(util::e)?;
-            Ok(json!({"resultado": "ok", "usuario": SesionInfo { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, debe_cambiar_pin: usuario.debe_cambiar_pin }, "minutosInactividad": minutos}))
+            Ok(json!({"resultado": "ok", "usuario": SesionInfo { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, debe_cambiar_pin: usuario.debe_cambiar_pin }, "minutosInactividad": minutos, "continua": mismo}))
         }
         r => serde_json::to_value(r).map_err(util::e),
     }
@@ -215,7 +272,7 @@ async fn sesion_tecnico(st: St<'_>, pin: String) -> Res<Value> {
 /// Sesión vigente (al recargar la ventana), sin renovar el plazo.
 #[tauri::command]
 async fn sesion_actual(st: St<'_>) -> Res<Option<SesionInfo>> {
-    Ok(st.sesion.vigente().await.map(|a| SesionInfo { id: a.id, nombre: a.nombre, rol: a.rol, debe_cambiar_pin: st.debe_cambiar_pin.load(Ordering::SeqCst) }))
+    Ok(st.sesion.vigente(&st.seg()).await.map(|a| SesionInfo { id: a.id, nombre: a.nombre, rol: a.rol, debe_cambiar_pin: st.debe_cambiar_pin.load(Ordering::SeqCst) }))
 }
 
 #[tauri::command]
@@ -225,23 +282,137 @@ async fn sesion_cerrar(st: St<'_>) -> Res<()> {
     Ok(())
 }
 
-/// La pantalla avisa que hubo actividad (teclado/ratón); renueva el plazo de inactividad.
+/// La pantalla avisa que hubo actividad real (teclado, lector, mouse, táctil). Es lo único que
+/// renueva el plazo de inactividad. Si ya venció, la sesión queda bloqueada.
 #[tauri::command]
 async fn sesion_tocar(st: St<'_>) -> Res<()> {
-    st.sesion.actor().await.map(|_| ())
+    st.sesion.tocar(&st.seg()).await
+}
+
+/// Para el aviso de 1 minuto y el velo de bloqueo (sin renovar). None = no hay sesión.
+#[tauri::command]
+async fn sesion_estado(st: St<'_>) -> Res<Option<Value>> {
+    let seg = st.seg();
+    let Some(e) = st.sesion.estado(&seg).await else { return Ok(None) };
+    let (id, rol, nombre, _) = st.sesion.usuario().await.ok_or(sesion::EXPIRADA)?;
+    Ok(Some(json!({"bloqueada": e.bloqueada, "restanteMs": e.restante_ms, "minutos": e.minutos, "usuario": {"id": id, "rol": rol, "nombre": nombre}})))
+}
+
+/// Política efectiva del usuario de la sesión: la pantalla muestra u oculta con esto (no decide).
+#[tauri::command]
+async fn sesion_permisos(st: St<'_>) -> Res<Value> {
+    let (a, _g) = st.comando("sesion_permisos").await?;
+    let acciones: Map<String, Value> = acciones::CATALOGO.iter().map(|x| (x.id.to_string(), json!(a.politica(x.id)))).collect();
+    Ok(json!({"version": a.seg.version, "acciones": acciones, "motivosAnulacion": a.seg.datos.motivos_anulacion, "umbralAvisoAnulaciones": a.seg.datos.umbral_aviso_anulaciones}))
+}
+
+// ─────────── Permisos y bloqueo (DISENO-PERMISOS.md) ───────────
+
+/// Después de agregar una versión: memoria al día y aviso a la pantalla (vuelve a pedir sus permisos).
+async fn seguridad_cambiada<R: tauri::Runtime>(app: &tauri::AppHandle<R>, st: &App) -> Res<()> {
+    use tauri::Emitter;
+    st.recargar_seguridad().await?;
+    let _ = app.emit("seguridad-cambiada", st.seg().version);
+    Ok(())
+}
+
+#[tauri::command]
+async fn seguridad_obtener(st: St<'_>) -> Res<Value> {
+    let (a, _g) = st.comando("seguridad_obtener").await?;
+    seguridad::obtener(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn seguridad_diferencias(st: St<'_>, datos: politica::Datos) -> Res<Vec<String>> {
+    let (a, _g) = st.comando("seguridad_diferencias").await?;
+    seguridad::diferencias(&a, &datos)
+}
+
+#[tauri::command]
+async fn seguridad_plantilla(st: St<'_>, nombre: String) -> Res<politica::Datos> {
+    let (a, _g) = st.comando("seguridad_plantilla").await?;
+    politica::plantilla(&nombre, &a.seg.datos)
+}
+
+#[tauri::command]
+async fn seguridad_guardar<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, datos: politica::Datos, motivo: String, plantilla: Option<String>, pin: Option<String>) -> Res<i64> {
+    let (a, _g) = st.comando("seguridad_guardar").await?;
+    let id = seguridad::guardar(st.pool()?, &a, "seguridad.editar", &datos, &motivo, plantilla.as_deref(), pin.as_deref()).await?;
+    seguridad_cambiada(&app, &st).await?;
+    Ok(id)
+}
+
+#[tauri::command]
+async fn seguridad_inactividad<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, inactividad: politica::Inactividad, pin: Option<String>) -> Res<i64> {
+    let (a, _g) = st.comando("seguridad_inactividad").await?;
+    let id = seguridad::inactividad(st.pool()?, &a, &inactividad, pin.as_deref()).await?;
+    seguridad_cambiada(&app, &st).await?;
+    Ok(id)
+}
+
+#[tauri::command]
+async fn seguridad_historial(st: St<'_>) -> Res<Vec<seguridad::VersionFila>> {
+    let (a, _g) = st.comando("seguridad_historial").await?;
+    seguridad::historial(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn seguridad_version(st: St<'_>, id: i64) -> Res<politica::Datos> {
+    let (a, _g) = st.comando("seguridad_version").await?;
+    seguridad::version(st.pool()?, &a, id).await
+}
+
+#[tauri::command]
+async fn seguridad_volver<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, id: i64, motivo: String, pin: String) -> Res<i64> {
+    let (a, _g) = st.comando("seguridad_volver").await?;
+    let v = seguridad::volver(st.pool()?, &a, id, &motivo, &pin).await?;
+    seguridad_cambiada(&app, &st).await?;
+    Ok(v)
+}
+
+/// PIN del dueño o motivo para la siguiente llamada de una acción («NECESITA_PIN» / «NECESITA_MOTIVO»).
+#[tauri::command]
+async fn seguridad_autorizar(st: St<'_>, accion: String, pin: Option<String>, motivo: Option<String>) -> Res<()> {
+    let (a, _g) = st.comando("seguridad_autorizar").await?;
+    let (autorizo, motivo) = seguridad::autorizar(st.pool()?, &a, &accion, pin.as_deref(), motivo.as_deref()).await?;
+    st.sesion.autorizar(&accion, autorizo, motivo).await
+}
+
+#[tauri::command]
+async fn avisos_dueno(st: St<'_>) -> Res<Value> {
+    let (a, _g) = st.comando("avisos_dueno").await?;
+    seguridad::avisos(st.pool()?, &a).await
+}
+
+#[tauri::command]
+async fn avisos_anulaciones_vistas(st: St<'_>) -> Res<()> {
+    let (a, _g) = st.comando("avisos_anulaciones_vistas").await?;
+    seguridad::anulaciones_vistas(st.pool()?, &a).await
+}
+
+/// Solo la compilación de desarrollo con POS_E2E=1: adelanta el reloj de la app (prueba del bloqueo).
+#[tauri::command]
+async fn prueba_avanzar_reloj(segundos: i64) -> Res<()> {
+    #[cfg(debug_assertions)]
+    if std::env::var("POS_E2E").as_deref() == Ok("1") {
+        util::avanzar_reloj_prueba(segundos);
+        return Ok(());
+    }
+    let _ = segundos;
+    Err("No disponible".into())
 }
 
 // ─────────── Base: lectura restringida y catálogo por nombre ───────────
 
 #[tauri::command]
 async fn bd_leer(st: St<'_>, sql: String, params: Vec<Value>) -> Res<Vec<Map<String, Value>>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("bd_leer").await?;
     st.bd()?.leer(&a, &sql, &params).await
 }
 
 #[tauri::command]
 async fn bd_lote(st: St<'_>, ops: Vec<Op>) -> Res<Vec<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("bd_lote").await?;
     st.bd()?.lote(&a, &ops).await
 }
 
@@ -249,27 +420,27 @@ async fn bd_lote(st: St<'_>, ops: Vec<Op>) -> Res<Vec<Value>> {
 
 #[tauri::command]
 async fn usuarios_listar(st: St<'_>) -> Res<Vec<usuarios::Usuario>> {
-    let a = st.actor().await?;
-    a.exigir("usuarios", "ver usuarios")?;
+    let (a, _g) = st.comando("usuarios_listar").await?;
+    a.exigir("usuarios.administrar", "ver usuarios")?;
     usuarios::listar(st.pool()?, a.rol == Rol::Tecnico, false).await
 }
 
 #[tauri::command]
 async fn usuarios_crear(st: St<'_>, nombre: String, rol: Rol, pin: String) -> Res<usuarios::Usuario> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("usuarios_crear").await?;
     usuarios::crear(st.pool()?, &a, &nombre, rol, &pin).await
 }
 
 #[tauri::command]
 async fn usuarios_editar(st: St<'_>, id: String, nombre: Option<String>, activo: Option<bool>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("usuarios_editar").await?;
     usuarios::editar(st.pool()?, &a, &id, nombre.as_deref(), activo).await
 }
 
 /// También sirve con un cambio de PIN pendiente (es lo único que se puede hacer en ese estado).
 #[tauri::command]
 async fn usuarios_cambiar_pin(st: St<'_>, id: String, pin: String) -> Res<()> {
-    let a = st.sesion.actor().await?;
+    let (a, _g) = st.sesion.actor(&st.seg()).await?;
     if st.debe_cambiar_pin.load(Ordering::SeqCst) && id != a.id {
         return Err("DEBE_CAMBIAR_PIN".into());
     }
@@ -282,7 +453,7 @@ async fn usuarios_cambiar_pin(st: St<'_>, id: String, pin: String) -> Res<()> {
 
 #[tauri::command]
 async fn usuarios_eliminar(st: St<'_>, id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("usuarios_eliminar").await?;
     usuarios::eliminar(st.pool()?, &a, &id).await
 }
 
@@ -290,33 +461,33 @@ async fn usuarios_eliminar(st: St<'_>, id: String) -> Res<()> {
 
 #[tauri::command]
 async fn config_guardar(st: St<'_>, clave: String, valor: Value) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("config_guardar").await?;
     config::guardar(st.pool()?, &a, &clave, &valor).await
 }
 
 #[tauri::command]
 async fn negocio_guardar(st: St<'_>, cambios: Map<String, Value>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("negocio_guardar").await?;
     negocio::guardar(st.pool()?, &a, &cambios).await
 }
 
 #[tauri::command]
 async fn negocio_logo(st: St<'_>, logo: Option<negocio::Logo>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("negocio_logo").await?;
     negocio::guardar_logo(st.pool()?, &a, logo).await
 }
 
 #[tauri::command]
 async fn bitacora_listar(st: St<'_>, limite: i64, entidad: Option<String>, desde: Option<String>, hasta: Option<String>) -> Res<Vec<bitacora::Entrada>> {
-    let a = st.actor().await?;
-    a.exigir("reportes", "ver la bitácora")?;
+    let (a, _g) = st.comando("bitacora_listar").await?;
+    a.exigir("bitacora.ver", "ver la bitácora")?;
     bitacora::listar(st.pool()?, limite.clamp(1, 2000), entidad.as_deref(), desde.as_deref(), hasta.as_deref()).await
 }
 
 #[tauri::command]
 async fn bitacora_verificar(st: St<'_>) -> Res<bitacora::Verificacion> {
-    let a = st.actor().await?;
-    a.exigir("reportes", "verificar la bitácora")?;
+    let (a, _g) = st.comando("bitacora_verificar").await?;
+    a.exigir("bitacora.ver", "verificar la bitácora")?;
     bitacora::verificar(st.pool()?).await
 }
 
@@ -324,57 +495,62 @@ async fn bitacora_verificar(st: St<'_>) -> Res<bitacora::Verificacion> {
 
 #[tauri::command]
 async fn caja_estado(st: St<'_>) -> Res<caja::EstadoCaja> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_estado").await?;
     caja::estado(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn caja_abrir(st: St<'_>, conteo: caja::Conteo, eleccion: Option<String>) -> Res<caja::Turno> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_abrir").await?;
     caja::abrir_eligiendo(st.pool()?, &a, caja::CAJA_1, &conteo, eleccion.as_deref()).await
 }
 
 #[tauri::command]
 async fn caja_queda(st: St<'_>, turno_id: String, monto: i64) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_queda").await?;
     caja::queda_en_gaveta(st.pool()?, &a, &turno_id, monto).await
 }
 
 #[tauri::command]
 async fn caja_corregir_dia(st: St<'_>, turno_id: String, dia: String, pin: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_corregir_dia").await?;
     caja::corregir_dia(st.pool()?, &a, &turno_id, &dia, &pin, &motivo).await
 }
 
 #[tauri::command]
 async fn caja_movimiento(st: St<'_>, movimiento: caja::NuevoMovimiento, pin_dueno: Option<String>) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_movimiento").await?;
     caja::movimiento(st.pool()?, &a, caja::CAJA_1, &movimiento, pin_dueno.as_deref()).await
 }
 
 #[tauri::command]
 async fn caja_detalle(st: St<'_>, turno_id: String) -> Res<caja::Detalle> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_detalle").await?;
     caja::detalle(st.pool()?, &a, &turno_id).await
 }
 
 #[tauri::command]
 async fn caja_necesita_nota(st: St<'_>, conteo: caja::Conteo) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_necesita_nota").await?;
     caja::necesita_nota(st.pool()?, &a, caja::CAJA_1, &conteo).await
 }
 
 #[tauri::command]
-async fn caja_cerrar(app: tauri::AppHandle, st: St<'_>, conteo: caja::Conteo, nota: String) -> Res<caja::ResultadoCierre> {
-    let a = st.actor().await?;
+async fn caja_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, conteo: caja::Conteo, nota: String) -> Res<caja::ResultadoCierre> {
+    let (a, _g) = st.comando("caja_cerrar").await?;
     let r = caja::cerrar(st.pool()?, &a, caja::CAJA_1, &conteo, &nota).await?;
+    // Al cerrar también se revisa la cadena de versiones de permisos: si alguien la alteró, queda en
+    // la bitácora, el dueño ve el aviso y desde ya se usa la última versión válida.
+    if politica::verificar(st.pool()?).await?.is_some() {
+        st.recargar_seguridad().await?;
+    }
     // Respaldo automático al cerrar el turno, en segundo plano (no demora el cierre).
     respaldo_en_segundo_plano(app, "cierre");
     Ok(r)
 }
 
 /// Hace un respaldo automático sin trabar a quien llama. Si falla, queda en la bitácora.
-fn respaldo_en_segundo_plano(app: tauri::AppHandle, motivo: &'static str) {
+fn respaldo_en_segundo_plano<R: tauri::Runtime>(app: tauri::AppHandle<R>, motivo: &'static str) {
     tauri::async_runtime::spawn(async move {
         let st = app.state::<App>();
         if let Ok(b) = &st.bd {
@@ -392,51 +568,51 @@ fn respaldo_en_segundo_plano(app: tauri::AppHandle, motivo: &'static str) {
 
 #[tauri::command]
 async fn respaldo_auto_configurar(st: St<'_>, contrasena: String, pin: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_auto_configurar").await?;
     respaldo::configurar_automatico(st.bd()?, &a, &contrasena, &pin).await
 }
 
 #[tauri::command]
 async fn respaldo_auto_estado(st: St<'_>) -> Res<respaldo::EstadoAutomatico> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_auto_estado").await?;
     respaldo::estado_automatico(st.bd()?, &a).await
 }
 
 #[tauri::command]
 async fn respaldo_auto_ahora(st: St<'_>) -> Res<Option<String>> {
-    let a = st.actor().await?;
-    a.exigir("respaldo", "hacer respaldos")?;
+    let (a, _g) = st.comando("respaldo_auto_ahora").await?;
+    a.exigir("respaldo.crear", "hacer respaldos")?;
     respaldo::automatico(st.bd()?, "manual").await
 }
 
 #[tauri::command]
 async fn respaldo_usb_confirmado(st: St<'_>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_usb_confirmado").await?;
     respaldo::usb_confirmado(st.bd()?, &a).await
 }
 
 #[tauri::command]
 async fn caja_consecutivo(st: St<'_>, numero: i64) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_consecutivo").await?;
     caja::fijar_consecutivo(st.pool()?, &a, caja::CAJA_1, numero).await
 }
 
 #[tauri::command]
 async fn caja_reabrir(st: St<'_>, turno_id: String, pin: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_reabrir").await?;
     caja::reabrir(st.pool()?, &a, &turno_id, &pin, &motivo).await
 }
 
 #[tauri::command]
 async fn caja_revisada(st: St<'_>, turno_id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_revisada").await?;
     caja::marcar_revisada(st.pool()?, &a, &turno_id).await
 }
 
 /// Datos del Z de un turno cerrado y si la próxima impresión sale como COPIA.
 #[tauri::command]
 async fn caja_z(st: St<'_>, turno_id: String) -> Res<Value> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_z").await?;
     let (d, copia) = caja::datos_z(st.pool()?, &a, &turno_id).await?;
     Ok(json!({"detalle": d, "copia": copia}))
 }
@@ -444,19 +620,19 @@ async fn caja_z(st: St<'_>, turno_id: String) -> Res<Value> {
 /// Imprime el Z (y los tiquetes por departamento) en la impresora de cierres. COPIA = PIN del dueño.
 #[tauri::command]
 async fn caja_z_imprimir(st: St<'_>, turno_id: String, documentos: Vec<Vec<u8>>, pin: Option<String>) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_z_imprimir").await?;
     caja::imprimir_z(st.pool()?, &a, &turno_id, &documentos, pin.as_deref()).await
 }
 
 #[tauri::command]
 async fn caja_nota_cierre(st: St<'_>, turno_id: String, nota: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_nota_cierre").await?;
     caja::nota_cierre(st.pool()?, &a, &turno_id, &nota).await
 }
 
 #[tauri::command]
 async fn caja_corte(st: St<'_>, retiro: Option<caja::Retiro>, pin: Option<String>) -> Res<caja::Corte> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_corte").await?;
     caja::corte(st.pool()?, &a, caja::CAJA_1, retiro.as_ref(), pin.as_deref()).await
 }
 
@@ -464,43 +640,43 @@ async fn caja_corte(st: St<'_>, retiro: Option<caja::Retiro>, pin: Option<String
 
 #[tauri::command]
 async fn gaveta_venta(st: St<'_>, venta_id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_venta").await?;
     gaveta::por_venta(st.pool()?, &a, &venta_id).await
 }
 
 #[tauri::command]
 async fn gaveta_abono(st: St<'_>, operacion_id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_abono").await?;
     gaveta::por_abono(st.pool()?, &a, &operacion_id).await
 }
 
 #[tauri::command]
 async fn gaveta_cierre(st: St<'_>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_cierre").await?;
     gaveta::para_cierre(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn gaveta_no_venta(st: St<'_>, motivo: String, nota: String, pin: Option<String>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_no_venta").await?;
     gaveta::no_venta(st.pool()?, &a, caja::CAJA_1, &motivo, &nota, pin.as_deref()).await
 }
 
 #[tauri::command]
 async fn gaveta_dueno(st: St<'_>, pin: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_dueno").await?;
     gaveta::orden_dueno(st.pool()?, &a, caja::CAJA_1, &pin, &motivo).await
 }
 
 #[tauri::command]
 async fn gaveta_aperturas(st: St<'_>, desde: String, hasta: String, usuario_id: Option<String>) -> Res<Vec<gaveta::Apertura>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("gaveta_aperturas").await?;
     gaveta::listar(st.pool()?, &a, caja::CAJA_1, &desde, &hasta, usuario_id.as_deref()).await
 }
 
 #[tauri::command]
 async fn caja_turnos(st: St<'_>, desde: String, hasta: String) -> Res<Vec<caja::TurnoFila>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("caja_turnos").await?;
     caja::listar(st.pool()?, &a, caja::CAJA_1, &desde, &hasta).await
 }
 
@@ -508,49 +684,49 @@ async fn caja_turnos(st: St<'_>, desde: String, hasta: String) -> Res<Vec<caja::
 
 #[tauri::command]
 async fn venta_esperas(st: St<'_>) -> Res<Vec<ventas::Espera>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_esperas").await?;
     ventas::listar_esperas(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn venta_espera_crear(st: St<'_>, estado: calculo::Estado) -> Res<ventas::Espera> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_espera_crear").await?;
     ventas::crear_espera(st.pool()?, &a, caja::CAJA_1, &estado).await
 }
 
 #[tauri::command]
 async fn venta_espera_guardar(st: St<'_>, id: String, estado: calculo::Estado) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_espera_guardar").await?;
     ventas::guardar_espera(st.pool()?, &a, &id, &estado).await
 }
 
 #[tauri::command]
 async fn venta_espera_descartar(st: St<'_>, id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_espera_descartar").await?;
     ventas::descartar_espera(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn venta_autorizar_descuento(st: St<'_>, espera_id: String, pct: f64, pin: String) -> Res<ventas::AutorizacionEmitida> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_autorizar_descuento").await?;
     ventas::autorizar_descuento(st.pool()?, &a, &espera_id, pct, &pin).await
 }
 
 #[tauri::command]
 async fn venta_faltantes(st: St<'_>, lineas: Vec<(Option<String>, i64)>) -> Res<Vec<String>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_faltantes").await?;
     ventas::faltantes(st.pool()?, &a, caja::CAJA_1, &lineas).await
 }
 
 #[tauri::command]
 async fn venta_referencia_usada(st: St<'_>, forma_pago_id: String, referencia: String) -> Res<Option<String>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_referencia_usada").await?;
     ventas::referencia_usada(st.pool()?, &a, &forma_pago_id, &referencia).await
 }
 
 #[tauri::command]
 async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pagos: Vec<calculo::PagoEntrada>, pin_existencia: Option<String>, credito: Option<bool>) -> Res<ventas::ResultadoCobro> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_cobrar").await?;
     ventas::cobrar_opc(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, &pagos, pin_existencia.as_deref(), credito.unwrap_or(false)).await
 }
 
@@ -558,115 +734,115 @@ async fn venta_cobrar(st: St<'_>, espera_id: String, estado: calculo::Estado, pa
 
 #[tauri::command]
 async fn cuentas_reglas(st: St<'_>) -> Res<cuentas::Reglas> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuentas_reglas").await?;
     cuentas::reglas(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn cuenta_crear_apartado(st: St<'_>, espera_id: String, estado: calculo::Estado, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String, descripcion: Option<String>) -> Res<cuentas::ResultadoAbono> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_crear_apartado").await?;
     cuentas::crear_apartado_con(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, monto, &pagos, &operacion_id, descripcion.as_deref()).await
 }
 
 #[tauri::command]
 async fn cuenta_abonar(st: St<'_>, cuenta_id: String, monto: i64, pagos: Vec<calculo::PagoEntrada>, operacion_id: String, entregar: bool) -> Res<cuentas::ResultadoAbono> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_abonar").await?;
     cuentas::abonar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, monto, &pagos, &operacion_id, entregar).await
 }
 
 #[tauri::command]
 async fn cuenta_entregar(st: St<'_>, cuenta_id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_entregar").await?;
     cuentas::entregar(st.pool()?, &a, &cuenta_id).await
 }
 
 #[tauri::command]
 async fn cuenta_buscar(st: St<'_>, texto: String) -> Res<Vec<cuentas::CuentaFila>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_buscar").await?;
     cuentas::buscar(st.pool()?, &a, &texto).await
 }
 
 #[tauri::command]
 async fn cuenta_obtener(st: St<'_>, id: String) -> Res<cuentas::CuentaDetalle> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_obtener").await?;
     cuentas::obtener(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn cuenta_imprimir(st: St<'_>, cuenta_id: String, datos: Vec<u8>) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_imprimir").await?;
     cuentas::imprimir(st.pool()?, &a, &cuenta_id, &datos).await
 }
 
 #[tauri::command]
 async fn cuenta_listar(st: St<'_>, filtro: String) -> Res<Vec<cuentas::CuentaFila>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_listar").await?;
     cuentas::listar(st.pool()?, &a, &filtro).await
 }
 
 #[tauri::command]
 async fn cuenta_vencidas(st: St<'_>) -> Res<i64> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_vencidas").await?;
     cuentas::vencidas(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn cuenta_cancelar(st: St<'_>, cuenta_id: String, pin: String, motivo: String, devuelto: i64, en_efectivo: i64) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_cancelar").await?;
     cuentas::cancelar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, &pin, &motivo, devuelto, en_efectivo).await
 }
 
 #[tauri::command]
 async fn cuenta_ajustar(st: St<'_>, cuenta_id: String, cambio: i64, pin: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_ajustar").await?;
     cuentas::ajustar(st.pool()?, &a, &cuenta_id, cambio, &pin, &motivo).await
 }
 
 #[tauri::command]
 async fn cuenta_condonar(st: St<'_>, cuenta_id: String, pin: String, motivo: String, entregar: bool) -> Res<Option<String>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_condonar").await?;
     cuentas::condonar(st.pool()?, &a, caja::CAJA_1, &cuenta_id, &pin, &motivo, entregar).await
 }
 
 #[tauri::command]
 async fn cuenta_prorrogar(st: St<'_>, cuenta_id: String, fecha_limite: String, motivo: String, pin: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cuenta_prorrogar").await?;
     cuentas::prorrogar(st.pool()?, &a, &cuenta_id, &fecha_limite, &motivo, &pin).await
 }
 
 #[tauri::command]
 async fn credito_opciones(st: St<'_>) -> Res<cuentas::OpcionesCredito> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("credito_opciones").await?;
     cuentas::opciones_credito(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn credito_guardar_opciones(st: St<'_>, opciones: cuentas::OpcionesCredito, pin: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("credito_guardar_opciones").await?;
     cuentas::guardar_opciones_credito(st.pool()?, &a, &opciones, &pin).await
 }
 
 #[tauri::command]
 async fn cliente_limite_obtener(st: St<'_>, cliente_id: String) -> Res<Option<i64>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_limite_obtener").await?;
     cuentas::limite_cliente(st.pool()?, &a, &cliente_id).await
 }
 
 #[tauri::command]
 async fn cliente_estado_cuenta(st: St<'_>, cliente_id: String) -> Res<cuentas::EstadoCuenta> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_estado_cuenta").await?;
     cuentas::estado_cuenta(st.pool()?, &a, &cliente_id).await
 }
 
 #[tauri::command]
 async fn abono_anular(st: St<'_>, abono_id: String, pin: String, motivo: String, devolucion_efectivo: i64) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("abono_anular").await?;
     cuentas::anular_abono(st.pool()?, &a, caja::CAJA_1, &abono_id, &pin, &motivo, devolucion_efectivo).await
 }
 
 #[tauri::command]
 async fn cliente_limite_credito(st: St<'_>, cliente_id: String, limite: Option<i64>, pin: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_limite_credito").await?;
     cuentas::fijar_limite(st.pool()?, &a, &cliente_id, limite, &pin).await
 }
 
@@ -674,43 +850,43 @@ async fn cliente_limite_credito(st: St<'_>, cliente_id: String, limite: Option<i
 
 #[tauri::command]
 async fn proforma_guardar(st: St<'_>, espera_id: String, estado: calculo::Estado, reemplaza: Option<String>) -> Res<proformas::ProformaDetalle> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_guardar").await?;
     proformas::guardar(st.pool()?, &a, caja::CAJA_1, &espera_id, &estado, reemplaza.as_deref()).await
 }
 
 #[tauri::command]
 async fn proforma_buscar(st: St<'_>, texto: String, filtro: String) -> Res<Vec<proformas::ProformaFila>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_buscar").await?;
     proformas::buscar(st.pool()?, &a, &texto, &filtro).await
 }
 
 #[tauri::command]
 async fn proforma_obtener(st: St<'_>, id: String) -> Res<proformas::ProformaDetalle> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_obtener").await?;
     proformas::obtener(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn proforma_imprimir(st: St<'_>, id: String, datos: Vec<u8>) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_imprimir").await?;
     proformas::imprimir(st.pool()?, &a, &id, &datos).await
 }
 
 #[tauri::command]
 async fn proforma_anular(st: St<'_>, id: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_anular").await?;
     proformas::anular(st.pool()?, &a, &id, &motivo).await
 }
 
 #[tauri::command]
 async fn proforma_abrir(st: St<'_>, id: String) -> Res<proformas::AbrirProforma> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_abrir").await?;
     proformas::abrir_en_venta(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn proforma_reporte(st: St<'_>, desde: String, hasta: String) -> Res<proformas::ReporteProformas> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proforma_reporte").await?;
     proformas::reporte(st.pool()?, &a, &desde, &hasta).await
 }
 
@@ -718,80 +894,80 @@ async fn proforma_reporte(st: St<'_>, desde: String, hasta: String) -> Res<profo
 
 #[tauri::command]
 async fn reporte_rangos(st: St<'_>) -> Res<reportes::Rangos> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("reporte_rangos").await?;
     reportes::rangos(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn reporte_ventas(st: St<'_>, desde: String, hasta: String) -> Res<reportes::Reporte> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("reporte_ventas").await?;
     reportes::ventas(st.pool()?, &a, &desde, &hasta).await
 }
 
 #[tauri::command]
 async fn credito_disponible(st: St<'_>, cliente_id: String) -> Res<i64> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("credito_disponible").await?;
     cuentas::credito_disponible_cliente(st.pool()?, &a, &cliente_id).await
 }
 
 #[tauri::command]
 async fn venta_obtener(st: St<'_>, id: String) -> Res<Option<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_obtener").await?;
     ventas::obtener(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn venta_listar_dia(st: St<'_>, dia: String) -> Res<Vec<ventas::VentaResumen>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_listar_dia").await?;
     ventas::listar_dia(st.pool()?, &a, caja::CAJA_1, &dia).await
 }
 
 #[tauri::command]
 async fn venta_listar_turno(st: St<'_>, turno_id: String) -> Res<Vec<ventas::VentaResumen>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_listar_turno").await?;
     ventas::listar_turno(st.pool()?, &a, &turno_id).await
 }
 
 /// Tiquete de una venta: el original una vez; después, solo COPIA. Devuelve si fue copia.
 #[tauri::command]
 async fn venta_imprimir(st: St<'_>, venta_id: String, data: Vec<u8>) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_imprimir").await?;
     ventas::imprimir_tiquete(st.pool()?, &a, &venta_id, &data).await
 }
 
 #[tauri::command]
 async fn venta_correcciones(st: St<'_>, venta_id: String) -> Res<Vec<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_correcciones").await?;
     ventas::correcciones_de(st.pool()?, &a, &venta_id).await
 }
 
 #[tauri::command]
 async fn venta_corregir_pago(st: St<'_>, pago_id: String, cambio: ventas::CambioPago, motivo: String, pin_dueno: Option<String>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_corregir_pago").await?;
     ventas::corregir_pago(st.pool()?, &a, caja::CAJA_1, &pago_id, &cambio, &motivo, pin_dueno.as_deref()).await
 }
 
 #[tauri::command]
-async fn venta_anular(st: St<'_>, venta_id: String, pin: String, motivo: String, devolucion_efectivo: i64) -> Res<()> {
-    let a = st.actor().await?;
+async fn venta_anular(st: St<'_>, venta_id: String, pin: String, motivo: String, devolucion_efectivo: i64) -> Res<ventas::Anulada> {
+    let (a, _g) = st.comando("venta_anular").await?;
     ventas::anular(st.pool()?, &a, caja::CAJA_1, &venta_id, &pin, &motivo, devolucion_efectivo).await
 }
 
 #[tauri::command]
 async fn venta_pendientes_factura(st: St<'_>) -> Res<Vec<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_pendientes_factura").await?;
     ventas::pendientes_factura(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn venta_pedir_factura(st: St<'_>, venta_id: String, cliente_id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_pedir_factura").await?;
     ventas::pedir_factura(st.pool()?, &a, &venta_id, &cliente_id).await
 }
 
 #[tauri::command]
 async fn venta_marcar_factura(st: St<'_>, venta_id: String, referencia: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("venta_marcar_factura").await?;
     ventas::marcar_factura(st.pool()?, &a, &venta_id, &referencia).await
 }
 
@@ -799,73 +975,73 @@ async fn venta_marcar_factura(st: St<'_>, venta_id: String, referencia: String) 
 
 #[tauri::command]
 async fn cliente_crear(st: St<'_>, datos: clientes::Datos, consentimiento: bool, version_aviso: String) -> Res<clientes::Basico> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_crear").await?;
     clientes::crear(st.pool()?, &a, &datos, consentimiento, &version_aviso).await
 }
 
 #[tauri::command]
 async fn cliente_buscar(st: St<'_>, texto: String, limite: Option<i64>) -> Res<Vec<clientes::Basico>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_buscar").await?;
     clientes::buscar_basico(st.pool()?, &a, &texto, limite.unwrap_or(15)).await
 }
 
 #[tauri::command]
 async fn cliente_basico(st: St<'_>, id: String) -> Res<Option<clientes::Basico>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_basico").await?;
     clientes::basico(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn cliente_dato_factura(st: St<'_>, id: String, campo: String) -> Res<Option<String>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_dato_factura").await?;
     clientes::dato_para_factura(st.pool()?, &a, &id, &campo).await
 }
 
 #[tauri::command]
 async fn cliente_tiene_correo(st: St<'_>, id: String) -> Res<bool> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_tiene_correo").await?;
     clientes::tiene_correo(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn cliente_listar(st: St<'_>, texto: Option<String>, incluir_anonimizados: Option<bool>) -> Res<Vec<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_listar").await?;
     clientes::listar(st.pool()?, &a, texto.as_deref().unwrap_or(""), incluir_anonimizados.unwrap_or(false)).await
 }
 
 #[tauri::command]
 async fn cliente_obtener(st: St<'_>, id: String) -> Res<Option<Value>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_obtener").await?;
     clientes::obtener(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn cliente_editar(st: St<'_>, id: String, datos: clientes::Datos) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_editar").await?;
     clientes::editar(st.pool()?, &a, &id, &datos).await
 }
 
 #[tauri::command]
 async fn cliente_cuentas_saldo(st: St<'_>, id: String) -> Res<Vec<Map<String, Value>>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_cuentas_saldo").await?;
     clientes::cuentas_con_saldo(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn cliente_exportar(st: St<'_>, id: String, formato: String) -> Res<Value> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_exportar").await?;
     clientes::para_exportar(st.pool()?, &a, &id, &formato).await
 }
 
 #[tauri::command]
 async fn cliente_anonimizar(st: St<'_>, id: String, pin: String, motivo: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_anonimizar").await?;
     clientes::anonimizar(st.pool()?, &a, &id, &pin, &motivo).await
 }
 
 #[tauri::command]
 async fn cliente_retencion(st: St<'_>) -> Res<Vec<clientes::Basico>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("cliente_retencion").await?;
     clientes::sugerencias_retencion(st.pool()?, &a).await
 }
 
@@ -873,22 +1049,22 @@ async fn cliente_retencion(st: St<'_>) -> Res<Vec<clientes::Basico>> {
 
 #[tauri::command]
 async fn respaldo_crear(st: St<'_>, contrasena: String) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_crear").await?;
     respaldo::crear(st.bd()?, &a, &contrasena).await
 }
 
 /// El archivo llega como bytes desde un <input type="file">: la ventana no necesita acceso al disco.
 #[tauri::command]
 async fn respaldo_restaurar(st: St<'_>, pin: String, archivo: Vec<u8>, contrasena: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_restaurar").await?;
     respaldo::restaurar(st.bd()?, &a, &pin, &archivo, &contrasena, st.clave.as_ref()).await
 }
 
 /// PDF del cierre, CSV, datos del cliente: Rust lo guarda (Documentos o Descargas) y devuelve la ruta real.
 /// Con un enlace "blob:" la app no podía saber si el archivo quedó guardado.
 #[tauri::command]
-async fn guardar_descarga(app: tauri::AppHandle, st: St<'_>, nombre: String, datos: Vec<u8>, carpeta: Option<String>, mes: Option<String>) -> Res<String> {
-    st.actor().await?;
+async fn guardar_descarga<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, nombre: String, datos: Vec<u8>, carpeta: Option<String>, mes: Option<String>) -> Res<String> {
+    let _g = st.comando("guardar_descarga").await?;
     let dir = match carpeta {
         // Documentos\Punto de venta\<carpeta>\AAAA-MM (mes del documento o el actual). Windows puede vaciar Descargas solo.
         Some(c) => {
@@ -905,7 +1081,7 @@ async fn guardar_descarga(app: tauri::AppHandle, st: St<'_>, nombre: String, dat
 
 #[tauri::command]
 async fn respaldo_ultimo(st: St<'_>) -> Res<Option<String>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("respaldo_ultimo").await?;
     respaldo::ultimo(st.bd()?, &a).await
 }
 
@@ -919,8 +1095,8 @@ async fn diagnostico_anotar(st: St<'_>, origen: String, mensaje: String) -> Res<
 
 /// Archivo de diagnóstico para el técnico (sin datos personales), en Descargas.
 #[tauri::command]
-async fn diagnostico_exportar(app: tauri::AppHandle, st: St<'_>) -> Res<String> {
-    let a = st.actor().await?;
+async fn diagnostico_exportar<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>) -> Res<String> {
+    let (a, _g) = st.comando("diagnostico_exportar").await?;
     let txt = diagnostico::exportar(st.bd.as_ref(), &st.dir, &a).await?;
     let dir = app.path().download_dir().map_err(|err| format!("No se encontró la carpeta Descargas: {err}"))?;
     util::guardar_en(&dir, &format!("diagnostico-pos-{}.txt", chrono::Local::now().format("%Y%m%d-%H%M")), txt.as_bytes())
@@ -928,12 +1104,12 @@ async fn diagnostico_exportar(app: tauri::AppHandle, st: St<'_>) -> Res<String> 
 
 #[tauri::command]
 async fn sistema_preparacion(st: St<'_>) -> Res<Vec<preparacion::Punto>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("sistema_preparacion").await?;
     preparacion::revisar(st.bd()?, &a).await
 }
 
 #[tauri::command]
-async fn app_reiniciar(app: tauri::AppHandle) -> Res<()> {
+async fn app_reiniciar<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Res<()> {
     app.restart();
 }
 
@@ -942,14 +1118,14 @@ async fn app_reiniciar(app: tauri::AppHandle) -> Res<()> {
 /// Lee el CSV elegido con <input type="file"> (llega como bytes: la ventana no toca el disco).
 #[tauri::command]
 async fn importacion_leer(st: St<'_>, archivo: Vec<u8>) -> Res<importacion::Tabla> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("importacion_leer").await?;
     a.exigir("productos.importar", "importar productos")?;
     importacion::leer(&archivo)
 }
 
 #[tauri::command]
 async fn importacion_aplicar(st: St<'_>, pin: String, pedido: importacion::Pedido) -> Res<importacion::Resultado> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("importacion_aplicar").await?;
     importacion::aplicar(st.pool()?, &a, &pin, &pedido).await
 }
 
@@ -957,128 +1133,128 @@ async fn importacion_aplicar(st: St<'_>, pin: String, pedido: importacion::Pedid
 
 #[tauri::command]
 async fn inventario_lista(st: St<'_>, filtro: inventario::Filtro) -> Res<Value> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_lista").await?;
     let (filas, total) = inventario::lista(st.pool()?, &a, caja::CAJA_1, &filtro).await?;
     Ok(json!({"filas": filas, "total": total}))
 }
 
 #[tauri::command]
 async fn inventario_estado(st: St<'_>, ids: Vec<String>) -> Res<Vec<inventario::FilaInventario>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_estado").await?;
     inventario::estado_de(st.pool()?, &a, caja::CAJA_1, &ids).await
 }
 
 #[tauri::command]
 async fn inventario_existencia(st: St<'_>, ids: Vec<String>) -> Res<Vec<inventario::ExistenciaVenta>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_existencia").await?;
     inventario::existencia_venta(st.pool()?, &a, caja::CAJA_1, &ids).await
 }
 
 #[tauri::command]
 async fn inventario_alertas(st: St<'_>) -> Res<i64> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_alertas").await?;
     inventario::alertas(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn inventario_producto(st: St<'_>, producto_id: String, controla: bool, minimo: i64, costo: Option<i64>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_producto").await?;
     inventario::producto_guardar(st.pool()?, &a, &producto_id, controla, minimo, costo).await
 }
 
 #[tauri::command]
 async fn inventario_kardex(st: St<'_>, producto_id: String, desde: String, hasta: String) -> Res<Vec<inventario::FilaKardex>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_kardex").await?;
     inventario::kardex(st.pool()?, &a, &producto_id, &desde, &hasta).await
 }
 
 #[tauri::command]
 async fn inventario_entrada(st: St<'_>, entrada: inventario::Entrada) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_entrada").await?;
     inventario::entrada(st.pool()?, &a, caja::CAJA_1, &entrada).await
 }
 
 #[tauri::command]
 async fn inventario_entrada_obtener(st: St<'_>, id: String) -> Res<Value> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_entrada_obtener").await?;
     inventario::entrada_obtener(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn inventario_ajustar(st: St<'_>, ajuste: inventario::Ajuste, pin: String) -> Res<i64> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_ajustar").await?;
     inventario::ajustar(st.pool()?, &a, caja::CAJA_1, &ajuste, &pin).await
 }
 
 #[tauri::command]
 async fn inventario_conteo_abierto(st: St<'_>) -> Res<Option<inventario::Conteo>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_conteo_abierto").await?;
     inventario::conteo_abierto(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn inventario_conteo_guardar(st: St<'_>, id: Option<String>, departamento_id: Option<String>, datos: std::collections::HashMap<String, i64>) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_conteo_guardar").await?;
     inventario::conteo_guardar(st.pool()?, &a, caja::CAJA_1, id.as_deref(), departamento_id.as_deref(), &datos).await
 }
 
 #[tauri::command]
 async fn inventario_conteo_diferencias(st: St<'_>, id: String) -> Res<Vec<inventario::FilaConteo>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_conteo_diferencias").await?;
     inventario::conteo_diferencias(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn inventario_conteo_aplicar(st: St<'_>, id: String, pin: String) -> Res<i64> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_conteo_aplicar").await?;
     inventario::conteo_aplicar(st.pool()?, &a, &id, &pin).await
 }
 
 #[tauri::command]
 async fn inventario_conteo_descartar(st: St<'_>, id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_conteo_descartar").await?;
     inventario::conteo_descartar(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn inventario_inicial(st: St<'_>, filas: Vec<inventario::FilaInicial>, aplicar: bool, pin: Option<String>) -> Res<Vec<inventario::PrevistaInicial>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_inicial").await?;
     inventario::inicial(st.pool()?, &a, caja::CAJA_1, &filas, aplicar, pin.as_deref()).await
 }
 
 #[tauri::command]
 async fn inventario_reporte_bajo_minimo(st: St<'_>) -> Res<Vec<inventario::FilaBajoMinimo>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_reporte_bajo_minimo").await?;
     inventario::reporte_bajo_minimo(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn inventario_reporte_valorizado(st: St<'_>) -> Res<inventario::Valorizado> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_reporte_valorizado").await?;
     inventario::reporte_valorizado(st.pool()?, &a, caja::CAJA_1).await
 }
 
 #[tauri::command]
 async fn inventario_reporte_movimientos(st: St<'_>, desde: String, hasta: String, tipo: Option<String>) -> Res<Vec<inventario::FilaKardex>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("inventario_reporte_movimientos").await?;
     inventario::reporte_movimientos(st.pool()?, &a, &desde, &hasta, tipo.as_deref()).await
 }
 
 #[tauri::command]
 async fn proveedores_listar(st: St<'_>) -> Res<Vec<inventario::Proveedor>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proveedores_listar").await?;
     inventario::proveedores(st.pool()?, &a).await
 }
 
 #[tauri::command]
 async fn proveedor_guardar(st: St<'_>, proveedor: inventario::Proveedor) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proveedor_guardar").await?;
     inventario::proveedor_guardar(st.pool()?, &a, &proveedor).await
 }
 
 #[tauri::command]
 async fn proveedor_eliminar(st: St<'_>, id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("proveedor_eliminar").await?;
     inventario::proveedor_eliminar(st.pool()?, &a, &id).await
 }
 
@@ -1086,65 +1262,70 @@ async fn proveedor_eliminar(st: St<'_>, id: String) -> Res<()> {
 
 #[tauri::command]
 async fn impresoras_listar(st: St<'_>) -> Res<Vec<impresoras::Impresora>> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresoras_listar").await?;
     impresoras::listar(st.pool()?, &a, caja::CAJA_1).await
 }
 
 /// Lo que detecta el sistema operativo (la pantalla solo elige de aquí).
 #[tauri::command]
 async fn impresoras_detectar(st: St<'_>) -> Res<printer::Detectadas> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresoras_detectar").await?;
     impresoras::detectar(&a)
 }
 
 #[tauri::command]
 async fn impresora_guardar(st: St<'_>, datos: impresoras::Datos) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresora_guardar").await?;
     impresoras::guardar(st.pool()?, &a, caja::CAJA_1, &datos).await
 }
 
 #[tauri::command]
 async fn impresora_eliminar(st: St<'_>, id: String) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresora_eliminar").await?;
     impresoras::eliminar(st.pool()?, &a, &id).await
 }
 
 #[tauri::command]
 async fn impresora_asignar(st: St<'_>, documento: String, impresora_id: Option<String>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresora_asignar").await?;
     impresoras::asignar(st.pool()?, &a, caja::CAJA_1, &documento, impresora_id.as_deref()).await
 }
 
 #[tauri::command]
 async fn impresora_probar(st: St<'_>, id: String, data: Vec<u8>) -> Res<()> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("impresora_probar").await?;
     impresoras::probar(st.pool()?, &a, &id, &data).await
 }
 
 /// Formato de la impresora de un documento (ancho, code page…), para armarlo en la pantalla.
 #[tauri::command]
 async fn impresora_ajustes(st: St<'_>, documento: String) -> Res<Option<impresoras::Ajustes>> {
-    st.actor().await?;
+    let _g = st.comando("impresora_ajustes").await?;
     impresoras::ajustes(st.pool()?, caja::CAJA_1, &documento).await
 }
 
 /// Comprobantes de movimiento, etiquetas y cortes (cierres y reportes). Tiquetes y Z tienen su comando.
 #[tauri::command]
 async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
-    let a = st.actor().await?;
+    let (a, _g) = st.comando("imprimir").await?;
     let mut documento = documento;
     match documento.as_str() {
-        "movimiento" => a.exigir("caja", "imprimir comprobantes de caja")?,
+        "movimiento" => a.exigir("caja.ver", "imprimir comprobantes de caja")?,
         // Comprobante de entrada de mercadería: sale por la impresora de comprobantes.
         "entrada" => {
-            a.exigir("inventario", "imprimir comprobantes de inventario")?;
+            a.exigir("inventario.entradas", "imprimir comprobantes de inventario")?;
             documento = "movimiento".into();
         }
-        "etiqueta" => a.exigir("productos", "imprimir etiquetas")?,
-        "cierre" => a.exigir("caja.admin", "imprimir reportes de caja")?,
+        "etiqueta" => a.exigir("productos.etiquetas", "imprimir etiquetas")?,
+        "cierre" => a.exigir("caja.historial", "imprimir reportes de caja")?,
         // Estado de cuenta de un cliente: solo el dueño; sale por la impresora de tiquetes.
         "estado_cuenta" => {
-            a.exigir("cuentas.admin", "imprimir el estado de cuenta")?;
+            a.exigir("cuentas.ver_todas", "imprimir el estado de cuenta")?;
+            documento = "tiquete".into();
+        }
+        // Comprobante de anulación (con firma del cajero): quien puede anular; impresora de tiquetes.
+        "anulacion" => {
+            a.exigir("ventas.anular", "imprimir el comprobante de anulación")?;
             documento = "tiquete".into();
         }
         _ => return Err("Ese documento se imprime desde su pantalla".into()),
@@ -1155,8 +1336,8 @@ async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
 /// Diagnóstico del técnico: impresoras de Windows instaladas.
 #[tauri::command]
 async fn list_printers(st: St<'_>) -> Res<Vec<String>> {
-    let a = st.actor().await?;
-    a.exigir("config.tecnica", "usar el diagnóstico")?;
+    let (a, _g) = st.comando("list_printers").await?;
+    a.exigir("impresoras.configurar", "usar el diagnóstico")?;
     printer::list_printers()
 }
 
@@ -1164,8 +1345,8 @@ async fn list_printers(st: St<'_>) -> Res<Vec<String>> {
 /// la lista blanca (no abren la gaveta).
 #[tauri::command]
 async fn print_raw(st: St<'_>, printer_name: String, data: Vec<u8>) -> Res<()> {
-    let a = st.actor().await?;
-    a.exigir("config.tecnica", "usar el diagnóstico")?;
+    let (a, _g) = st.comando("print_raw").await?;
+    a.exigir("impresoras.configurar", "usar el diagnóstico")?;
     escpos::validar(&data)?;
     // Solo impresoras instaladas: un nombre inventado (\\equipo\cola) haría que Windows se conecte a otra máquina.
     if !printer::list_printers()?.contains(&printer_name) {
@@ -1221,10 +1402,10 @@ async fn semilla_e2e(pool: &sqlx::SqlitePool) -> Res<()> {
         return Ok(());
     }
     let t = usuarios::crear_tecnico_inicial(pool, "735919").await?;
-    let tec = sesion::Actor { id: t.id, rol: permisos::Rol::Tecnico, nombre: "Técnico".into() };
+    let tec = sesion::Actor::nuevo(t.id, permisos::Rol::Tecnico, "Técnico");
     for (nombre, rol, pin) in [("Ana", permisos::Rol::Dueno, "246813"), ("Luis", permisos::Rol::Cajero, "2580")] {
         let u = usuarios::crear(pool, &tec, nombre, rol, pin).await?;
-        usuarios::cambiar_pin(pool, &sesion::Actor { id: u.id.clone(), rol, nombre: nombre.into() }, &u.id, pin).await?;
+        usuarios::cambiar_pin(pool, &sesion::Actor::nuevo(u.id.clone(), rol, nombre), &u.id, pin).await?;
     }
     let id = util::ulid();
     sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, 'Retablo tallado', 'retablo tallado', '00000000000000000000000D01', 20000)")
@@ -1233,6 +1414,14 @@ async fn semilla_e2e(pool: &sqlx::SqlitePool) -> Res<()> {
         .await
         .map_err(util::e)?;
     sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7501234567893', ?, 'barras')").bind(&id).execute(pool).await.map_err(util::e)?;
+    // Un producto barato (prueba de permisos: anular sin PIN dentro del límite).
+    let id2 = util::ulid();
+    sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, 'Lápiz de grafito', 'lapiz de grafito', '00000000000000000000000D01', 2000)")
+        .bind(&id2)
+        .execute(pool)
+        .await
+        .map_err(util::e)?;
+    sqlx::query("INSERT INTO codigos (codigo, producto_id, tipo) VALUES ('7501234567800', ?, 'barras')").bind(&id2).execute(pool).await.map_err(util::e)?;
     Ok(())
 }
 
@@ -1279,6 +1468,174 @@ mod tests_instancia {
         assert!(!super::ya_abierto(&nombre), "la primera vez no hay otra");
         assert!(super::ya_abierto(&nombre), "la segunda vez sí");
     }
+}
+
+/// Todos los comandos que la pantalla puede llamar. Una sola lista: la usa la app y la prueba
+/// que recorre cada comando con cada rol (tabla_comandos.rs).
+fn comandos<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        sistema_estado,
+        sistema_crear_tecnico,
+        cuentas_reglas,
+        cuenta_crear_apartado,
+        cuenta_abonar,
+        cuenta_entregar,
+        cuenta_buscar,
+        cuenta_obtener,
+        cuenta_imprimir,
+        cuenta_listar,
+        cuenta_vencidas,
+        cuenta_cancelar,
+        cuenta_ajustar,
+        cuenta_condonar,
+        cuenta_prorrogar,
+        abono_anular,
+        cliente_limite_credito,
+        cliente_limite_obtener,
+        cliente_estado_cuenta,
+        credito_disponible,
+        credito_opciones,
+        credito_guardar_opciones,
+        proforma_guardar,
+        proforma_buscar,
+        proforma_obtener,
+        proforma_imprimir,
+        proforma_anular,
+        proforma_abrir,
+        proforma_reporte,
+        reporte_rangos,
+        reporte_ventas,
+        sistema_restaurar,
+        diagnostico_anotar,
+        diagnostico_exportar,
+        sistema_preparacion,
+        sesion_usuarios,
+        sesion_iniciar,
+        sesion_tecnico,
+        sesion_actual,
+        sesion_cerrar,
+        sesion_tocar,
+        sesion_estado,
+        sesion_permisos,
+        seguridad_obtener,
+        seguridad_diferencias,
+        seguridad_plantilla,
+        seguridad_guardar,
+        seguridad_inactividad,
+        seguridad_historial,
+        seguridad_version,
+        seguridad_volver,
+        seguridad_autorizar,
+        avisos_dueno,
+        avisos_anulaciones_vistas,
+        prueba_avanzar_reloj,
+        bd_leer,
+        bd_lote,
+        usuarios_listar,
+        usuarios_crear,
+        usuarios_editar,
+        usuarios_cambiar_pin,
+        usuarios_eliminar,
+        config_guardar,
+        negocio_guardar,
+        negocio_logo,
+        bitacora_listar,
+        bitacora_verificar,
+        caja_estado,
+        caja_abrir,
+        caja_queda,
+        caja_corregir_dia,
+        caja_movimiento,
+        caja_detalle,
+        caja_necesita_nota,
+        caja_cerrar,
+        caja_reabrir,
+        caja_consecutivo,
+        caja_revisada,
+        caja_z,
+        caja_z_imprimir,
+        caja_nota_cierre,
+        caja_corte,
+        caja_turnos,
+        gaveta_venta,
+        gaveta_abono,
+        gaveta_no_venta,
+        gaveta_cierre,
+        gaveta_dueno,
+        gaveta_aperturas,
+        venta_esperas,
+        venta_espera_crear,
+        venta_espera_guardar,
+        venta_espera_descartar,
+        venta_autorizar_descuento,
+        venta_faltantes,
+        venta_referencia_usada,
+        venta_cobrar,
+        venta_obtener,
+        venta_listar_dia,
+        venta_listar_turno,
+        venta_imprimir,
+        venta_correcciones,
+        venta_corregir_pago,
+        venta_anular,
+        venta_pendientes_factura,
+        venta_marcar_factura,
+        venta_pedir_factura,
+        cliente_crear,
+        cliente_buscar,
+        cliente_basico,
+        cliente_dato_factura,
+        cliente_tiene_correo,
+        cliente_listar,
+        cliente_obtener,
+        cliente_editar,
+        cliente_cuentas_saldo,
+        cliente_exportar,
+        cliente_anonimizar,
+        cliente_retencion,
+        respaldo_crear,
+        respaldo_ultimo,
+        respaldo_auto_configurar,
+        respaldo_auto_estado,
+        respaldo_auto_ahora,
+        respaldo_usb_confirmado,
+        guardar_descarga,
+        respaldo_restaurar,
+        importacion_leer,
+        importacion_aplicar,
+        app_reiniciar,
+        impresoras_listar,
+        impresoras_detectar,
+        impresora_guardar,
+        impresora_eliminar,
+        impresora_asignar,
+        impresora_probar,
+        impresora_ajustes,
+        imprimir,
+        list_printers,
+        print_raw,
+        inventario_lista,
+        inventario_estado,
+        inventario_existencia,
+        inventario_alertas,
+        inventario_producto,
+        inventario_kardex,
+        inventario_entrada,
+        inventario_entrada_obtener,
+        inventario_ajustar,
+        inventario_conteo_abierto,
+        inventario_conteo_guardar,
+        inventario_conteo_diferencias,
+        inventario_conteo_aplicar,
+        inventario_conteo_descartar,
+        inventario_inicial,
+        inventario_reporte_bajo_minimo,
+        inventario_reporte_valorizado,
+        inventario_reporte_movimientos,
+        proveedores_listar,
+        proveedor_guardar,
+        proveedor_eliminar,
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1354,7 +1711,13 @@ pub fn run() {
                     }
                 });
             }
-            app.manage(App { bd, dir, clave, sesion: Sesion::default(), debe_cambiar_pin: AtomicBool::new(false) });
+            // Permisos vigentes en memoria. La cadena de versiones se verifica aquí; si está rota se usa
+            // la última válida (queda en la bitácora y el dueño ve el aviso).
+            let seguridad = match &bd {
+                Ok(b) => tauri::async_runtime::block_on(politica::cargar(&b.pool)).unwrap_or_else(|_| politica::Vigente { version: 0, datos: politica::plantilla_normal(), rota_en: None }),
+                Err(_) => politica::Vigente { version: 0, datos: politica::plantilla_normal(), rota_en: None },
+            };
+            app.manage(App { bd, dir, clave, sesion: Sesion::default(), debe_cambiar_pin: AtomicBool::new(false), seguridad: std::sync::RwLock::new(std::sync::Arc::new(seguridad)) });
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Punto de Venta")
                 .inner_size(1280.0, 800.0)
@@ -1366,155 +1729,7 @@ pub fn run() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            sistema_estado,
-            sistema_crear_tecnico,
-            cuentas_reglas,
-            cuenta_crear_apartado,
-            cuenta_abonar,
-            cuenta_entregar,
-            cuenta_buscar,
-            cuenta_obtener,
-            cuenta_imprimir,
-            cuenta_listar,
-            cuenta_vencidas,
-            cuenta_cancelar,
-            cuenta_ajustar,
-            cuenta_condonar,
-            cuenta_prorrogar,
-            abono_anular,
-            cliente_limite_credito,
-            cliente_limite_obtener,
-            cliente_estado_cuenta,
-            credito_disponible,
-            credito_opciones,
-            credito_guardar_opciones,
-            proforma_guardar,
-            proforma_buscar,
-            proforma_obtener,
-            proforma_imprimir,
-            proforma_anular,
-            proforma_abrir,
-            proforma_reporte,
-            reporte_rangos,
-            reporte_ventas,
-            sistema_restaurar,
-            diagnostico_anotar,
-            diagnostico_exportar,
-            sistema_preparacion,
-            sesion_usuarios,
-            sesion_iniciar,
-            sesion_tecnico,
-            sesion_actual,
-            sesion_cerrar,
-            sesion_tocar,
-            bd_leer,
-            bd_lote,
-            usuarios_listar,
-            usuarios_crear,
-            usuarios_editar,
-            usuarios_cambiar_pin,
-            usuarios_eliminar,
-            config_guardar,
-            negocio_guardar,
-            negocio_logo,
-            bitacora_listar,
-            bitacora_verificar,
-            caja_estado,
-            caja_abrir,
-            caja_queda,
-            caja_corregir_dia,
-            caja_movimiento,
-            caja_detalle,
-            caja_necesita_nota,
-            caja_cerrar,
-            caja_reabrir,
-            caja_consecutivo,
-            caja_revisada,
-            caja_z,
-            caja_z_imprimir,
-            caja_nota_cierre,
-            caja_corte,
-            caja_turnos,
-            gaveta_venta,
-            gaveta_abono,
-            gaveta_no_venta,
-            gaveta_cierre,
-            gaveta_dueno,
-            gaveta_aperturas,
-            venta_esperas,
-            venta_espera_crear,
-            venta_espera_guardar,
-            venta_espera_descartar,
-            venta_autorizar_descuento,
-            venta_faltantes,
-            venta_referencia_usada,
-            venta_cobrar,
-            venta_obtener,
-            venta_listar_dia,
-            venta_listar_turno,
-            venta_imprimir,
-            venta_correcciones,
-            venta_corregir_pago,
-            venta_anular,
-            venta_pendientes_factura,
-            venta_marcar_factura,
-            venta_pedir_factura,
-            cliente_crear,
-            cliente_buscar,
-            cliente_basico,
-            cliente_dato_factura,
-            cliente_tiene_correo,
-            cliente_listar,
-            cliente_obtener,
-            cliente_editar,
-            cliente_cuentas_saldo,
-            cliente_exportar,
-            cliente_anonimizar,
-            cliente_retencion,
-            respaldo_crear,
-            respaldo_ultimo,
-            respaldo_auto_configurar,
-            respaldo_auto_estado,
-            respaldo_auto_ahora,
-            respaldo_usb_confirmado,
-            guardar_descarga,
-            respaldo_restaurar,
-            importacion_leer,
-            importacion_aplicar,
-            app_reiniciar,
-            impresoras_listar,
-            impresoras_detectar,
-            impresora_guardar,
-            impresora_eliminar,
-            impresora_asignar,
-            impresora_probar,
-            impresora_ajustes,
-            imprimir,
-            list_printers,
-            print_raw,
-            inventario_lista,
-            inventario_estado,
-            inventario_existencia,
-            inventario_alertas,
-            inventario_producto,
-            inventario_kardex,
-            inventario_entrada,
-            inventario_entrada_obtener,
-            inventario_ajustar,
-            inventario_conteo_abierto,
-            inventario_conteo_guardar,
-            inventario_conteo_diferencias,
-            inventario_conteo_aplicar,
-            inventario_conteo_descartar,
-            inventario_inicial,
-            inventario_reporte_bajo_minimo,
-            inventario_reporte_valorizado,
-            inventario_reporte_movimientos,
-            proveedores_listar,
-            proveedor_guardar,
-            proveedor_eliminar,
-        ])
+        .invoke_handler(comandos())
         .run(tauri::generate_context!())
         .expect("error al iniciar la aplicación Tauri");
 }

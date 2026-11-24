@@ -37,7 +37,7 @@ pub struct Rangos {
 /// Atajos de fechas. "Hoy" es el día de negocio actual: el del turno abierto (una caja tardía del
 /// sábado cuenta para el lunes) o, sin turno, la fecha del reloj.
 pub async fn rangos(pool: &SqlitePool, a: &Actor) -> Res<Rangos> {
-    a.exigir("reportes.ventas", "ver reportes de ventas")?;
+    a.exigir("reportes.ver", "ver reportes de ventas")?;
     let abierto: Option<String> = sqlx::query_scalar("SELECT dia FROM caja_turnos WHERE estado = 'abierto' AND eliminado_en IS NULL ORDER BY abierto_en DESC LIMIT 1").fetch_optional(pool).await.map_err(e)?;
     let hoy = abierto.and_then(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()).unwrap_or_else(|| ahora().date_naive());
     Ok(rangos_desde(hoy))
@@ -336,7 +336,7 @@ async fn totales(c: &mut SqliteConnection, desde: &str, hasta: &str) -> Res<Tota
 }
 
 pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> Res<Reporte> {
-    a.exigir("reportes.ventas", "ver reportes de ventas")?;
+    a.exigir("reportes.ver", "ver reportes de ventas")?;
     let (d0, d1) = (fecha(desde)?, fecha(hasta)?);
     if d1 < d0 || (d1 - d0).num_days() > 366 {
         return Err("El rango va de 1 día a 1 año".into());

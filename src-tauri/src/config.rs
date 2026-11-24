@@ -1,7 +1,7 @@
 // Configuración clave → valor JSON, con permiso por clave (lo decide Rust).
 
 use crate::bitacora;
-use crate::permisos::{puede, sin_permiso};
+use crate::permisos::sin_permiso;
 use crate::sesion::Actor;
 use crate::util::{ahora_iso, e, Res};
 use serde_json::{json, Value};
@@ -34,23 +34,23 @@ pub async fn booleano(pool: &SqlitePool, clave: &str, defecto: bool) -> bool {
     valor(pool, clave).await.and_then(|v| v.as_bool()).unwrap_or(defecto)
 }
 
-/// Quién puede cambiar cada clave.
-fn permiso_de(clave: &str) -> &'static [&'static str] {
-    match clave {
-        "tema" => &[],                                            // cualquier usuario con sesión
-        c if c.starts_with("importacion_") => &["productos.importar"],
-        c if c.starts_with("caja_") => &["caja.admin", "config.tecnica"],
-        "departamentos_color" | "color_fondo" => &["departamentos", "config.tecnica"],
+/// La acción (acciones.rs) que permite cambiar cada clave. None = cualquier usuario con sesión.
+pub fn accion_de(clave: &str) -> Option<&'static str> {
+    Some(match clave {
+        "tema" => return None,
+        c if c.starts_with("importacion_") => "productos.importar",
+        c if c.starts_with("caja_") => "caja.opciones",
+        "departamentos_color" | "color_fondo" => "departamentos.editar",
         // Inventario: solo el dueño (el técnico no tiene acceso a inventario).
-        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => &["inventario"],
-        c if c.starts_with("inventario_") => &["inventario"],
-        c if c.starts_with("respaldo_") => &["respaldo"],
+        "permitir_vender_sin_existencia" | "venta_mostrar_existencia" => "inventario.opciones",
+        c if c.starts_with("inventario_") => "inventario.opciones",
+        c if c.starts_with("respaldo_") => "respaldo.crear",
         // Política de apartados y crédito: la decide el dueño. Activar el módulo (usa_*) es del técnico.
-        "abono_minimo_pct" => &["cuentas.admin", "config.tecnica"],
-        c if c.starts_with("apartado_") || c.starts_with("credito_") => &["cuentas.admin", "config.tecnica"],
-        c if c.starts_with("proforma_") => &["proformas.admin", "config.tecnica"],
-        _ => &["config.tecnica"],                                  // todo lo demás: técnico
-    }
+        "abono_minimo_pct" => "cuentas.opciones",
+        c if c.starts_with("apartado_") || c.starts_with("credito_") => "cuentas.opciones",
+        c if c.starts_with("proforma_") => "proformas.opciones",
+        _ => "config.tecnica", // todo lo demás: técnico
+    })
 }
 
 /// Claves que cambian cobros, el efectivo o el cierre: tipo y rango. Un valor de otro tipo no daba
@@ -144,14 +144,25 @@ pub(crate) fn validar(clave: &str, v: &Value) -> Res<()> {
     }
 }
 
+/// Claves que desde la 0.9.3 son parte de los permisos (politica.rs): ya no se cambian aquí.
+pub const EN_PERMISOS: &[&str] = &["descuento_max_pct", "caja_salida_max_sin_pin", "permitir_vender_sin_existencia", "venta_mostrar_existencia", "sesion_inactividad_min"];
+
 pub async fn guardar(pool: &SqlitePool, a: &Actor, clave: &str, v: &Value) -> Res<()> {
+    if EN_PERMISOS.contains(&clave) {
+        return Err(sin_permiso("cambiar esto aquí: se cambia en Administración → Permisos"));
+    }
     if clave.is_empty() || clave.len() > 60 || !clave.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
         return Err("La clave solo admite minúsculas, números y _".into());
     }
-    let perms = permiso_de(clave);
-    if !perms.is_empty() && !perms.iter().any(|p| puede(a.rol, p)) {
+    if accion_de(clave).is_some_and(|x| !a.puede(x)) {
         return Err(sin_permiso("cambiar esta configuración"));
     }
+    escribir(pool, a, clave, v).await
+}
+
+/// Guarda una clave ya autorizada por la acción de quien llama (p. ej. opciones de crédito: su
+/// propia acción y el PIN del dueño). Misma validación y misma bitácora que `guardar`.
+pub async fn escribir(pool: &SqlitePool, a: &Actor, clave: &str, v: &Value) -> Res<()> {
     validar(clave, v)?;
     let txt = v.to_string();
     if txt.len() > 20_000 {
@@ -246,7 +257,11 @@ mod tests {
         assert!(guardar(&bd.pool, &dueno, "color_fondo", &json!("azul")).await.is_err());
         assert!(guardar(&bd.pool, &cajero, "color_fondo", &json!("#e8f0fe")).await.unwrap_err().contains("permiso"));
         assert!(guardar(&bd.pool, &tec, "texto_no_factura", &json!("  ")).await.is_err());
-        guardar(&bd.pool, &dueno, "caja_salida_max_sin_pin", &json!(30000)).await.unwrap();
+        // Los topes que pasaron a Permisos ya no se cambian aquí, ni el dueño ni el técnico.
+        for clave in EN_PERMISOS {
+            assert!(guardar(&bd.pool, &dueno, clave, &json!(1)).await.unwrap_err().contains("Permisos"), "{clave}");
+            assert!(guardar(&bd.pool, &tec, clave, &json!(1)).await.unwrap_err().contains("Permisos"), "{clave}");
+        }
         assert_eq!(entero(&bd.pool, "redondeo_total", 5).await, 10);
     }
 }

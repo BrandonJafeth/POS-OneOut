@@ -1,6 +1,7 @@
 // Caja: el turno abierto (de la caja, no de una persona), movimientos, "no venta", corte, cierre
 // con arqueo y cierre Z; historial de turnos y, para el dueño, las aperturas de gaveta sin venta.
 // Con el turno abierto, el cajero no ve totales de ventas (Rust ni siquiera se los manda).
+import { umbralAnulaciones } from "../lib/permisos";
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, BarChart3, CheckCircle2, ChevronRight, Eye, FileDown, History, Inbox, KeyRound, Lock, LockOpen, NotebookPen, Printer, RotateCcw, Scissors } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSesion } from "../app/sesion";
@@ -76,13 +77,13 @@ export default function Caja() {
   const [recarga, setRecarga] = useState(0);
   const toast = useToast();
   const turno = caja?.turno ?? null;
-  const admin = puede("caja.admin");
+  const admin = puede("caja.historial");
   const usable = !!turno && !!caja?.puedeUsar;
 
   // Una falla del disco se lleva todas las ventas: se avisa si el respaldo es viejo o no existe.
   useEffect(() => {
     // Sin respaldo automático ya avisa la franja de arriba (AvisoRespaldo): aquí no se repite.
-    if (puede("respaldo")) Promise.all([ultimoRespaldo(), estadoAutomatico()]).then(([u, a]) => a.configurado && setRespaldo(u), () => undefined);
+    if (puede("respaldo.crear")) Promise.all([ultimoRespaldo(), estadoAutomatico()]).then(([u, a]) => a.configurado && setRespaldo(u), () => undefined);
   }, []);
   const diasSinRespaldo = respaldo ? Math.floor((Date.now() - Date.parse(respaldo)) / 86_400_000) : null;
 
@@ -441,7 +442,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
         </Alert>
       )}
       {!res.bitacoraOk && <Alert tono="error">La bitácora no pasó la verificación. Avise al técnico.</Alert>}
-      {d && d.turno.quedaEnGaveta === null && (usuario.id === d.turno.usuarioCierreId || puede("caja.admin")) && (
+      {d && d.turno.quedaEnGaveta === null && (usuario.id === d.turno.usuarioCierreId || puede("caja.historial")) && (
         <form
           className="row abajo"
           onSubmit={async (e) => {
@@ -470,7 +471,7 @@ function ResultadoCierreModal(p: { cierre: { r: ResultadoCierre; o: OpcionesCier
           Queda en la gaveta {monto(d.turno.quedaEnGaveta)} · retiro de cierre {monto((d.turno.contado ?? 0) - d.turno.quedaEnGaveta)}
         </p>
       )}
-      {res.requiereRevision && !notaGuardada && d && !d.turno.notaCierre && (usuario.rol === "cajero" || puede("caja.admin")) && (
+      {res.requiereRevision && !notaGuardada && d && !d.turno.notaCierre && (!puede("caja.ver_totales") || puede("caja.historial")) && (
         <form
           className="row abajo"
           onSubmit={async (e) => {
@@ -598,7 +599,7 @@ async function ventasDelTurno(t: Detalle["turno"]): Promise<Venta[]> {
 function BotonPdf(p: { d: Detalle; denominaciones: number[] }) {
   const toast = useToast();
   const envio = useEnvio(); // un doble clic = un solo archivo
-  const admin = useSesion().puede("caja.admin");
+  const admin = useSesion().puede("caja.historial");
   return (
     <Button
       icono={FileDown}
@@ -716,6 +717,11 @@ export function Historial(p: { admin: boolean; onVer(id: string): void; onDia?(d
                       </span>
                     </span>
                     {g.tardias > 0 && <Badge tono="aviso">{plural(g.tardias, "venta", "ventas")} después del cierre</Badge>}
+                    {(() => {
+                      // Día marcado: más anulaciones sin PIN que el umbral (Administración → Permisos).
+                      const n = g.turnos.reduce((s, t) => s + (t.anulacionesSinPin ?? 0), 0);
+                      return n > umbralAnulaciones() ? <Badge tono="aviso">{plural(n, "anulación", "anulaciones")} sin PIN</Badge> : null;
+                    })()}
                     <span className="fila-dia-total">
                       <span className="muted">Vendido</span> {g.total === null ? "—" : monto(g.total)}
                       <span className="muted"> · Recibido</span> {g.recibido === null ? "—" : monto(g.recibido)}
@@ -785,7 +791,7 @@ export function DetalleTurno(p: { turnoId: string; estado: EstadoCaja; onCerrar(
   }, [p.turnoId]);
 
   const t = d?.turno;
-  const admin = puede("caja.admin");
+  const admin = puede("caja.historial");
   const umbral = config.caja_umbral_diferencia;
 
   return (

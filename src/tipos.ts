@@ -337,6 +337,11 @@ export interface Venta {
   ivaTotal: number;
   estado: "completada" | "anulada";
   anuladaMotivo: string | null;
+  anuladaEn?: string | null;
+  /** A (dueño), B (cajero con PIN), C (cajero sin PIN); null en anulaciones de antes de la 0.9.3. */
+  anuladaPolitica?: "A" | "B" | "C" | null;
+  anuladaActor?: string | null;
+  anuladaSinPin?: boolean;
   requiereFactura: boolean;
   facturaEmitida: boolean;
   facturaReferencia: string | null;

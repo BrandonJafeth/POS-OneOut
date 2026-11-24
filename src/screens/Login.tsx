@@ -14,7 +14,8 @@ const TECNICO = "__tecnico";
 
 type Elegible = Pick<Usuario, "id" | "nombre" | "rol">;
 
-export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: string; onEntrar(u: Usuario, minutosInactividad: number): void }) {
+/** `bloqueo`: la pantalla se bloqueó por inactividad; ese usuario aparece primero. */
+export default function Login({ nombreNegocio, onEntrar, bloqueo }: { nombreNegocio: string; onEntrar(u: Usuario, minutosInactividad: number, continua: boolean): void; bloqueo?: { id: string; nombre: string } }) {
   const [usuarios, setUsuarios] = useState<Elegible[]>([]);
   const [elegido, setElegido] = useState<Elegible | null>(null);
   const [pin, setPin] = useState("");
@@ -24,7 +25,7 @@ export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: stri
   const primero = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    usuariosParaEntrar().then(setUsuarios, (e) => setError(textoError(e)));
+    usuariosParaEntrar().then((l) => setUsuarios(bloqueo ? [...l.filter((u) => u.id === bloqueo.id), ...l.filter((u) => u.id !== bloqueo.id)] : l), (e) => setError(textoError(e)));
   }, []);
   useEffect(() => {
     if (!elegido) primero.current?.focus();
@@ -54,7 +55,7 @@ export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: stri
     setError("");
     try {
       const r = elegido.id === TECNICO ? await iniciarSesionTecnico(pin) : await iniciarSesion(elegido.id, pin);
-      if (r.ok) return onEntrar(r.usuario, r.minutosInactividad);
+      if (r.ok) return onEntrar(r.usuario, r.minutosInactividad, r.continua);
       setPin("");
       // Rust responde igual si el usuario no existe: no se dice cuál de las dos cosas falló.
       if (r.esperaMs) setError(`PIN incorrecto o demasiados intentos. Espere ${formatoEspera(r.esperaMs)} y vuelva a intentar.`);
@@ -74,7 +75,13 @@ export default function Login({ nombreNegocio, onEntrar }: { nombreNegocio: stri
         <h1>{nombreNegocio || "Punto de venta"}</h1>
         {!elegido ? (
           <>
-            <p className="muted">¿Quién está en la caja?</p>
+            {bloqueo ? (
+              <p className="muted">
+                Se bloqueó por inactividad. {bloqueo.nombre}: ponga su PIN para seguir donde estaba. Si entra otra persona, empieza de cero.
+              </p>
+            ) : (
+              <p className="muted">¿Quién está en la caja?</p>
+            )}
             {usuarios.length === 0 && <Alert tono="aviso">Todavía no hay usuarios. Pida al técnico que los cree.</Alert>}
             <div className="usuarios-grid">
               {usuarios.map((u, i) => (

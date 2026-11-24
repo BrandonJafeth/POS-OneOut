@@ -39,7 +39,7 @@ export default function Productos() {
   const [error, setError] = useState("");
   const consulta = useRef(0);
   // Existencia, mínimo y estado: solo para quien maneja inventario (el técnico no; el cajero no entra aquí).
-  const verInventario = puede("inventario");
+  const verInventario = puede("inventario.ver");
   const [inv, setInv] = useState<Record<string, FilaInventario>>({});
   useEffect(() => {
     if (!verInventario || !filas.length) return;

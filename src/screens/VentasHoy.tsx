@@ -10,6 +10,8 @@ import Mensaje, { textoError } from "../components/Mensaje";
 import Modal from "../components/Modal";
 import { listarBancos, listarFormasPago } from "../db/formasPago";
 import { diaConNombre } from "../db/caja";
+import { estado, motivosAnulacion, politicaDe } from "../lib/permisos";
+import { imprimirAnulacion } from "../lib/caja/imprimir";
 import { anularVenta, correccionesDe, corregirPago, listarVentasDia, obtenerVenta, type Correccion, type VentaResumen } from "../db/ventas";
 import { conMiles, diaLocal, plural } from "../lib/texto";
 import { monto } from "../lib/tickets";
@@ -82,14 +84,14 @@ export default function VentasHoy() {
       <div className="row">
         {caja?.turno ? <Badge tono="ok">Caja abierta</Badge> : <Badge tono="aviso">Caja cerrada</Badge>}
         <span style={{ flex: 1 }} />
-        {puede("caja") && (
+        {puede("caja.ver") && (
           <Button icono={Landmark} onClick={() => irA("caja")}>
             Ir a Caja
           </Button>
         )}
       </div>
       <Mensaje error={error} />
-      {puede("caja.admin") ? (
+      {puede("caja.ver_totales") ? (
         <div className="conteos">
           <div>
             <strong>{completadas.length}</strong>ventas
@@ -209,10 +211,10 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
   useEffect(() => void cargar().catch((e) => setError(textoError(e))), [p.ventaId]);
   if (!v) return <Modal titulo="Venta" onCerrar={p.onCerrar}>{error ? <Mensaje error={error} /> : "Cargando…"}</Modal>;
 
-  const verCliente = puede("clientes.basico");
+  const verCliente = puede("clientes.crear");
   // Una venta cobrada solo la cambia el dueño (con su PIN y motivo). Si su turno ya cerró, queda
   // como ajuste en la caja de hoy.
-  const puedeAjustar = puede("caja.admin");
+  const puedeAjustar = puede("ventas.anular") || puede("ventas.cambiar_pago");
   async function reimprimir() {
     setError("");
     try {
@@ -292,7 +294,7 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
       </table>
       {!v.turnoAbierto && (
         <Alert tono="info">
-          La caja de esta venta ya se cerró. {puede("caja.admin") ? "Una corrección o anulación queda como ajuste en la caja de hoy." : "Solo el dueño puede corregirla o anularla."}
+          La caja de esta venta ya se cerró. {puedeAjustar ? "Una corrección o anulación queda como ajuste en la caja de hoy." : "Solo el dueño puede corregirla o anularla."}
         </Alert>
       )}
       {v.turnoAbierto && !puedeAjustar && v.estado === "completada" && (
@@ -316,9 +318,22 @@ function DetalleVenta(p: { ventaId: string; onCerrar(): void; onCambio(): void }
         <Button icono={Printer} disabled={impresion.ocupado} onClick={() => impresion.enviar(reimprimir)}>
           {v.impreso ? "Reimprimir (sale como COPIA)" : "Imprimir tiquete"}
         </Button>
-        {v.estado === "completada" && !v.requiereFactura && puede("facturas") && (
+        {v.estado === "completada" && !v.requiereFactura && puede("facturas.ver") && (
           <Button icono={FileText} onClick={() => setFactura(true)}>
             Pedir factura
+          </Button>
+        )}
+        {v.estado === "anulada" && v.anuladaPolitica && puede("ventas.anular") && (
+          <Button
+            icono={Printer}
+            onClick={() =>
+              void imprimirAnulacion({ numero: v.numero, total: v.total, motivo: v.anuladaMotivo ?? "", usuario: v.anuladaActor ?? "", fecha: v.anuladaEn ?? v.fecha, sinPin: !!v.anuladaSinPin, politica: v.anuladaPolitica ?? "A", comprobante: true, factura: null }).then(
+                () => toast.ok("Comprobante de anulación impreso."),
+                (e) => toast.error("No se imprimió", textoError(e)),
+              )
+            }
+          >
+            Comprobante de anulación
           </Button>
         )}
         <span className="separador" />
@@ -477,8 +492,19 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
 }
 
 function Anular(p: { ventaId: string; numero: string; total: number; efectivo: number; turnoAbierto: boolean; facturaEmitida: boolean; onCerrar(): void; onListo(): Promise<void> }) {
-  const { actor } = useSesion();
-  const [motivo, setMotivo] = useState("");
+  const { actor, usuario } = useSesion();
+  const toast = useToast();
+  // El dueño escribe el motivo y pone su PIN (opción A). El cajero elige el motivo de la lista; el
+  // PIN solo se pide aquí con la opción B; con la C, si pasa un límite, Rust lo pide (lib/invocar).
+  const dueno = usuario.rol === "dueno";
+  const conPin = dueno || estado(politicaDe("ventas.anular")) === "pin";
+  const lista = motivosAnulacion();
+  const [elegido, setElegido] = useState("");
+  const [otro, setOtro] = useState("");
+  const esOtro = elegido.toLowerCase().startsWith("otro");
+  const [motivoLibre, setMotivoLibre] = useState("");
+  const motivo = dueno ? motivoLibre : esOtro ? `${elegido}: ${otro.trim()}` : elegido;
+  const motivoListo = dueno ? motivoLibre.trim().length >= 5 : !!elegido && (!esOtro || otro.trim().length >= 3);
   const [pin, setPin] = useState("");
   const [devolver, setDevolver] = useState(conMiles(String(Math.max(0, p.efectivo))));
   const { ocupado, error, enviar } = useEnvio();
@@ -489,7 +515,9 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
           e.preventDefault();
           void enviar(async () => {
             const dev = p.turnoAbierto ? 0 : Number(devolver.replace(/\D/g, "") || 0);
-            await anularVenta(actor, p.ventaId, pin, motivo, dev);
+            const a = await anularVenta(actor, p.ventaId, pin, motivo, dev);
+            // Comprobante con firma (opción C siempre). Si la impresora falla, la anulación ya quedó.
+            if (a.comprobante) await imprimirAnulacion(a).catch((e) => toast.error("No se imprimió el comprobante de anulación", `${textoError(e)} Reimprímalo desde la venta.`));
             await p.onListo();
           }).then((ok) => ok || setPin(""));
         }}
@@ -510,19 +538,41 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
             Anularla aquí no anula la factura en Hacienda: haga también la nota de crédito en el sistema de facturación.
           </Alert>
         )}
-        <Field label="Motivo (obligatorio)">
-          <input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} />
-        </Field>
+        {dueno ? (
+          <Field label="Motivo (obligatorio)">
+            <input autoFocus value={motivoLibre} onChange={(e) => setMotivoLibre(e.target.value)} />
+          </Field>
+        ) : (
+          <>
+            <Field label="Motivo">
+              <select autoFocus value={elegido} onChange={(e) => setElegido(e.target.value)}>
+                <option value="">Elija el motivo…</option>
+                {lista.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {esOtro && (
+              <Field label="¿Cuál?">
+                <input maxLength={200} value={otro} onChange={(e) => setOtro(e.target.value)} />
+              </Field>
+            )}
+          </>
+        )}
         {!p.turnoAbierto && (
           <Field label="Efectivo que se devuelve ahora" ayuda={`Sale de la caja de hoy como salida. Máximo ${monto(p.total)}; 0 si no se devuelve dinero.`}>
             <CampoMonto valor={devolver} onCambio={setDevolver} />
           </Field>
         )}
-        <Field label="Su PIN de dueño">
-          <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
-        </Field>
+        {conPin && (
+          <Field label={dueno ? "Su PIN de dueño" : "PIN del dueño"}>
+            <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+          </Field>
+        )}
         {error && <Alert tono="error">{error}</Alert>}
-        <Button type="submit" variante="peligro-lleno" icono={ShieldCheck} disabled={!pin || !motivo.trim() || ocupado}>
+        <Button type="submit" variante="peligro-lleno" icono={ShieldCheck} disabled={(conPin && !pin) || !motivoListo || ocupado}>
           Anular definitivamente
         </Button>
       </form>

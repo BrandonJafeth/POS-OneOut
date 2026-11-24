@@ -56,7 +56,7 @@ pub fn anotar_cierres(dir: &Path) {
 
 /// Texto del diagnóstico (solo el técnico).
 pub async fn exportar(bd: Result<&Bd, &String>, dir: &Path, a: &Actor) -> Res<String> {
-    a.exigir("config.tecnica", "exportar el diagnóstico")?;
+    a.exigir("sistema.preparar", "exportar el diagnóstico")?;
     let mut t = String::new();
     let mut l = |k: &str, v: String| t.push_str(&format!("{k}: {v}\n"));
     l("Programa", format!("Punto de Venta {}", env!("CARGO_PKG_VERSION")));
@@ -122,9 +122,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pos-diag-{}", crate::util::ulid()));
         let bd = Bd::abrir(&dir, None).await.unwrap();
         let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = crate::usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let dueno = Actor::nuevo(d.id, Rol::Dueno, "Ana");
         let datos: crate::clientes::Datos = serde_json::from_value(serde_json::json!({"nombre": "Marisol Quesada Pérez", "telefono": "8765-4321", "cedula": "1-0987-0654"})).unwrap();
         crate::clientes::crear(&bd.pool, &dueno, &datos, true, "1").await.unwrap();
         anotar(&dir, "venta_cobrar", "ERROR_TECNICO: database is locked (cliente 87654321)");

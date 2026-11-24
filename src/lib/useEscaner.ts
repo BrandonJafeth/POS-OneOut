@@ -1,6 +1,7 @@
 // Detecta lecturas del escáner USB (que "teclea" el código muy rápido y termina en Enter)
 // en cualquier parte de la pantalla, aunque el foco esté en otro campo.
 // Si las teclas cayeron dentro de un campo de texto, se las quita para que no ensucien lo escrito.
+import { pantallaBloqueada } from "../ui/teclado";
 import { useEffect, useRef } from "react";
 
 interface Opciones {
@@ -45,6 +46,7 @@ export function useEscaner(onEscaneo: (codigo: string) => void, opc: Opciones = 
   useEffect(() => {
     if (!activo) return;
     const k = (e: KeyboardEvent) => {
+      if (pantallaBloqueada()) return; // el PIN del velo no es un código de barras
       const ahora = performance.now();
       const b = buf.current;
       if (e.key === "Enter") {

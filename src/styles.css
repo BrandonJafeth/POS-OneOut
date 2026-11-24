@@ -4405,3 +4405,86 @@ tr.clic:focus-visible .fila-ver {
 .modal-cuerpo details {
   margin-block: var(--e3);
 }
+
+/* ── Permisos y bloqueo por inactividad (0.9.3) ── */
+/* Velo de bloqueo: <dialog> modal opaco sobre todo (también sobre otros diálogos abiertos). */
+.velo-bloqueo {
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--e4);
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  overflow: auto;
+}
+.velo-bloqueo::backdrop {
+  background: var(--bg);
+}
+.velo-bloqueo-cab {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  justify-content: center;
+  font-weight: 600;
+  color: var(--muted);
+}
+.aviso-inactividad {
+  position: fixed;
+  top: var(--e3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: var(--e2) var(--e4);
+  border-radius: var(--radio);
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  box-shadow: 0 4px 12px var(--sombra);
+}
+.permisos {
+  display: grid;
+  gap: var(--e4);
+}
+.tbl-permisos td {
+  vertical-align: top;
+}
+.tbl-permisos tr.grupo th {
+  text-align: left;
+  background: var(--card2);
+}
+.celda-politica select {
+  min-height: var(--alto-control);
+  max-width: 100%;
+}
+.celda-politica .limites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e2);
+  margin-top: var(--e2);
+}
+.celda-politica .limites input {
+  width: 7em;
+  min-height: var(--alto-control);
+}
+.celda-politica .frase {
+  margin: var(--e1) 0 0;
+  color: var(--muted);
+  font-size: 0.9em;
+  max-width: 34em;
+}
+.barra-guardar {
+  position: sticky;
+  bottom: 0;
+}
+@media (max-width: 760px) {
+  .tbl-permisos thead {
+    display: none;
+  }
+  .tbl-permisos td {
+    display: block;
+  }
+}

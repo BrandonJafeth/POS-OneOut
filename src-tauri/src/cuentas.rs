@@ -13,7 +13,6 @@ use crate::caja::{self, Horario, Turno};
 use crate::calculo::{self, Estado, Linea, PagoEntrada};
 use crate::config;
 use crate::inventario;
-use crate::permisos::Rol;
 use crate::sesion::Actor;
 use crate::usuarios;
 use crate::util::{ahora, ahora_iso, colones, e, normalizar, texto, ulid, Res};
@@ -75,7 +74,7 @@ pub fn credito_disponible(limite: i64, saldo_actual: i64) -> i64 {
 }
 
 pub async fn reglas(pool: &SqlitePool, a: &Actor) -> Res<Reglas> {
-    a.exigir("cuentas", "ver las reglas de apartados")?;
+    a.exigir("cuentas.crear", "ver las reglas de apartados")?;
     let mut c = pool.acquire().await.map_err(e)?;
     Ok(reglas_con(&mut c).await)
 }
@@ -435,7 +434,7 @@ pub async fn crear_apartado_con(
     operacion_id: &str,
     descripcion: Option<&str>,
 ) -> Res<ResultadoAbono> {
-    a.exigir("cuentas", "crear apartados")?;
+    a.exigir("cuentas.crear", "crear apartados")?;
     let descripcion = descripcion.map(|d| d.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|d| !d.is_empty());
     if descripcion.as_ref().is_some_and(|d| d.chars().count() > 200) {
         return Err("La descripción del apartado es muy larga (máximo 200 letras)".into());
@@ -451,7 +450,8 @@ pub async fn crear_apartado_con(
         calculo::validar_linea(l)?;
     }
     let paso = config::entero(pool, "redondeo_total", 5).await;
-    let tope = ventas::tope_descuento(pool, a.rol).await;
+    ventas::revisar_precio_libre(a, est)?;
+    let tope = ventas::tope_descuento(a);
     let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let rg = reglas_con(&mut tx).await;
@@ -469,7 +469,7 @@ pub async fn crear_apartado_con(
     // Sin existencia libre (descontando lo ya apartado) solo se aparta si el negocio vende sin existencia.
     let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
     let controladas = inventario::controladas(&mut tx, &e2.lineas.iter().map(|l| (l.producto_id.clone(), l.cantidad)).collect::<Vec<_>>()).await?;
-    if !config::booleano_con(&mut tx, "permitir_vender_sin_existencia", true).await {
+    if a.politica("venta.sin_existencia").nivel != crate::acciones::Nivel::Si {
         let mut sin = vec![];
         for (pid, nombre, n) in &controladas {
             if inventario::existencia(&mut tx, pid, &sucursal).await? - reservado(&mut tx, pid).await? < *n {
@@ -574,7 +574,7 @@ pub async fn crear_apartado_con(
 /// venta y sale del inventario; `entregar` = se lleva los productos ahora) y el crédito queda pagado.
 #[allow(clippy::too_many_arguments)]
 pub async fn abonar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, monto: i64, pagos: &[PagoEntrada], operacion_id: &str, entregar: bool) -> Res<ResultadoAbono> {
-    a.exigir("cuentas", "recibir abonos")?;
+    a.exigir("cuentas.abonar", "recibir abonos")?;
     operacion_valida(operacion_id)?;
     if let Some(r) = ya_registrado(pool, operacion_id).await? {
         return Ok(r);
@@ -721,7 +721,7 @@ async fn liquidar(tx: &mut SqliteConnection, a: &Actor, t: &Turno, cuenta_id: &s
 
 /// Apartado pagado sin entregar (pagó todo y retira otro día): solo cambia el estado.
 pub async fn entregar(pool: &SqlitePool, a: &Actor, cuenta_id: &str) -> Res<()> {
-    a.exigir("cuentas", "entregar apartados")?;
+    a.exigir("cuentas.abonar", "entregar apartados")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let fecha = ahora_iso();
     let n = sqlx::query("UPDATE cuentas SET estado = 'entregada', fecha_entrega = ?, actualizado_en = ? WHERE id = ? AND tipo = 'apartado' AND estado = 'pagada'")
@@ -761,7 +761,7 @@ async fn limite_y_saldo(c: &mut SqliteConnection, cliente_id: &str) -> Res<(i64,
 /// Crédito disponible del cliente, para avisarlo ANTES de cobrar. El cajero ve solo esto: ni el
 /// límite ni lo que debe en otras cuentas (Ley 8968). Rust vuelve a revisar al cobrar.
 pub async fn credito_disponible_cliente(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<i64> {
-    a.exigir("cuentas", "vender a crédito")?;
+    a.exigir("credito.vender", "vender a crédito")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let (limite, saldo) = limite_y_saldo(&mut c, cliente_id).await?;
     Ok(credito_disponible(limite, saldo))
@@ -827,7 +827,7 @@ pub struct OpcionesCredito {
 }
 
 pub async fn opciones_credito(pool: &SqlitePool, a: &Actor) -> Res<OpcionesCredito> {
-    a.exigir("cuentas.admin", "ver las opciones de crédito")?;
+    a.exigir("credito.limite", "ver las opciones de crédito")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let rg = reglas_con(&mut c).await;
     Ok(OpcionesCredito {
@@ -840,7 +840,7 @@ pub async fn opciones_credito(pool: &SqlitePool, a: &Actor) -> Res<OpcionesCredi
 
 /// Guarda las opciones del crédito con el PIN del dueño. Se valida todo antes de escribir nada.
 pub async fn guardar_opciones_credito(pool: &SqlitePool, a: &Actor, o: &OpcionesCredito, pin: &str) -> Res<()> {
-    a.exigir("cuentas.admin", "cambiar las opciones de crédito")?;
+    a.exigir("credito.limite", "cambiar las opciones de crédito")?;
     let valores = [
         ("credito_limite_defecto", json!(o.limite_defecto)),
         ("credito_plazo_dias", json!(o.plazo_dias)),
@@ -850,16 +850,16 @@ pub async fn guardar_opciones_credito(pool: &SqlitePool, a: &Actor, o: &Opciones
     for (k, v) in &valores {
         config::validar(k, v)?;
     }
-    usuarios::confirmar_dueno(pool, a, pin, "opciones de crédito").await?;
+    usuarios::confirmar_dueno(pool, a, "credito.limite", pin, "opciones de crédito").await?;
     for (k, v) in &valores {
-        config::guardar(pool, a, k, v).await?;
+        config::escribir(pool, a, k, v).await?;
     }
     Ok(())
 }
 
 /// Límite propio de un cliente (None = usa el del negocio). Solo el dueño.
 pub async fn limite_cliente(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<Option<i64>> {
-    a.exigir("cuentas.admin", "ver el límite de crédito")?;
+    a.exigir("credito.limite", "ver el límite de crédito")?;
     let l: Option<Option<i64>> = sqlx::query_scalar("SELECT limite_credito FROM clientes WHERE id = ?").bind(cliente_id).fetch_optional(pool).await.map_err(e)?;
     l.ok_or_else(|| "Cliente no encontrado".to_string())
 }
@@ -877,7 +877,7 @@ pub struct EstadoCuenta {
 }
 
 pub async fn estado_cuenta(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Res<EstadoCuenta> {
-    a.exigir("cuentas.admin", "ver el estado de cuenta")?;
+    a.exigir("cuentas.ver_todas", "ver el estado de cuenta")?;
     let cliente: String = sqlx::query_scalar("SELECT nombre FROM clientes WHERE id = ?").bind(cliente_id).fetch_optional(pool).await.map_err(e)?.ok_or("Cliente no encontrado")?;
     let ids: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM cuentas WHERE cliente_id = ? AND eliminado_en IS NULL
@@ -898,11 +898,11 @@ pub async fn estado_cuenta(pool: &SqlitePool, a: &Actor, cliente_id: &str) -> Re
 
 /// Límite de crédito de un cliente (solo el dueño, con PIN). La bitácora no guarda el monto.
 pub async fn fijar_limite(pool: &SqlitePool, a: &Actor, cliente_id: &str, limite: Option<i64>, pin: &str) -> Res<()> {
-    a.exigir("cuentas.admin", "cambiar el límite de crédito")?;
+    a.exigir("credito.limite", "cambiar el límite de crédito")?;
     if limite.is_some_and(|l| !(0..=100_000_000).contains(&l)) {
         return Err("Límite inválido".into());
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "límite de crédito").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "credito.limite", pin, "límite de crédito").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let n = sqlx::query("UPDATE clientes SET limite_credito = ?, actualizado_en = ? WHERE id = ? AND anonimizado_en IS NULL").bind(limite).bind(ahora_iso()).bind(cliente_id).execute(&mut *tx).await.map_err(e)?.rows_affected();
     if n == 0 {
@@ -927,9 +927,9 @@ fn motivo_valido(m: &str) -> Res<String> {
 /// retenido); `en_efectivo`: la parte de lo devuelto que sale de la gaveta del turno abierto.
 #[allow(clippy::too_many_arguments)]
 pub async fn cancelar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, pin: &str, motivo: &str, devuelto: i64, en_efectivo: i64) -> Res<()> {
-    a.exigir("cuentas.admin", "cancelar apartados")?;
+    a.exigir("cuentas.cancelar", "cancelar apartados")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "cancelar apartado").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.cancelar", pin, "cancelar apartado").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let k = sqlx::query("SELECT numero, tipo, estado, total, saldo, condonado FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Apartado no encontrado")?;
     if k.get::<String, _>("tipo") != APARTADO || k.get::<String, _>("estado") != "abierta" {
@@ -972,9 +972,9 @@ pub async fn cancelar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &s
 /// venta anulada). De un turno cerrado, el Z viejo no cambia y lo devuelto en efectivo sale hoy.
 #[allow(clippy::too_many_arguments)]
 pub async fn anular_abono(pool: &SqlitePool, a: &Actor, caja_id: &str, abono_id: &str, pin: &str, motivo: &str, devolucion_efectivo: i64) -> Res<()> {
-    a.exigir("cuentas.admin", "anular abonos")?;
+    a.exigir("cuentas.anular_abono", "anular abonos")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "anular abono").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.anular_abono", pin, "anular abono").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let f = sqlx::query("SELECT a.cuenta_id, a.monto, a.turno_id, a.anulado_en, k.estado, t.estado AS testado FROM abonos a JOIN cuentas k ON k.id = a.cuenta_id LEFT JOIN caja_turnos t ON t.id = a.turno_id WHERE a.id = ?")
         .bind(abono_id)
@@ -1040,9 +1040,9 @@ pub const CONDONAR_SIN_CAJA: &str = "Para condonar, abra la caja primero (se reg
 /// caja abierta); un crédito queda pagado (la venta ya se había registrado).
 #[allow(clippy::too_many_arguments)]
 pub async fn condonar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, pin: &str, motivo: &str, entregar: bool) -> Res<Option<String>> {
-    a.exigir("cuentas.admin", "condonar saldos")?;
+    a.exigir("cuentas.condonar", "condonar saldos")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "condonar saldo").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.condonar", pin, "condonar saldo").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let k = sqlx::query("SELECT tipo, estado, saldo FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Cuenta no encontrada")?;
     let saldo: i64 = k.get("saldo");
@@ -1074,12 +1074,12 @@ pub async fn condonar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &s
 /// Corrige el total (error al apartar: una línea de más, un precio mal puesto). El saldo sube o baja
 /// lo mismo y no puede quedar en 0 ni negativo (para eso está condonar).
 pub async fn ajustar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, cambio: i64, pin: &str, motivo: &str) -> Res<()> {
-    a.exigir("cuentas.admin", "ajustar saldos")?;
+    a.exigir("cuentas.ajustar", "ajustar saldos")?;
     let motivo = motivo_valido(motivo)?;
     if cambio == 0 || cambio.abs() > 100_000_000 {
         return Err("Escriba cuánto sube o baja el saldo".into());
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "ajustar saldo").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.ajustar", pin, "ajustar saldo").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let k = sqlx::query("SELECT estado, saldo, tipo FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Cuenta no encontrada")?;
     if k.get::<String, _>("estado") != "abierta" {
@@ -1106,13 +1106,13 @@ pub async fn ajustar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, cambio: i64,
 
 /// Nueva fecha límite: cambia lo prometido al cliente, así que pide PIN del dueño y motivo.
 pub async fn prorrogar(pool: &SqlitePool, a: &Actor, cuenta_id: &str, fecha_limite: &str, motivo: &str, pin: &str) -> Res<()> {
-    a.exigir("cuentas.admin", "prorrogar apartados")?;
+    a.exigir("cuentas.prorrogar", "prorrogar apartados")?;
     let motivo = motivo_valido(motivo)?;
     let nueva = NaiveDate::parse_from_str(fecha_limite, "%Y-%m-%d").map_err(|_| "Fecha inválida".to_string())?;
     if nueva < ahora().date_naive() {
         return Err("La nueva fecha ya pasó".into());
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "prorrogar").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.prorrogar", pin, "prorrogar").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let fecha = ahora_iso();
     let n = sqlx::query("UPDATE cuentas SET fecha_limite = ?, actualizado_en = ? WHERE id = ? AND estado = 'abierta'").bind(nueva.to_string()).bind(&fecha).bind(cuenta_id).execute(&mut *tx).await.map_err(e)?.rows_affected();
@@ -1157,7 +1157,7 @@ fn a_fila(f: &sqlx::sqlite::SqliteRow, hoy: NaiveDate) -> CuentaFila {
 
 /// Búsqueda del cajero (F10): abiertas y pagadas sin entregar, por número, nombre, teléfono o cédula.
 pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str) -> Res<Vec<CuentaFila>> {
-    a.exigir("cuentas", "buscar apartados")?;
+    a.exigir("cuentas.crear", "buscar apartados")?;
     let q = q.trim();
     let hoy = ahora().date_naive();
     let num: Option<i64> = q.trim_start_matches(['A', 'a', 'C', 'c']).trim_start_matches('-').parse().ok();
@@ -1179,7 +1179,7 @@ pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str) -> Res<Vec<CuentaFila
 
 /// Lista del dueño: "abiertas", "vencidas", "pagadas" (sin entregar), "cerradas" o "credito".
 pub async fn listar(pool: &SqlitePool, a: &Actor, filtro: &str) -> Res<Vec<CuentaFila>> {
-    a.exigir("cuentas.admin", "ver todos los apartados")?;
+    a.exigir("cuentas.ver_todas", "ver todos los apartados")?;
     let hoy = ahora().date_naive();
     let donde = match filtro {
         "abiertas" => "k.tipo = 'apartado' AND k.estado = 'abierta'",
@@ -1199,7 +1199,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, filtro: &str) -> Res<Vec<Cuent
 
 /// Cuántas cuentas abiertas vencieron (aviso del menú del dueño).
 pub async fn vencidas(pool: &SqlitePool, a: &Actor) -> Res<i64> {
-    a.exigir("cuentas.admin", "ver apartados vencidos")?;
+    a.exigir("cuentas.ver_todas", "ver apartados vencidos")?;
     sqlx::query_scalar("SELECT COUNT(*) FROM cuentas WHERE estado = 'abierta' AND fecha_limite < ? AND eliminado_en IS NULL")
         .bind(ahora().date_naive().to_string())
         .fetch_one(pool)
@@ -1208,7 +1208,7 @@ pub async fn vencidas(pool: &SqlitePool, a: &Actor) -> Res<i64> {
 }
 
 pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<CuentaDetalle> {
-    a.exigir("cuentas", "ver apartados")?;
+    a.exigir("cuentas.crear", "ver apartados")?;
     let hoy = ahora().date_naive();
     let f = sqlx::query(&format!("{SELECT_FILA} WHERE k.id = ?")).bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Apartado no encontrado")?;
     let x = sqlx::query("SELECT k.subtotal, k.descuento, k.redondeo, k.condonado, k.devuelto, k.retenido, k.venta_id, v.numero AS vnum, v.total AS vtotal, u.nombre AS usuario FROM cuentas k JOIN usuarios u ON u.id = k.usuario_id LEFT JOIN ventas v ON v.id = k.venta_id WHERE k.id = ?")
@@ -1246,7 +1246,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<CuentaDetall
         operacion_id: b.get("operacion_id"),
     })
     .collect();
-    let eventos = if a.rol == Rol::Dueno {
+    let eventos = if a.puede("cuentas.ver_todas") {
         sqlx::query("SELECT e.fecha, e.tipo, e.monto, u.nombre AS usuario, e.motivo FROM cuenta_eventos e JOIN usuarios u ON u.id = e.usuario_id WHERE e.cuenta_id = ? ORDER BY e.fecha, e.id")
             .bind(id)
             .fetch_all(pool)
@@ -1279,7 +1279,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<CuentaDetall
 /// Imprime un comprobante (apartado, abono, cancelación). Una reimpresión lleva la marca COPIA,
 /// suma a `reimpresiones` y queda en la bitácora.
 pub async fn imprimir(pool: &SqlitePool, a: &Actor, cuenta_id: &str, datos: &[u8]) -> Res<bool> {
-    a.exigir("cuentas", "imprimir comprobantes")?;
+    a.exigir("cuentas.crear", "imprimir comprobantes")?;
     crate::escpos::validar(datos)?;
     let copia = crate::escpos::tiene_marca_copia(datos);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;

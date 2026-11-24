@@ -103,7 +103,10 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
     case "venta.anular": {
       const dev = num(d.devolucionEfectivo) ? ` Devolvió ${plata(d.devolucionEfectivo)} en efectivo.` : "";
       const fac = "facturaEmitida" in d ? " Tenía factura electrónica: falta la nota de crédito." : "";
-      return f("ventas", `Anuló el tiquete ${txt(d.numero)} de ${plata(d.total)}${motivo(d)}${autorizo}.${dev}${fac}`, true);
+      // Política con que se anuló (0.9.3): A dueño, B cajero con PIN, C cajero sin PIN (con controles).
+      const pol = { A: "", B: " (opción B: cajero con PIN del dueño)", C: d.sinPin === true ? " (opción C: cajero sin PIN)" : " (opción C: pasó un límite y puso el PIN del dueño)" }[String(d.politica)] ?? "";
+      const conPin = d.sinPin === true ? "" : autorizo;
+      return f("ventas", `Anuló el tiquete ${txt(d.numero)} de ${plata(d.total)}${motivo(d)}${pol}${conPin}.${dev}${fac}`, true);
     }
     case "venta.pago_corregido":
       return f("ventas", `Corrigió un pago de ${plata(d.monto)}: de ${txt(antes.forma)} a ${txt(despues.forma)}${num(d.redondeo) ? ` (redondeado ${plata(d.redondeo)})` : ""}${autorizo}.`, true);
@@ -167,6 +170,29 @@ function frasePara(e: EntradaBitacora, nombres: Record<string, string>): Omit<Fr
     // ── Usuarios y accesos
     case "login.ok":
       return f("usuarios", "Entró al sistema.");
+    case "sesion.desbloqueo":
+      return f("usuarios", "Volvió a poner su PIN después del bloqueo por inactividad.");
+    // ── Permisos (0.9.3)
+    case "seguridad.cambiar": {
+      const mas = Array.isArray(d.masPermiso) && d.masPermiso.length ? ` Da más permiso en: ${(d.masPermiso as string[]).join(", ")}` : "";
+      const pin = txt(d.pinDueno) ? ` (confirmó ${quien(d.pinDueno) || "el dueño"} con su PIN)` : "";
+      const pl = txt(d.plantilla) ? ` con la plantilla «${txt(d.plantilla)}»` : "";
+      return f("usuarios", `Cambió los permisos${pl} (versión ${num(d.version) ?? ""}).${mas}${pin}${motivo(d)}`, true);
+    }
+    case "seguridad.inactividad": {
+      const a = (d.antes ?? {}) as D;
+      const b = (d.despues ?? {}) as D;
+      const pin = txt(d.pinDueno) ? ` (confirmó ${quien(d.pinDueno) || "el dueño"} con su PIN)` : "";
+      return f("usuarios", `Cambió el tiempo de bloqueo por inactividad: de ${num(a.general) ?? "?"} a ${num(b.general) ?? "?"} minutos${pin}.`, true);
+    }
+    case "seguridad.inicial":
+      return f("sistema", "Se crearon los permisos iniciales (iguales a la versión anterior).");
+    case "seguridad.alterada":
+      return f("sistema", "Alguien alteró la configuración de permisos fuera del programa: se usa la última versión válida.", true);
+    case "permiso.autorizado":
+      return f("usuarios", `Hizo «${txt(e.entidadId)}»${txt(d.motivo) ? ` con el motivo «${txt(d.motivo)}»` : ""}${txt(d.autorizo) ? ` (autorizó ${quien(d.autorizo) || "el dueño"} con su PIN)` : ""}.`, !!txt(d.autorizo));
+    case "aviso.anulaciones_visto":
+      return f("ventas", "Revisó el aviso de anulaciones sin PIN.");
     case "login.fallido":
       return f("usuarios", "Escribió mal su PIN al entrar.");
     case "login.bloqueado":
