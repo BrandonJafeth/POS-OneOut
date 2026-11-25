@@ -20,7 +20,17 @@ export interface AccionInfo {
   duenoSigueCajero: boolean;
   normalCajero: Politica;
   normalTecnico: Politica;
+  /** Niveles que la acción aplica (1 PIN, 2 motivo, 4 sí): la pantalla ofrece solo esos (Rust rechaza otros). */
+  niveles: number;
+  /** Sin un monto máximo, el cajero la tiene solo con PIN. */
+  montoOPin: boolean;
 }
+
+export const N_PIN = 1;
+export const N_MOTIVO = 2;
+export const N_SI = 4;
+/** «Sí» y «con PIN» son lo mismo: el comando siempre pide el PIN del dueño. */
+export const N_CON_PIN = N_PIN | N_SI;
 
 export interface Seguridad {
   version: number;

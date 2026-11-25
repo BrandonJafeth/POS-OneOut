@@ -36,6 +36,17 @@ pub async fn revisar(bd: &Bd, a: &Actor) -> Res<Vec<Punto>> {
     });
     let duenos = n(bd, "SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL").await?;
     v.push(Punto { titulo: "Usuario del dueño", listo: duenos > 0, detalle: format!("{duenos} dueño(s) activo(s). Al entrar por primera vez cada uno cambia su PIN. Administración → Usuarios."), obligatorio: false });
+    let sin_codigo = n(bd, "SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL AND recuperacion_hash IS NULL").await?;
+    v.push(Punto {
+        titulo: "Código de recuperación impreso y guardado",
+        listo: duenos > 0 && sin_codigo == 0,
+        detalle: if sin_codigo == 0 {
+            "Cada dueño tiene su código. Que esté impreso y guardado en un sobre: sin él (y sin otro dueño), un PIN olvidado del dueño solo se recupera restaurando un respaldo.".into()
+        } else {
+            format!("{sin_codigo} dueño(s) sin código: que cada uno lo genere en Cambiar PIN → Código de recuperación, lo imprima y lo guarde en un sobre.")
+        },
+        obligatorio: false,
+    });
     let prueba = n(bd, "SELECT COUNT(*) FROM usuarios WHERE eliminado_en IS NULL AND (lower(nombre) LIKE '%prueba%' OR lower(nombre) LIKE '%test%' OR lower(nombre) LIKE '%demo%')").await?;
     v.push(Punto { titulo: "Sin usuarios de prueba", listo: prueba == 0, detalle: if prueba == 0 { "Ninguno.".into() } else { format!("Hay {prueba} usuario(s) con nombre de prueba: elimínelos en Administración → Usuarios.") }, obligatorio: false });
     let efectivo = n(bd, "SELECT COUNT(*) FROM formas_pago WHERE activo = 1 AND eliminado_en IS NULL AND da_vuelto = 1").await?;

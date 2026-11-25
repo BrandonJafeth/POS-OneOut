@@ -40,16 +40,26 @@ export async function crearTecnicoInicial(pin: string): Promise<void> {
   await invocar("sistema_crear_tecnico", { pin });
 }
 
+/** Un dueño nuevo trae su código de recuperación (se muestra una sola vez). */
 export function crearUsuario(_actor: Actor, datos: { nombre: string; rol: Rol; pin: string }): Promise<Usuario> {
   return invocar<Usuario>("usuarios_crear", datos);
+}
+
+/** El dueño se hace un código de recuperación nuevo con su PIN (el anterior deja de servir). */
+export function nuevoCodigoRecuperacion(pin: string): Promise<string> {
+  return invocar<string>("usuarios_codigo_recuperacion", { pin });
 }
 
 export async function editarUsuario(_actor: Actor, id: string, cambios: { nombre?: string; activo?: boolean }): Promise<void> {
   await invocar("usuarios_editar", { id, nombre: cambios.nombre ?? null, activo: cambios.activo ?? null });
 }
 
-export async function cambiarPin(_actor: Actor, id: string, pin: string): Promise<void> {
-  await invocar("usuarios_cambiar_pin", { id, pin });
+/**
+ * `actual`: el PIN propio de ahora (no hace falta en el cambio obligatorio). `codigo`: el código de
+ * recuperación del dueño cuyo PIN se restablece. Devuelve el código nuevo si se generó (mostrarlo una vez).
+ */
+export async function cambiarPin(_actor: Actor, id: string, pin: string, extra: { actual?: string; codigo?: string } = {}): Promise<string | null> {
+  return (await invocar<string | null>("usuarios_cambiar_pin", { id, pin, actual: extra.actual ?? null, codigo: extra.codigo ?? null })) ?? null;
 }
 
 /** Borrado lógico: el usuario queda en ventas y bitácora, pero ya no aparece ni puede entrar. */

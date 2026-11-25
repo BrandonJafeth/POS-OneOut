@@ -105,10 +105,11 @@ mod imp {
                 tam *= 4;
                 continue;
             }
-            let mut out: Vec<String> = buf[..n]
+            // Sin cortar texto por bytes: un nombre de dispositivo no ASCII cerraba la app (B1).
+            let mut out: Vec<String> = buf[..n.min(buf.len())]
                 .split(|c| *c == 0)
                 .map(String::from_utf16_lossy)
-                .filter(|s| s.len() > 3 && s[..3].eq_ignore_ascii_case("COM") && s[3..].chars().all(|c| c.is_ascii_digit()))
+                .filter(|s| s.len() > 3 && s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("COM")) && s.get(3..).is_some_and(|r| r.chars().all(|c| c.is_ascii_digit())))
                 .map(|s| s.to_uppercase())
                 .collect();
             out.sort_by_key(|s| s[3..].parse::<u32>().unwrap_or(0));

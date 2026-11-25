@@ -130,7 +130,8 @@ pub(crate) fn llamadas(cajero: &str, dueno: &str, tec: &str) -> Vec<(String, &'s
     c(&simple("seguridad_guardar"), "seguridad_guardar", json!({"datos": crate::politica::plantilla_normal(), "motivo": ""}));
     c(&simple("seguridad_inactividad"), "seguridad_inactividad", json!({"inactividad": {"general": 10}}));
     c(&simple("seguridad_volver"), "seguridad_volver", json!({"id": 1, "motivo": "", "pin": ""}));
-    c(&simple("seguridad_autorizar"), "seguridad_autorizar", json!({"accion": "venta.vender"}));
+    c(&simple("usuarios_codigo_recuperacion"), "usuarios_codigo_recuperacion", json!({"pin": "000000"}));
+    c(&simple("seguridad_autorizar"), "seguridad_autorizar", json!({"accion": "venta.vender", "comando": "venta_cobrar"}));
     c(&simple("avisos_dueno"), "avisos_dueno", json!({}));
     c(&simple("avisos_anulaciones_vistas"), "avisos_anulaciones_vistas", json!({}));
     c(&simple("sesion_cerrar"), "sesion_cerrar", json!({}));
@@ -142,7 +143,7 @@ pub(crate) fn llamadas(cajero: &str, dueno: &str, tec: &str) -> Vec<(String, &'s
     for id in ops.keys().filter(|k| !k.starts_with('_')) {
         c(&format!("bd_lote ({id})"), "bd_lote", json!({"ops": [{"id": id, "params": []}]}));
     }
-    c("bd_lote (bitacora.registrar)", "bd_lote", json!({"ops": [{"id": "bitacora.registrar", "params": [null, "prueba", "prueba", null, "{}"]}]}));
+    c("bd_lote (bitacora.registrar)", "bd_lote", json!({"ops": [{"id": "bitacora.registrar", "params": [null, "producto.prueba", "producto", null, "{}"]}]}));
     // Usuarios
     c(&simple("usuarios_listar"), "usuarios_listar", json!({}));
     for (r, pin) in [("cajero", "1593"), ("dueno", "864209"), ("tecnico", "864209")] {
@@ -211,7 +212,7 @@ pub(crate) fn llamadas(cajero: &str, dueno: &str, tec: &str) -> Vec<(String, &'s
     c(&simple("venta_espera_crear"), "venta_espera_crear", json!({"estado": estado()}));
     c(&simple("venta_espera_guardar"), "venta_espera_guardar", json!({"id": X, "estado": estado()}));
     c(&simple("venta_espera_descartar"), "venta_espera_descartar", json!({"id": X}));
-    c(&simple("venta_autorizar_descuento"), "venta_autorizar_descuento", json!({"esperaId": X, "pct": 50.0, "pin": "000000"}));
+    c(&simple("venta_autorizar_descuento"), "venta_autorizar_descuento", json!({"esperaId": X, "estado": estado(), "pin": "000000"}));
     c(&simple("venta_faltantes"), "venta_faltantes", json!({"lineas": [[X, 1]]}));
     c(&simple("venta_referencia_usada"), "venta_referencia_usada", json!({"formaPagoId": X, "referencia": "12345"}));
     c(&simple("venta_cobrar"), "venta_cobrar", json!({"esperaId": X, "estado": estado(), "pagos": []}));
@@ -339,6 +340,13 @@ const DELIBERADOS: &[(&str, &str, &str, &str, &str, &str)] = &[
     ("config_guardar (permitir_vender_sin_existencia)", "sesion", "no", "no", "no", "en Permisos: venta.sin_existencia"),
     ("config_guardar (venta_mostrar_existencia)", "sesion", "no", "no", "no", "en Permisos: venta.ver_existencia"),
     ("config_guardar (sesion_inactividad_min)", "sesion", "no", "no", "no", "en Permisos: bloqueo por inactividad"),
+    // 0.9.4 (AUDITORIA-0.9.4.md). D2: cambiar el PIN propio pide el actual (aquí no viene: «pin»).
+    // D1: el PIN de otro dueño solo con su código de recuperación; el técnico ya no crea dueños
+    // (hay uno con su PIN) y otro dueño lo crea un dueño. B9: el cajero no se cambia el nombre.
+    ("usuarios_cambiar_pin (de dueno)", "sesion", "no", "pin", "pin", "D1/D2: PIN actual o código de recuperación"),
+    ("usuarios_cambiar_pin (de tecnico)", "sesion", "no", "no", "pin", "D2: PIN actual"),
+    ("usuarios_crear (dueno)", "sesion", "no", "si", "no", "D1: el técnico solo en la instalación"),
+    ("usuarios_editar (nombre de cajero)", "sesion", "no", "si", "si", "B9: el cajero no se cambia el nombre"),
 ];
 
 /// Comandos nuevos (0.9.3): (nombre, sin sesión, cajero, dueño, técnico).
@@ -358,6 +366,8 @@ const NUEVOS: &[(&str, &str, &str, &str, &str)] = &[
     ("seguridad_autorizar", "sesion", "si", "si", "no"),
     ("avisos_dueno", "sesion", "si", "si", "si"),
     ("avisos_anulaciones_vistas", "sesion", "no", "si", "no"),
+    // 0.9.4: código de recuperación del dueño (D1), con su PIN.
+    ("usuarios_codigo_recuperacion", "sesion", "no", "pin", "no"),
 ];
 
 /// Comandos que la prueba no llama: (comando, por qué).

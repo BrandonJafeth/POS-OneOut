@@ -199,11 +199,17 @@ proptest! {
             let otro = efectiva(&d, "ana", Rol::Cajero, a.id);
             let fab = efectiva(&d, "fab", Rol::Cajero, a.id);
             if !a.no_delegable {
-                prop_assert_eq!(otro, d.cajero.get(a.id).copied().unwrap_or(Politica::NO));
-                prop_assert_eq!(fab, ex.get(a.id).copied().unwrap_or(otro));
+                // Lo configurado, bajado al nivel más estricto que la acción aplica (D4); nunca más permiso.
+                let conf = d.cajero.get(a.id).copied().unwrap_or(Politica::NO);
+                prop_assert_eq!(otro, a.ajustar(conf));
+                prop_assert!(otro.nivel <= conf.nivel);
+                prop_assert!(a.admite(&otro).is_ok());
+                prop_assert_eq!(fab, a.ajustar(ex.get(a.id).copied().unwrap_or(conf)));
             }
-            // La fila del dueño no depende de lo que se configure (salvo el tope del negocio).
-            if !a.dueno_sigue_cajero { prop_assert_eq!(efectiva(&d, "x", Rol::Dueno, a.id), a.dueno); }
+            // La fila del dueño no depende de lo que se configure (salvo el tope del negocio, y con su
+            // PIN siempre puede: A6).
+            let du = efectiva(&d, "x", Rol::Dueno, a.id);
+            if a.dueno_sigue_cajero { prop_assert!(du.nivel >= Nivel::Pin && du.limites.al_pasar == AlPasar::Pin); } else { prop_assert_eq!(du, a.dueno); }
         }
         prop_assert_eq!(efectiva(&d, "fab", Rol::Cajero, "accion.que.no.existe").nivel, Nivel::No);
     }

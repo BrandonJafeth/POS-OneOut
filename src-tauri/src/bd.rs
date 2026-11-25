@@ -50,6 +50,7 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (23, "code128_impresora", include_str!("../../src/db/migraciones/0023_code128_impresora.sql")),
     (24, "proformas", include_str!("../../src/db/migraciones/0024_proformas.sql")),
     (25, "seguridad_versiones", include_str!("../../src/db/migraciones/0025_seguridad_versiones.sql")),
+    (26, "auditoria_094", include_str!("../../src/db/migraciones/0026_auditoria_094.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
@@ -101,6 +102,13 @@ pub struct Sentencia {
     #[serde(default)]
     pub devuelve: bool,
 }
+
+/// Tope de filas de bd_leer (las listas más grandes de la pantalla son de miles).
+const MAX_FILAS_LECTURA: usize = 200_000;
+
+/// Prefijos de acciones que la pantalla puede anotar en la bitácora por `bd_lote` (junto a sus cambios
+/// de catálogo). El resto lo escribe Rust.
+const BITACORA_PANTALLA: &[&str] = &["producto.", "codigo.", "departamento.", "forma_pago.", "banco."];
 
 pub struct Bd {
     pub pool: SqlitePool,
@@ -195,8 +203,17 @@ impl Bd {
         for p in params {
             q = bind(q, p);
         }
-        let filas = q.fetch_all(&self.lectura).await.map_err(e)?;
-        Ok(filas.iter().map(fila_json).collect())
+        // Con tope de filas (B4): una consulta que no termina (WITH RECURSIVE…) no agota la memoria.
+        use futures_core::Stream;
+        let mut st = q.fetch(&self.lectura);
+        let mut out = Vec::new();
+        while let Some(f) = std::future::poll_fn(|cx| st.as_mut().poll_next(cx)).await {
+            out.push(fila_json(&f.map_err(e)?));
+            if out.len() > MAX_FILAS_LECTURA {
+                return Err(format!("{}La consulta devuelve más de {MAX_FILAS_LECTURA} filas", crate::util::TECNICO));
+            }
+        }
+        Ok(out)
     }
 
     /// Escrituras de catálogo por nombre, en una transacción. Devuelve filas afectadas (o filas, si la sentencia devuelve).
@@ -207,6 +224,12 @@ impl Bd {
             if op.id == "bitacora.registrar" {
                 // [usuario (ignorado: se usa el de la sesión), acción, entidad, entidadId, detalle JSON]
                 let s = |k: usize| op.params.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                // Solo lo que la pantalla anota junto a sus cambios de catálogo (M3): avisos, permisos,
+                // seguridad y lo demás los escribe Rust.
+                let accion = s(1).unwrap_or_default();
+                if !BITACORA_PANTALLA.iter().any(|p| accion.starts_with(p)) {
+                    return Err(crate::permisos::sin_permiso("anotar eso en la bitácora"));
+                }
                 let detalle: Value = s(4).and_then(|d| serde_json::from_str(&d).ok()).unwrap_or(Value::Null);
                 bitacora::registrar(&mut tx, Some(&actor.id), &s(1).unwrap_or_default(), &s(2).unwrap_or_default(), s(3).as_deref(), &detalle).await?;
                 out.push(Value::from(1));
@@ -214,6 +237,15 @@ impl Bd {
             }
             let st = self.registro.get(&op.id).ok_or_else(|| format!("{}Operación desconocida: {}", crate::util::TECNICO, op.id))?;
             actor.exigir(&st.permiso, "hacer este cambio")?;
+            // Cambiar el precio o el descuento fijo de un producto es su propia acción (Etapa 2).
+            if op.id == "producto.editar" {
+                let id = op.params.get(10).and_then(Value::as_str).unwrap_or_default();
+                let antes: Option<(i64, i64)> = sqlx::query_as("SELECT precio, descuento_pct FROM productos WHERE id = ?").bind(id).fetch_optional(&mut *tx).await.map_err(e)?;
+                let nuevo = (op.params.get(3).and_then(Value::as_i64), op.params.get(8).and_then(Value::as_i64));
+                if antes.is_some_and(|(p, d)| nuevo != (Some(p), Some(d))) {
+                    actor.exigir("productos.precio", "cambiar precios de venta")?;
+                }
+            }
             let mut q = sqlx::query(&st.sql);
             for p in &op.params {
                 q = bind(q, p);

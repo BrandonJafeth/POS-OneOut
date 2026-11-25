@@ -22,6 +22,7 @@ import { estadoInventario, registrarEntrada } from "../../db/inventario";
 import { isValidEan13 } from "../../lib/ean13";
 import { leerMontoEntero, limpiarNombre } from "../../lib/texto";
 import { colones, monto } from "../../lib/tickets";
+import { ulid } from "../../lib/ulid";
 import { useEscaner } from "../../lib/useEscaner";
 import type { Codigo, Departamento, ProductoConCodigos, TipoCodigo } from "../../tipos";
 import Etiqueta from "./Etiqueta";
@@ -130,6 +131,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
         await cargar(nuevoId);
         if (existenciaNum > 0)
           await registrarEntrada({
+            operacionId: ulid(),
             proveedorId: null,
             factura: "",
             fecha: new Date().toLocaleDateString("sv-SE"),

@@ -26,10 +26,11 @@ export async function descartarEspera(_actor: Actor, id: string): Promise<void> 
 
 /**
  * El dueño autoriza un descuento sobre el tope con su PIN. Rust devuelve un token de un solo uso
- * para ESA venta y ese porcentaje; el PIN no se guarda en ningún lado.
+ * para ESA venta tal como está (líneas, precios, cantidades y descuentos) y ese monto en colones: si
+ * cambia algo, no vale. El PIN no se guarda en ningún lado.
  */
-export function autorizarDescuento(esperaId: string, pct: number, pin: string): Promise<{ duenoId: string; pct: number; token: string }> {
-  return invocar("venta_autorizar_descuento", { esperaId, pct, pin });
+export function autorizarDescuento(esperaId: string, estado: EstadoEspera, pin: string): Promise<{ duenoId: string; pct: number; monto: number; token: string }> {
+  return invocar("venta_autorizar_descuento", { esperaId, estado, pin });
 }
 
 // ─────────── Cobro ───────────

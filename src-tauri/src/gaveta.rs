@@ -100,9 +100,9 @@ async fn cerrar(tx: sqlx::Transaction<'_, sqlx::Sqlite>, r: Res<()>) -> Res<()> 
 /// Prefijo del error cuando falta el PIN del dueño: la pantalla lo reconoce y lo pide.
 pub const PIN_GAVETA: &str = "PIN_GAVETA";
 
-/// "No venta": abrir la gaveta sin vender (cambiar billetes…), con un motivo de la lista. Hasta el
-/// límite del turno (caja_no_venta_umbral, el mismo de la alerta del cierre) es libre; desde ahí,
-/// cada una necesita el PIN del dueño (el dueño no). Límite 0 = sin PIN nunca.
+/// "No venta": abrir la gaveta sin vender (cambiar billetes…), con un motivo de la lista. Política
+/// «caja.no_venta»: hasta su límite por turno es libre; desde ahí, cada una necesita el PIN del dueño
+/// (el dueño no). Límite 0 = siempre con PIN.
 pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str, nota: &str, pin: Option<&str>) -> Res<()> {
     a.exigir("caja.no_venta", "abrir la gaveta")?;
     let motivo = texto(motivo, 60, "el motivo", true)?;
@@ -114,8 +114,8 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
     if motivo.to_lowercase().starts_with("otro") && nota.chars().count() < 3 {
         return Err("Escriba el motivo".into());
     }
-    // Política «caja.no_venta»: cuántas sin PIN por turno (el aviso del Z sigue en caja_no_venta_umbral).
-    let pol = a.politica("caja.no_venta");
+    // Política «caja.no_venta» con todos sus niveles: cuántas por turno (0 = siempre PIN), motivo (el
+    // detalle escrito o la autorización del comando) y PIN del dueño (aquí o como autorización).
     // Fuera de la transacción: autorizar_dueno escribe (intentos fallidos) y la transacción tiene la base tomada.
     let previas: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM gaveta_aperturas g JOIN caja_turnos t ON t.id = g.turno_id WHERE g.caja_id = ? AND t.estado = 'abierto' AND g.causa = 'no_venta'",
@@ -124,17 +124,18 @@ pub async fn no_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, motivo: &str,
     .fetch_one(pool)
     .await
     .map_err(e)?;
-    let pasa = pol.nivel == crate::acciones::Nivel::Pin || pol.limites.cantidad_turno.is_some_and(|u| u > 0 && previas >= u);
-    if pasa && pol.nivel != crate::acciones::Nivel::Pin && pol.limites.al_pasar == crate::acciones::AlPasar::Bloquear {
-        return Err(format!("Ya van {previas} aperturas sin venta en este turno: no se puede abrir otra vez."));
-    }
-    let autorizado = if pasa {
-        match pin.filter(|p| !p.is_empty()) {
-            None => return Err(format!("{PIN_GAVETA}: ya van {previas} aperturas sin venta en este turno. Para abrirla otra vez hace falta el PIN del dueño.")),
-            Some(p) => Some(usuarios::autorizar_dueno(pool, p, "abrir la gaveta sin venta", &a.id).await?),
+    let pin_de = match pin.filter(|p| !p.is_empty()) {
+        Some(p) => Some(usuarios::autorizar_dueno(pool, p, "abrir la gaveta sin venta", &a.id).await?),
+        None => None,
+    };
+    let ctx = crate::politica::Contexto { hechas_turno: Some(previas), motivo: (!nota.is_empty()).then(|| nota.clone()), pin_de, ..Default::default() };
+    let autorizado = match crate::politica::aplicar(a, "caja.no_venta", &ctx) {
+        Ok(ap) => ap.autorizo,
+        Err(m) if m.starts_with(crate::politica::NECESITA_PIN) => {
+            return Err(format!("{PIN_GAVETA}: ya van {previas} aperturas sin venta en este turno. Para abrirla otra vez hace falta el PIN del dueño."));
         }
-    } else {
-        None
+        Err(m) if m.starts_with("No se puede") => return Err(format!("Ya van {previas} aperturas sin venta en este turno: no se puede abrir otra vez.")),
+        Err(m) => return Err(m),
     };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;

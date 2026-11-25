@@ -48,6 +48,7 @@
     "proformas.opciones",
     "productos.crear",
     "productos.editar",
+    "productos.precio",
     "productos.desactivar",
     "productos.favoritos",
     "productos.etiquetas",
@@ -55,6 +56,7 @@
     "departamentos.editar",
     "departamentos.estructura",
     "inventario.ver",
+    "inventario.costos",
     "inventario.entradas",
     "inventario.ajustes",
     "inventario.conteo",
@@ -66,7 +68,6 @@
     "clientes.exportar",
     "clientes.anonimizar",
     "reportes.ver",
-    "reportes.exportar",
     "usuarios.administrar",
     "negocio.contacto",
     "negocio.legal",
@@ -633,6 +634,18 @@
         "motivo": false,
         "nivel": "no"
       },
+      "inventario.costos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
       "inventario.entradas": {
         "limites": {
           "alPasar": "pin",
@@ -789,6 +802,18 @@
         "motivo": false,
         "nivel": "no"
       },
+      "productos.precio": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
       "proformas.admin": {
         "limites": {
           "alPasar": "pin",
@@ -838,18 +863,6 @@
         "nivel": "si"
       },
       "proformas.opciones": {
-        "limites": {
-          "alPasar": "pin",
-          "cantidadTurno": null,
-          "montoMax": null,
-          "pctMax": null,
-          "soloTurnoAbierto": false,
-          "ventanaMin": null
-        },
-        "motivo": false,
-        "nivel": "no"
-      },
-      "reportes.exportar": {
         "limites": {
           "alPasar": "pin",
           "cantidadTurno": null,
@@ -1595,6 +1608,18 @@
         "motivo": false,
         "nivel": "si"
       },
+      "inventario.costos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
       "inventario.entradas": {
         "limites": {
           "alPasar": "pin",
@@ -1751,6 +1776,18 @@
         "motivo": false,
         "nivel": "si"
       },
+      "productos.precio": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "si"
+      },
       "proformas.admin": {
         "limites": {
           "alPasar": "pin",
@@ -1800,18 +1837,6 @@
         "nivel": "si"
       },
       "proformas.opciones": {
-        "limites": {
-          "alPasar": "pin",
-          "cantidadTurno": null,
-          "montoMax": null,
-          "pctMax": null,
-          "soloTurnoAbierto": false,
-          "ventanaMin": null
-        },
-        "motivo": false,
-        "nivel": "si"
-      },
-      "reportes.exportar": {
         "limites": {
           "alPasar": "pin",
           "cantidadTurno": null,
@@ -2557,6 +2582,18 @@
         "motivo": false,
         "nivel": "no"
       },
+      "inventario.costos": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
       "inventario.entradas": {
         "limites": {
           "alPasar": "pin",
@@ -2713,6 +2750,18 @@
         "motivo": false,
         "nivel": "si"
       },
+      "productos.precio": {
+        "limites": {
+          "alPasar": "pin",
+          "cantidadTurno": null,
+          "montoMax": null,
+          "pctMax": null,
+          "soloTurnoAbierto": false,
+          "ventanaMin": null
+        },
+        "motivo": false,
+        "nivel": "no"
+      },
       "proformas.admin": {
         "limites": {
           "alPasar": "pin",
@@ -2772,18 +2821,6 @@
         },
         "motivo": false,
         "nivel": "si"
-      },
-      "reportes.exportar": {
-        "limites": {
-          "alPasar": "pin",
-          "cantidadTurno": null,
-          "montoMax": null,
-          "pctMax": null,
-          "soloTurnoAbierto": false,
-          "ventanaMin": null
-        },
-        "motivo": false,
-        "nivel": "no"
       },
       "reportes.ver": {
         "limites": {

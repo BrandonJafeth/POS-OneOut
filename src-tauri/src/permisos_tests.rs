@@ -57,8 +57,14 @@ fn cada_comando_cada_rol_cada_politica() {
                     *d = base.clone();
                     let fila = if rol == Rol::Cajero { &mut d.cajero } else { &mut d.tecnico };
                     fila.insert(id.to_string(), pol(nivel));
+                    // El valor del inventario es costo: además pide «ver costos» (Etapa 2).
+                    if cmd == "inventario_reporte_valorizado" {
+                        fila.insert("inventario.costos".into(), Politica::SI);
+                    }
                 });
                 p.como(Some(&actor));
+                // Un nivel que la acción no aplica vale como el más estricto que sí (D4).
+                let nivel = a.ajustar(pol(nivel)).nivel;
                 // PIN del dueño correcto en los argumentos: los PIN equivocados frenarían las autorizaciones.
                 let mut args = serde_json::from_str::<Value>(&args.to_string().replace("\"000000\"", "\"246813\"")).unwrap();
                 // Importar se confirma con el PIN PROPIO.
@@ -86,14 +92,14 @@ fn cada_comando_cada_rol_cada_politica() {
                             fallas.push(format!("{nombre} {rol:?} motivo: no lo pidió ({t})"));
                             continue;
                         }
-                        p.llamar("seguridad_autorizar", json!({"accion": id, "motivo": "Prueba de motivo"})).unwrap();
+                        p.llamar("seguridad_autorizar", json!({"accion": id, "comando": cmd, "motivo": "Prueba de motivo"})).unwrap();
                     }
                     Nivel::Pin => {
                         if !t.starts_with("NECESITA_PIN") {
                             fallas.push(format!("{nombre} {rol:?} PIN: no lo pidió ({t})"));
                             continue;
                         }
-                        p.llamar("seguridad_autorizar", json!({"accion": id, "pin": PIN})).unwrap();
+                        p.llamar("seguridad_autorizar", json!({"accion": id, "comando": cmd, "pin": PIN})).unwrap();
                     }
                     _ => {
                         if t.starts_with("NECESITA_") {
@@ -126,12 +132,12 @@ fn la_autorizacion_solo_con_el_pin_de_un_dueno() {
     p.como(Some(&p.cajero));
     assert!(texto(&p.llamar("venta_espera_descartar", json!({"id": "x"}))).starts_with("NECESITA_PIN"));
     // El PIN del cajero no sirve.
-    assert!(p.llamar("seguridad_autorizar", json!({"accion": "venta.descartar_espera", "pin": "2580"})).is_err());
+    assert!(p.llamar("seguridad_autorizar", json!({"accion": "venta.descartar_espera", "comando": "venta_espera_descartar", "pin": "2580"})).is_err());
     assert!(texto(&p.llamar("venta_espera_descartar", json!({"id": "x"}))).starts_with("NECESITA_PIN"));
     // Una acción que no tiene: ni con PIN.
-    assert!(negado(&p.llamar("seguridad_autorizar", json!({"accion": "caja.corte", "pin": PIN}))));
+    assert!(negado(&p.llamar("seguridad_autorizar", json!({"accion": "caja.corte", "comando": "caja_corte", "pin": PIN}))));
     // Queda en la bitácora con la versión y quién autorizó.
-    p.llamar("seguridad_autorizar", json!({"accion": "venta.descartar_espera", "pin": PIN})).unwrap();
+    p.llamar("seguridad_autorizar", json!({"accion": "venta.descartar_espera", "comando": "venta_espera_descartar", "pin": PIN})).unwrap();
     let _ = p.llamar("venta_espera_descartar", json!({"id": "x"}));
     let det: String = tauri::async_runtime::block_on(sqlx::query_scalar("SELECT detalle FROM bitacora WHERE accion = 'permiso.autorizado'").fetch_one(p.st().pool().unwrap())).unwrap();
     assert!(det.contains(&p.dueno.id) && det.contains("\"nivel\":\"pin\"") && det.contains("version"), "{det}");
@@ -266,7 +272,10 @@ fn nunca_sin_un_dueno_activo_con_pin() {
     assert!(texto(&p.llamar("usuarios_editar", json!({"id": p.dueno.id, "activo": false}))).contains("único dueño"));
     assert!(texto(&p.llamar("usuarios_eliminar", json!({"id": p.dueno.id}))).contains("único dueño"));
     // Un segundo dueño que todavía no puso su PIN no cuenta.
+    // Otro dueño lo crea un dueño (el técnico ya no: hay un dueño con su PIN).
+    p.como(Some(&p.dueno));
     let otro = p.llamar("usuarios_crear", json!({"nombre": "Marco", "rol": "dueno", "pin": "864209"})).unwrap();
+    p.como(Some(&p.tec));
     let otro_id = otro["id"].as_str().unwrap().to_string();
     assert!(texto(&p.llamar("usuarios_editar", json!({"id": p.dueno.id, "activo": false}))).contains("único dueño"));
     // No hay forma de cambiar el rol: el argumento se ignora y sigue siendo dueño.
@@ -274,7 +283,7 @@ fn nunca_sin_un_dueno_activo_con_pin() {
     let rol: String = tauri::async_runtime::block_on(sqlx::query_scalar("SELECT rol FROM usuarios WHERE id = ?").bind(&p.dueno.id).fetch_one(&pool)).unwrap();
     assert_eq!(rol, "dueno");
     // Ya con su PIN, el primero se puede desactivar; y entonces el segundo es el único.
-    tauri::async_runtime::block_on(crate::usuarios::cambiar_pin(&pool, &Actor::nuevo(otro_id.clone(), Rol::Dueno, "Marco"), &otro_id, "864209")).unwrap();
+    tauri::async_runtime::block_on(crate::usuarios::cambiar_pin(&pool, &Actor::nuevo(otro_id.clone(), Rol::Dueno, "Marco"), &otro_id, "864209", None, None)).unwrap();
     p.llamar("usuarios_editar", json!({"id": p.dueno.id, "activo": false})).unwrap();
     assert!(texto(&p.llamar("usuarios_eliminar", json!({"id": otro_id}))).contains("único dueño"));
 }
@@ -317,7 +326,7 @@ fn bloqueada_no_corre_ningun_comando_y_al_volver_sigue_todo() {
     assert!(p.llamar("inventario_conteo_abierto", json!({})).unwrap().to_string().contains("7"), "el conteo a medias sigue");
 
     // Bloqueo otra vez y entra OTRO usuario (el cajero, con su PIN propio): sesión nueva, solo lo de su rol.
-    tauri::async_runtime::block_on(crate::usuarios::cambiar_pin(&pool, &p.cajero, &p.cajero.id, "2580")).unwrap();
+    tauri::async_runtime::block_on(crate::usuarios::cambiar_pin(&pool, &p.cajero, &p.cajero.id, "2580", None, None)).unwrap();
     tauri::async_runtime::block_on(st.sesion.forzar_bloqueo());
     let r = p.llamar("sesion_iniciar", json!({"usuarioId": p.cajero.id, "pin": "2580"})).unwrap();
     assert_eq!(r["continua"], false);
@@ -374,4 +383,109 @@ fn casos_espejo_con_la_pantalla() {
         std::fs::write(ruta, &txt).unwrap();
         panic!("tests/casos/permisos.json actualizado: revíselo y súbalo");
     }
+}
+
+/// Las tablas de SEGURIDAD.md («Acciones y política Normal por rol» y «Comando → acción») salen del
+/// catálogo: si cambia una acción, un nivel o un comando, esta prueba falla. Para regenerarlas:
+/// `tools/tablas-seguridad.ps1` (POS_GENERAR_SEGURIDAD=1 cargo test seguridad_md).
+#[test]
+fn seguridad_md_igual_al_catalogo() {
+    use crate::acciones::{N_CON_PIN, N_TODOS};
+    let d = politica::plantilla_normal();
+    let miles = |n: i64| {
+        let s = n.to_string();
+        s.chars().enumerate().fold(String::new(), |mut o, (i, c)| {
+            if i > 0 && (s.len() - i) % 3 == 0 {
+                o.push('.');
+            }
+            o.push(c);
+            o
+        })
+    };
+    let niv = |p: Politica| -> String {
+        if p.nivel == Nivel::No {
+            return "—".into();
+        }
+        let mut t = match p.nivel {
+            Nivel::Si => "✔",
+            Nivel::Motivo => "motivo",
+            _ => "PIN",
+        }
+        .to_string();
+        let l = p.limites;
+        let mut extra = vec![];
+        if let Some(m) = l.monto_max {
+            extra.push(format!("≤ ¢{}", miles(m)));
+        }
+        if let Some(x) = l.pct_max {
+            extra.push(format!("≤ {x} %"));
+        }
+        if let Some(c) = l.cantidad_turno {
+            extra.push(format!("{c}/turno"));
+        }
+        if l.solo_turno_abierto {
+            extra.push("turno abierto".into());
+        }
+        if let Some(v) = l.ventana_min {
+            extra.push(format!("{v} min"));
+        }
+        if !extra.is_empty() {
+            t += &format!(" ({}, al pasar: {})", extra.join(", "), if l.al_pasar == crate::acciones::AlPasar::Pin { "PIN" } else { "no" });
+        }
+        t
+    };
+    let mut o = vec![
+        "#### Acciones y política Normal por rol (plantilla «Normal» = 0.9.2)".to_string(),
+        String::new(),
+        "🔒 = protegida (el técnico nunca). «fija» = no se cambia desde la pantalla. «Niveles»: los que la acción aplica de verdad (la pantalla ofrece solo esos y Rust rechaza otros, D4). Fuente: `acciones.rs` (lo calcula Rust).".into(),
+        String::new(),
+        "| Área | Acción | id | Niveles | Cajero | Dueño | Técnico |".into(),
+        "|---|---|---|---|:---:|:---:|:---:|".into(),
+    ];
+    for a in acciones::CATALOGO {
+        let marca = format!("{}{}", if a.protegida { " 🔒" } else { "" }, if a.no_delegable { " (fija)" } else { "" });
+        let niveles = match a.niveles {
+            N_TODOS if a.monto_o_pin => "no · sí · motivo · PIN (sin monto máximo: solo PIN)",
+            N_TODOS => "no · sí · motivo · PIN",
+            N_CON_PIN => "no · siempre con PIN",
+            _ => "no · sí",
+        };
+        let mut dueno = niv(politica::efectiva(&d, "u", Rol::Dueno, a.id));
+        if a.dueno_sigue_cajero {
+            dueno += " (tope del negocio = el del cajero)";
+        }
+        o.push(format!("| {} | {}{marca} | `{}` | {niveles} | {} | {dueno} | {} |", a.area, a.nombre, a.id, niv(politica::efectiva(&d, "u", Rol::Cajero, a.id)), niv(politica::efectiva(&d, "u", Rol::Tecnico, a.id))));
+    }
+    o.extend([
+        String::new(),
+        "#### Comando → acción".into(),
+        String::new(),
+        "Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconocido_se_niega` falla si un comando registrado no está aquí. «Según argumento»: la acción sale de la clave de configuración (`config::accion_de`), la operación (`sentencias.json`), el documento (`imprimir`), los campos (`negocio_guardar`), el usuario destino (`usuarios_*`: además la jerarquía fija) o el movimiento (`caja_movimiento`: entrada o salida).".into(),
+        String::new(),
+        "| Comando | Acción |".into(),
+        "|---|---|".into(),
+    ]);
+    for (c, dst) in acciones::COMANDOS {
+        let t = match dst {
+            Destino::SinSesion => "sin sesión".to_string(),
+            Destino::CualquierSesion => "cualquier sesión".into(),
+            Destino::SegunArgumento => "según argumento".into(),
+            Destino::Accion(a) => format!("`{a}`"),
+        };
+        o.push(format!("| `{c}` | {t} |"));
+    }
+    let tablas = o.join("\n") + "\n\n";
+    let ruta = concat!(env!("CARGO_MANIFEST_DIR"), "/../SEGURIDAD.md");
+    let md = std::fs::read_to_string(ruta).unwrap().replace("\r\n", "\n");
+    let (ini, fin) = ("<!-- tablas:inicio (las genera permisos_tests::seguridad_md_igual_al_catalogo; no editar a mano) -->\n", "<!-- tablas:fin -->");
+    let i = md.find(ini).expect("falta la marca de inicio en SEGURIDAD.md") + ini.len();
+    let j = md.find(fin).expect("falta la marca de fin en SEGURIDAD.md");
+    if md[i..j] == tablas {
+        return;
+    }
+    if std::env::var("POS_GENERAR_SEGURIDAD").as_deref() == Ok("1") {
+        std::fs::write(ruta, format!("{}{tablas}{}", &md[..i], &md[j..])).unwrap();
+        return;
+    }
+    panic!("Las tablas de SEGURIDAD.md no coinciden con el catálogo: corra tools/tablas-seguridad.ps1 y revise el cambio.");
 }

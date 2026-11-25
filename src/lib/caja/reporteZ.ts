@@ -485,6 +485,17 @@ export function comprobanteAnulacion(n: Negocio, a: { numero: string; total: num
   return aEscPos(n, l, s);
 }
 
+/** Código de recuperación de un dueño (D1): se imprime una vez y se guarda en un sobre cerrado. */
+export function comprobanteRecuperacion(n: Negocio, d: { nombre: string; codigo: string; fecha: string }, s: TicketSettings): Doc {
+  const c = columnas(s);
+  const l: LineaDoc[] = [{ t: sep2(c) }, { t: "CODIGO DE RECUPERACION", b: true, centro: true }];
+  if (nombreSiHayLogo(n)) l.push({ t: lr("Negocio:", cortar(n.nombreComercial, c - 9), c) });
+  l.push({ t: lr("Dueno:", cortar(d.nombre, c - 7), c) }, { t: lr("Fecha:", fechaHora(new Date(d.fecha)), c) }, { t: "" }, { t: d.codigo, b: true, centro: true }, { t: "" });
+  wrap("Sirve para restablecer el PIN de este dueno si lo olvida. Guardelo en un sobre cerrado, fuera de la caja. Al usarlo se genera otro.", c).forEach((x) => l.push({ t: x }));
+  l.push({ t: sep2(c) });
+  return aEscPos(n, l, s);
+}
+
 export function comprobanteMovimiento(n: Negocio, m: Movimiento, s: TicketSettings): Doc {
   const c = columnas(s);
   const l: LineaDoc[] = [{ t: sep2(c) }, { t: m.tipo === "salida" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO", b: true, centro: true }];

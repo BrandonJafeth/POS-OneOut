@@ -3,7 +3,7 @@
 import { datosReporteZ, imprimirReporteZ, type Corte, type Movimiento } from "../../db/caja";
 import { ajustesPara, imprimirDocumento } from "../../db/impresoras";
 import { obtenerNegocio } from "../../db/negocio";
-import { comprobanteAnulacion, comprobanteMovimiento, documentosCierre, reporteCorte, type OpcionesZ } from "./reporteZ";
+import { comprobanteAnulacion, comprobanteMovimiento, comprobanteRecuperacion, documentosCierre, reporteCorte, type OpcionesZ } from "./reporteZ";
 import type { Anulada } from "../../db/ventas";
 
 /**
@@ -26,6 +26,12 @@ export async function imprimirCorte(k: Corte): Promise<void> {
 export async function imprimirAnulacion(a: Anulada): Promise<void> {
   const ajustes = await ajustesPara("tiquete");
   await imprimirDocumento("anulacion", comprobanteAnulacion(await obtenerNegocio(), a, ajustes).bytes);
+}
+
+/** Código de recuperación de un dueño, por la impresora de tiquetes (Rust: documento «recuperacion»). */
+export async function imprimirRecuperacion(nombre: string, codigo: string): Promise<void> {
+  const ajustes = await ajustesPara("tiquete");
+  await imprimirDocumento("recuperacion", comprobanteRecuperacion(await obtenerNegocio(), { nombre, codigo, fecha: new Date().toISOString() }, ajustes).bytes);
 }
 
 export async function imprimirMovimiento(m: Movimiento): Promise<void> {

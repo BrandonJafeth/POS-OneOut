@@ -139,7 +139,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("usuarios_listar", lib("usuarios.administrar"));
     s("usuarios_crear (cajero)", denegado(usuarios::crear(p, a, "Nuevo", Rol::Cajero, "1593").await));
     s("usuarios_editar", denegado(usuarios::editar(p, a, otro, Some("Otro nombre"), None).await));
-    s("usuarios_cambiar_pin (de otro)", denegado(usuarios::cambiar_pin(p, a, otro, "975319").await));
+    s("usuarios_cambiar_pin (de otro)", denegado(usuarios::cambiar_pin(p, a, otro, "975319", None, None).await));
     s("usuarios_eliminar", denegado(usuarios::eliminar(p, a, otro).await));
     s("config_guardar (tema)", denegado(config::guardar(p, a, "tema", &json!("claro")).await));
     s("config_guardar (técnica)", denegado(config::guardar(p, a, "redondeo_total", &json!(5)).await));
@@ -172,7 +172,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("gaveta_aperturas", denegado(gaveta::listar(p, a, CAJA_1, "2000-01-01", "2999-01-01", None).await));
     s("venta_esperas / crear / guardar", denegado(ventas::listar_esperas(p, a, CAJA_1).await));
     s("venta_espera_descartar", denegado(ventas::descartar_espera(p, a, x).await));
-    s("venta_autorizar_descuento", denegado(ventas::autorizar_descuento(p, a, x, 50.0, "000000").await));
+    s("venta_autorizar_descuento", denegado(ventas::autorizar_descuento(p, a, x, &Default::default(), "000000").await));
     s("venta_faltantes", denegado(ventas::faltantes(p, a, CAJA_1, &[]).await));
     s("venta_referencia_usada", denegado(ventas::referencia_usada(p, a, x, "12345").await));
     s("venta_cobrar", denegado(ventas::cobrar_con(p, a, CAJA_1, x, &de(json!({"lineas": [], "descuentoTotal": 0, "requiereFactura": false})), &[], None).await));

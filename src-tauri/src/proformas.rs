@@ -203,8 +203,8 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &st
         Some(n) => Some(texto(n, 80, "el nombre", false)?).filter(|s| !s.is_empty()),
         None => None,
     };
-    let tope = ventas::tope_descuento(a);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    ventas::revisar_cambios(&mut tx, a, espera_id, est).await?;
     if let Some(cl) = &est.cliente {
         cuentas::cliente_con_consentimiento(&mut tx, &cl.id).await?;
     }
@@ -212,7 +212,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &st
     let e2 = Estado { lineas, ..est.clone() };
     // La proforma dice el precio exacto (el redondeo es del efectivo al cobrar).
     let tot = calculo::totales(&e2, 1);
-    let autorizado_por = ventas::revisar_tope(&tot, &catalogo, tope, est, espera_id)?;
+    let autorizado_por = ventas::revisar_tope(a, &tot, &catalogo, est, espera_id)?;
     if tot.total <= 0 {
         return Err("Una proforma de ¢0 no tiene sentido".into());
     }
@@ -417,7 +417,7 @@ async fn usa_precio_proforma(c: &mut SqliteConnection, vence: &str) -> bool {
 /// Arma la venta nueva de una proforma: sus líneas con el precio que toca y un aviso por línea que cambió
 /// o que ya no se vende. Queda ligada a la proforma; se convierte recién al cobrar o apartar.
 pub async fn abrir_en_venta(pool: &SqlitePool, a: &Actor, id: &str) -> Res<AbrirProforma> {
-    a.exigir("proformas.crear", "pasar proformas a venta")?;
+    a.exigir("proformas.convertir", "pasar proformas a venta")?;
     let d = obtener(pool, a, id).await?;
     let p = &d.proforma;
     if !matches!(p.estado.as_str(), "vigente" | "vencida") {

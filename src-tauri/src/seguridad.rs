@@ -27,6 +27,9 @@ pub struct AccionInfo {
     pub dueno_sigue_cajero: bool,
     pub normal_cajero: acciones::Politica,
     pub normal_tecnico: acciones::Politica,
+    /// Niveles que la acción aplica (acciones::N_*): la pantalla ofrece solo esos.
+    pub niveles: u8,
+    pub monto_o_pin: bool,
 }
 
 pub fn catalogo() -> Vec<AccionInfo> {
@@ -44,6 +47,8 @@ pub fn catalogo() -> Vec<AccionInfo> {
             dueno_sigue_cajero: a.dueno_sigue_cajero,
             normal_cajero: a.normal_cajero,
             normal_tecnico: a.normal_tecnico,
+            niveles: a.niveles,
+            monto_o_pin: a.monto_o_pin,
         })
         .collect()
 }
@@ -67,6 +72,11 @@ pub fn diferencias(a: &Actor, nueva: &Datos) -> Res<Vec<String>> {
 /// `accion`: "seguridad.editar" (pantalla Permisos) o "seguridad.inactividad".
 pub async fn guardar(pool: &SqlitePool, a: &Actor, accion: &str, nueva: &Datos, motivo: &str, plantilla: Option<&str>, pin: Option<&str>) -> Res<i64> {
     a.exigir(accion, "cambiar la seguridad")?;
+    // Cadena alterada: lo que se agregue después no aplicaría nunca (se usa lo último sano). No se
+    // guarda nada y se dice por qué (A1).
+    if let Some(r) = a.seg.rota_en {
+        return Err(format!("Los permisos guardados fueron alterados fuera del programa (versión {r}): no se puede guardar ningún cambio. Restaure un respaldo de antes de esa fecha o llame al técnico."));
+    }
     let motivo = texto(motivo, 300, "motivo", false)?;
     if let Some(p) = plantilla {
         if !matches!(p, "estricto" | "normal" | "flexible") {
@@ -96,7 +106,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, accion: &str, nueva: &Datos, 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     // Alguien guardó otra versión mientras tanto: que la vea antes de pisarla.
     let ultima: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM seguridad_versiones").fetch_one(&mut *tx).await.map_err(e)?;
-    if a.seg.rota_en.is_none() && ultima != a.seg.version {
+    if ultima != a.seg.version {
         return Err("Otra persona cambió los permisos mientras tanto. Cierre y vuelva a abrir esta pantalla.".into());
     }
     let id = politica::agregar(&mut tx, Some(&a.id), pin_de.as_deref(), plantilla, &motivo, nueva).await?;
@@ -183,8 +193,9 @@ pub async fn version(pool: &SqlitePool, a: &Actor, id: i64) -> Res<Datos> {
         return Err("Esa versión está después de un cambio alterado: no se puede usar".into());
     }
     let datos: Option<String> = sqlx::query_scalar("SELECT datos FROM seguridad_versiones WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)?;
-    let d: Datos = serde_json::from_str(&datos.ok_or("Versión no encontrada")?).map_err(|_| "Esa versión no se puede leer".to_string())?;
-    politica::validar(&d, None)?;
+    let mut d: Datos = serde_json::from_str(&datos.ok_or("Versión no encontrada")?).map_err(|_| "Esa versión no se puede leer".to_string())?;
+    politica::sin_desconocidas(&mut d);
+    politica::validar(&d, None).map_err(|err| format!("Esa versión no se puede usar con este programa: {err}"))?;
     Ok(d)
 }
 
@@ -206,7 +217,7 @@ pub async fn volver(pool: &SqlitePool, a: &Actor, id: i64, motivo: &str, pin: &s
         "" => token,
         p => Some(usuarios::autorizar_dueno(pool, p, "volver a una versión de permisos", &a.id).await?),
     };
-    let a2 = Actor { autorizaciones: vec![crate::sesion::Autorizacion { accion: "seguridad.editar".into(), autorizo: pin_de, motivo: None, vence: crate::util::ahora() + chrono::Duration::minutes(1) }], ..a.clone() };
+    let a2 = Actor { autorizaciones: vec![crate::sesion::Autorizacion { accion: "seguridad.editar".into(), comando: "seguridad_volver".into(), autorizo: pin_de, motivo: None, vence: crate::util::ahora() + chrono::Duration::minutes(1) }], ..a.clone() };
     guardar(pool, &a2, "seguridad.editar", &d, &motivo, None, None).await
 }
 

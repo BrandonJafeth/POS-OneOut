@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import { textoError } from "../../components/Mensaje";
 import { crearEspera, descartarEspera, guardarEspera, listarEsperas } from "../../db/ventas";
-import { estadoVacio } from "../../lib/venta/calculo";
+import { estadoVacio, huellaDescuento } from "../../lib/venta/calculo";
 import type { EstadoEspera, VentaEspera } from "../../tipos";
 
 /** Pestaña que se activa al entrar a Venta (la que abrió "Pasar a venta" desde Proformas). */
@@ -44,9 +44,12 @@ export function useEsperas(onError: (msg: string) => void) {
 
   /** Aplica un cambio a la venta activa y lo guarda en la base de inmediato, en fila (en orden). */
   const cola = useRef<Promise<void>>(Promise.resolve());
-  const actualizar = useCallback((nuevo: EstadoEspera) => {
+  const actualizar = useCallback((cambio: EstadoEspera) => {
     const id = activaRef.current;
     if (!id) return;
+    // La autorización de descuento es de la venta tal como estaba (D5): si cambia una línea, se pide otra vez.
+    const previo = esperasRef.current.find((e) => e.id === id)?.estado;
+    const nuevo = previo && cambio.autorizacion && cambio.autorizacion === previo.autorizacion && huellaDescuento(previo) !== huellaDescuento(cambio) ? { ...cambio, autorizacion: null } : cambio;
     poner(esperasRef.current.map((e) => (e.id === id ? { ...e, estado: nuevo } : e)));
     cola.current = cola.current.then(() =>
       guardarEspera(id, nuevo).catch((e) => onError("No se pudo guardar la venta en espera: " + textoError(e))),

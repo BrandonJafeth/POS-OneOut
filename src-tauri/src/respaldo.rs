@@ -805,7 +805,7 @@ mod tests_restaurar {
         let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
         assert_eq!(cabecera(&archivo).unwrap().unwrap().migracion, crate::bd::ultima_migracion());
@@ -915,7 +915,7 @@ mod tests_disco {
         let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
         // Después del respaldo se siguieron emitiendo tiquetes (1000 más).
@@ -1042,7 +1042,7 @@ mod tests_automatico {
         let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         (dir, bd, dueno)
     }
 

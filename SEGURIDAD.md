@@ -51,7 +51,9 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - Hay que cambiar el PIN en la primera entrada si lo puso otra persona o si es más corto que el mínimo. Hasta hacerlo, Rust responde `DEBE_CAMBIAR_PIN` a todo.
 - La entrada no revela si un usuario existe: "no existe", "inactivo" y "PIN incorrecto" dan la misma respuesta.
 - Las acciones sensibles piden el PIN cada vez y no guardan la autorización. Son: reabrir caja, salida grande, anular, corregir un pago de un turno cerrado, anonimizar y restaurar. Darle una de estas acciones a un cajero no le quita el PIN del dueño (`usuarios::confirmar_dueno` revisa la acción y siempre pide el PIN).
-- Lo que la política pide con «PIN» o «motivo» y el comando no recibe como argumento se autoriza con `seguridad_autorizar`: una autorización de **un solo uso** para esa acción, que vence a los 2 minutos y se gasta en el siguiente comando (aunque falle). Queda en la bitácora (`permiso.autorizado`) con la versión y quién autorizó.
+- Lo que la política pide con «PIN» o «motivo» y el comando no recibe como argumento se autoriza con `seguridad_autorizar`: una autorización de **un solo uso** para esa acción **y ese comando** (0.9.4: otro comando no la gasta ni la usa), que vence a los 2 minutos y se gasta cuando corre ese comando (aunque falle). Queda en la bitácora (`permiso.autorizado`) con la versión y quién autorizó.
+- Cambiar el PIN propio pide el PIN actual (0.9.4, D2), salvo el cambio obligatorio del primer ingreso o después de un restablecimiento.
+- **Recuperar el PIN de un dueño (0.9.4, D1)**: al crear cada dueño se genera un código de recuperación (4 grupos de 5 caracteres, ≈ 99 bits), se muestra una sola vez y se imprime para guardarlo en un sobre; en la base queda solo su hash (Argon2id). Restablecer el PIN de un dueño exige ese código, lo use quien lo use (también el técnico), con el mismo freno de intentos que el PIN del dueño; queda en la bitácora, obliga a cambiar el PIN al entrar, el código usado deja de servir y sale uno nuevo. Al entrar, el dueño ve «Su PIN fue restablecido el …». El técnico solo crea o restablece un dueño sin código mientras no exista ningún dueño con su PIN (la instalación); después, otro dueño lo crea un dueño. **Sin el código y sin otro dueño, la única salida es restaurar un respaldo** (Administración → Respaldo, o «Restaurar desde respaldo» si la base no abre).
 - El técnico entra por una entrada oculta (Ctrl+Alt+T); no aparece en la lista.
 
 ### Datos en disco
@@ -68,7 +70,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
   - Cada intento fallido con el PIN del dueño ya dado (contraseña equivocada, archivo alterado, no se pudo poner al día) queda en la bitácora como `respaldo.restaurar_fallido`, con el motivo técnico. La pantalla solo muestra un mensaje claro.
   - **Formato versionado**: `POSBAK02` lleva en el encabezado la versión del programa y la última migración. El encabezado va en claro (para rechazar un respaldo de una versión más nueva antes de pedir nada) pero autenticado por GCM: cambiarlo hace fallar el descifrado. El lector sigue aceptando `POSBAK01` (sin encabezado). Un formato nuevo agrega un lector; no reemplaza los anteriores.
   - `tests/fixtures/` guarda un respaldo de prueba por versión (sin datos reales). La prueba que los restaura todos no se borra.
-- Los archivos temporales y el registro no llevan datos personales ni PIN. No hay archivo de log de la app.
+- Los archivos temporales y el registro no llevan datos personales ni PIN. El único registro es `errores.log` en la carpeta de datos (errores técnicos para el técnico, máx. 512 KB con una rotación): números de 6 o más dígitos —también separados por guiones o espacios, como teléfonos y cédulas— se guardan como «#». Los mensajes de error no llevan nombres.
 
 ### Bitácora
 - Solo se puede agregar. Hay triggers contra `UPDATE`/`DELETE` y contra insertar sin hash.
@@ -150,10 +152,13 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 ### Cadena de suministro
 - `package-lock.json` y `Cargo.lock` están fijados. Se quitó `tauri-plugin-sql`, que ya no se usa.
 - `npm audit --omit=dev`: 0 vulnerabilidades. Las alertas de `npm audit` completo vienen de `webdriverio` (solo para la prueba de punta a punta; no va en el instalador). `cargo deny check`: advisories, bans, licenses y sources en ok.
-- `cargo audit`: sin hallazgos aplicables. Hay 3 excepciones justificadas en `src-tauri/.cargo/audit.toml`:
+- `cargo audit` y `cargo deny check`: pasan. Excepciones justificadas en `src-tauri/.cargo/audit.toml` (y las dos últimas también en `deny.toml`):
   - `rsa`: viene por el driver MySQL opcional de sqlx, que no se compila.
   - `glib` y `proc-macro-error`: son dependencias de Linux.
-  - Se verificó con `cargo tree -i <crate> --target all`.
+  - Se verificó con `cargo tree -i <crate> --target x86_64-pc-windows-msvc`.
+  - **RUSTSEC-2026-0459 (SQLite dentro de SQLCipher, `libsqlite3-sys` 0.30)**: sí se compila. El arreglo está en `libsqlite3-sys` ≥ 0.31, que solo acepta sqlx 0.9 (cambio mayor de la capa de base de datos, no compatible con la 0.8.6 de esta versión). Riesgo: la base es local y cifrada; el programa no ejecuta SQL de terceros (todo el SQL está en Rust o en `sentencias.json`, embebido); `bd_leer` acepta solo `SELECT` sobre las tablas del esquema, con tope de filas. Un atacante necesitaría ya poder escribir la base o mandar comandos a la app. Pendiente: pasar a sqlx 0.9 en una versión futura.
+  - **RUSTSEC-2026-0543 (`chrono` sin mantenimiento)**: aviso informativo, sin falla conocida. Pendiente: migrar a `time` o `jiff` en una versión futura.
+- `url` y `cookie` se actualizaron en el lockfile (0.9.4) por RUSTSEC-2026-0592 y RUSTSEC-2026-0594.
 - Compilación release: LTO, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
 - Instalador **sin firmar**. Cada entrega se publica con su SHA-256 (ver la sección 6).
 
@@ -191,6 +196,16 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Plantillas**: Estricto, Normal (= 0.9.2) y Flexible (anular C hasta ¢10.000, 3 por turno, 30 min; descuento 15 %; salida hasta ¢30.000). Antes de aplicar se ve la lista de diferencias.
 - Los topes que antes eran claves de configuración (`descuento_max_pct`, `caja_salida_max_sin_pin`, `permitir_vender_sin_existencia`, `venta_mostrar_existencia`, `sesion_inactividad_min`) pasaron a la versión 1 de los permisos con su valor; `config_guardar` ya no los acepta. `caja_no_venta_umbral` sigue como el aviso del Z; el PIN desde cierta cantidad es el límite de `caja.no_venta`.
 
+### Auditoría 0.9.4 (AUDITORIA-0.9.4.md)
+- **Niveles que cada acción aplica (D4)**: el catálogo dice qué niveles puede aplicar cada acción (`Accion::niveles`: no·sí; no·sí·motivo·PIN; o «siempre con PIN del dueño»). La pantalla Permisos ofrece solo esos y Rust rechaza guardar otro (también por comando directo y al volver a una versión vieja). Uno que llegue igual en una versión guardada antes se baja al más estricto que la acción aplique (`Accion::ajustar`), nunca vale como «sí». `Actor::puede` (mostrar o elegir un camino) es solo «sí»; `Actor::exigir` con «PIN» o «motivo» los revisa con la autorización de un solo uso. Las acciones de dinero (anular, cambiar forma de pago, salidas, no venta, descuentos, precio libre, quitar líneas, vender sin existencia o apartado, cancelar, condonar, anular abono) aplican todos sus niveles.
+- **Regla general al cobrar (C2)**: lo guardado de la venta en espera solo llega ahí pasando la política. Al cobrar, apartar, vender a crédito, guardar o convertir una proforma, Rust compara la venta con lo guardado y vuelve a aplicar la política a lo distinto (precio libre nuevo o cambiado, líneas quitadas), además del descuento, la venta sin existencia y las unidades apartadas; sin la autorización de ese comando, se rechaza. Una pestaña nueva con precio libre también pasa por la política.
+- **Descuento (D5)**: la autorización del dueño queda atada a esa venta, a una huella de sus líneas (precios, cantidades, descuentos) y al monto en colones; si cambia algo no vale (la pantalla la borra y Rust la rechaza). Un solo uso.
+- **Cancelar, condonar y anular un abono** (con «cambiar forma de pago»): admiten monto máximo; sin monto, el cajero solo las tiene con PIN.
+- **Precios y costos**: «cambiar precios de venta y descuentos fijos» (`productos.precio`) y «ver costos, valor del inventario y utilidad» (`inventario.costos`) son acciones aparte, por defecto solo del dueño. Rust revisa el precio en la edición de productos, la importación y la entrada de mercadería, y quita costo, valor y utilidad de las respuestas (y de lo que se exporte de ellas).
+- **F10 (D3)**: buscar apartados pide número, teléfono (8 dígitos) o al menos 3 letras; sin cédula, sin lista vacía, los comodines se buscan tal cual y quien no ve todas las cuentas recibe el teléfono tapado.
+- **Otros**: cadena de permisos alterada → guardar falla con un error claro; «0 por turno» = siempre PIN; el dueño, con su PIN, nunca queda frenado por el «no deja» del cajero; la entrada de mercadería es idempotente (id de operación); la bitácora por `bd_lote` solo acepta lo que anota la pantalla de catálogo; reloj de Windows atrasado más de un minuto → la sesión se bloquea; si los permisos no se pueden leer al abrir, se usa la Normal marcada como alterada (no en silencio).
+- **Tablas**: las de abajo («Acciones…» y «Comando → acción») las genera y compara la prueba `permisos_tests::seguridad_md_igual_al_catalogo` (`tools/tablas-seguridad.ps1` las regenera).
+
 ### Anulación por el cajero (0.9.3)
 - Opción A (solo el dueño, como antes), B (cajero con PIN del dueño) o C (cajero sin PIN, con motivo de la lista configurable y límites: monto, cantidad por turno, solo el turno abierto, minutos desde la venta; al pasar uno, PIN o no deja). Todo en la transacción de `ventas::anular`.
 - Siempre con PIN aunque cumpla los límites: turno cerrado, venta con factura electrónica, devolución de más dinero que el monto permitido. Las ventas que liquidan un apartado o un crédito con abonos no se anulan desde Ventas del día con ninguna opción.
@@ -211,92 +226,94 @@ Con la plantilla Normal (versión 1 después de actualizar), cada comando respon
 - `tabla_permisos::cada_comando_con_cada_rol_respeta_la_tabla` (la tabla de abajo, por módulo). «Permitido» = el comando no responde con falta de permiso (puede fallar por otra cosa).
 - `permisos_tests::cada_comando_cada_rol_cada_politica`: cada comando con acción, como cajero y como técnico, con cada política (no, sí, motivo, PIN): se niega, pasa, pide el motivo o el PIN y pasa con la autorización (de un solo uso).
 
+<!-- tablas:inicio (las genera permisos_tests::seguridad_md_igual_al_catalogo; no editar a mano) -->
 #### Acciones y política Normal por rol (plantilla «Normal» = 0.9.2)
 
-🔒 = protegida (el técnico nunca). «fija» = no se cambia desde la pantalla. Fuente: `acciones.rs` + `tests/casos/permisos.json` (lo calcula Rust).
+🔒 = protegida (el técnico nunca). «fija» = no se cambia desde la pantalla. «Niveles»: los que la acción aplica de verdad (la pantalla ofrece solo esos y Rust rechaza otros, D4). Fuente: `acciones.rs` (lo calcula Rust).
 
-| Área | Acción | id | Cajero | Dueño | Técnico |
-|---|---|---|:---:|:---:|:---:|
-| Venta | Vender y cobrar 🔒 | `venta.vender` | ✔ | ✔ | — |
-| Venta | Descuento por línea y al total 🔒 | `venta.descuento` | ✔ (≤ 10 %, al pasar: PIN) | ✔ | — |
-| Venta | Precio libre (F4) 🔒 | `venta.precio_libre` | ✔ | ✔ | — |
-| Venta | Vender sin existencia 🔒 | `venta.sin_existencia` | ✔ | ✔ (tope del negocio = el del cajero) | — |
-| Venta | Vender unidades apartadas 🔒 | `venta.apartadas` | PIN | PIN | — |
-| Venta | Quitar líneas de una venta abierta 🔒 | `venta.quitar_linea` | ✔ | ✔ | — |
-| Venta | Descartar una venta en espera 🔒 | `venta.descartar_espera` | ✔ | ✔ | — |
-| Venta | Ver existencias al vender 🔒 | `venta.ver_existencia` | — | ✔ | — |
-| Ventas cobradas | Ver tiquetes del día 🔒 | `ventas.ver` | ✔ | ✔ | — |
-| Ventas cobradas | Reimprimir tiquete 🔒 | `ventas.reimprimir` | ✔ | ✔ | — |
-| Ventas cobradas | Anular una venta 🔒 | `ventas.anular` | — | PIN | — |
-| Ventas cobradas | Cambiar la forma de pago 🔒 | `ventas.cambiar_pago` | — | PIN | — |
-| Ventas cobradas | Pendientes de factura 🔒 | `facturas.ver` | ✔ | ✔ | — |
-| Ventas cobradas | Marcar factura emitida 🔒 | `facturas.marcar` | ✔ | ✔ | — |
-| Caja | Ver la caja y su turno 🔒 | `caja.ver` | ✔ | ✔ | — |
-| Caja | Abrir caja 🔒 | `caja.abrir` | ✔ | ✔ | — |
-| Caja | Cerrar caja (conteo y Z) 🔒 | `caja.cerrar` | ✔ | ✔ | — |
-| Caja | Cerrar el turno de otro (de un día anterior) 🔒 | `caja.cerrar_otro` | ✔ | ✔ | — |
-| Caja | Ver totales con el turno abierto 🔒 | `caja.ver_totales` | — | ✔ | — |
-| Caja | Reabrir un turno 🔒 | `caja.reabrir` | — | PIN | — |
-| Caja | Entrada de efectivo 🔒 | `caja.entrada` | ✔ | ✔ | — |
-| Caja | Salida de efectivo 🔒 | `caja.salida` | ✔ (≤ ¢20.000, al pasar: PIN) | ✔ (≤ ¢20.000, al pasar: PIN) (tope del negocio = el del cajero) | — |
-| Caja | Corte con retiro 🔒 | `caja.corte` | — | ✔ | — |
-| Caja | No venta (abrir la gaveta con motivo) 🔒 | `caja.no_venta` | ✔ | ✔ | — |
-| Caja | Abrir la gaveta con orden del dueño 🔒 | `caja.gaveta_sin_venta` | PIN | PIN | — |
-| Caja | Historial de cierres y aperturas de gaveta 🔒 | `caja.historial` | — | ✔ | — |
-| Caja | Reimprimir un cierre Z 🔒 | `caja.reimprimir_z` | PIN | PIN | — |
-| Caja | Corregir la fecha de negocio 🔒 | `caja.corregir_dia` | — | PIN | — |
-| Caja | Número inicial del consecutivo | `caja.consecutivo` | — | ✔ | ✔ |
-| Caja | Opciones de caja y cierre | `caja.opciones` | — | ✔ | ✔ |
-| Apartados y crédito | Crear y buscar apartados 🔒 | `cuentas.crear` | ✔ | ✔ | — |
-| Apartados y crédito | Recibir abonos y entregar 🔒 | `cuentas.abonar` | ✔ | ✔ | — |
-| Apartados y crédito | Ver todas las cuentas y estados de cuenta 🔒 | `cuentas.ver_todas` | — | ✔ | — |
-| Apartados y crédito | Cancelar un apartado 🔒 | `cuentas.cancelar` | — | PIN | — |
-| Apartados y crédito | Anular un abono 🔒 | `cuentas.anular_abono` | — | PIN | — |
-| Apartados y crédito | Ajustar el saldo 🔒 | `cuentas.ajustar` | — | PIN | — |
-| Apartados y crédito | Condonar el saldo 🔒 | `cuentas.condonar` | — | PIN | — |
-| Apartados y crédito | Prorrogar la fecha límite 🔒 | `cuentas.prorrogar` | — | PIN | — |
-| Apartados y crédito | Vender a crédito 🔒 | `credito.vender` | ✔ | ✔ | — |
-| Apartados y crédito | Límites y opciones de crédito 🔒 | `credito.limite` | — | PIN | — |
-| Apartados y crédito | Opciones de apartados y crédito | `cuentas.opciones` | — | ✔ | ✔ |
-| Proformas | Crear, buscar e imprimir proformas 🔒 | `proformas.crear` | ✔ | ✔ | — |
-| Proformas | Pasar una proforma a venta 🔒 | `proformas.convertir` | ✔ | ✔ | — |
-| Proformas | Anular una proforma 🔒 | `proformas.anular` | — | ✔ | — |
-| Proformas | Reporte de proformas 🔒 | `proformas.admin` | — | ✔ | — |
-| Proformas | Opciones de proformas | `proformas.opciones` | — | ✔ | ✔ |
-| Productos | Crear productos y códigos | `productos.crear` | — | ✔ | ✔ |
-| Productos | Editar productos | `productos.editar` | — | ✔ | ✔ |
-| Productos | Desactivar productos | `productos.desactivar` | — | ✔ | ✔ |
-| Productos | Favoritos | `productos.favoritos` | — | ✔ | ✔ |
-| Productos | Imprimir etiquetas | `productos.etiquetas` | — | ✔ | ✔ |
-| Productos | Importar CSV | `productos.importar` | — | ✔ | ✔ |
-| Productos | Editar departamentos (nombre, orden, color) | `departamentos.editar` | — | ✔ | ✔ |
-| Productos | Crear departamentos y cambiar su código | `departamentos.estructura` | — | — | ✔ |
-| Inventario | Ver existencias y kardex 🔒 | `inventario.ver` | — | ✔ | — |
-| Inventario | Entradas de mercadería y proveedores 🔒 | `inventario.entradas` | — | ✔ | — |
-| Inventario | Ajustes de inventario 🔒 | `inventario.ajustes` | — | ✔ | — |
-| Inventario | Conteo físico y carga inicial 🔒 | `inventario.conteo` | — | ✔ | — |
-| Inventario | Reportes de inventario 🔒 | `inventario.reportes` | — | ✔ | — |
-| Inventario | Opciones de inventario 🔒 | `inventario.opciones` | — | ✔ | — |
-| Clientes | Buscar y crear clientes (nombre, teléfono, cédula) 🔒 | `clientes.crear` | ✔ | ✔ | — |
-| Clientes | Ver la lista y los datos completos 🔒 | `clientes.ver_todos` | — | ✔ | — |
-| Clientes | Editar clientes 🔒 | `clientes.editar` | — | ✔ | — |
-| Clientes | Exportar los datos de un cliente 🔒 | `clientes.exportar` | — | ✔ | — |
-| Clientes | Anonimizar un cliente 🔒 | `clientes.anonimizar` | — | PIN | — |
-| Reportes | Reportes de ventas 🔒 | `reportes.ver` | — | ✔ | — |
-| Reportes | Exportar reportes y cierres 🔒 | `reportes.exportar` | — | ✔ | — |
-| Administración | Usuarios (fija) | `usuarios.administrar` | — | ✔ | ✔ |
-| Administración | Datos de contacto del negocio | `negocio.contacto` | — | ✔ | ✔ |
-| Administración | Datos legales y logo | `negocio.legal` | — | — | ✔ |
-| Administración | Formas de pago y bancos | `pagos.formas` | — | — | ✔ |
-| Administración | Configurar impresoras y gaveta | `impresoras.configurar` | — | — | ✔ |
-| Administración | Asignar y probar impresoras | `impresoras.asignar` | — | ✔ | ✔ |
-| Administración | Configuración técnica (fija) | `config.tecnica` | — | — | ✔ |
-| Administración | Respaldo 🔒 | `respaldo.crear` | — | ✔ | — |
-| Administración | Restaurar un respaldo 🔒 | `respaldo.restaurar` | — | PIN | — |
-| Administración | Ver la bitácora | `bitacora.ver` | — | ✔ | ✔ |
-| Administración | Editar permisos (fija) | `seguridad.editar` | — | ✔ | ✔ |
-| Administración | Tiempo de bloqueo por inactividad (fija) | `seguridad.inactividad` | — | ✔ | ✔ |
-| Administración | Preparar para el cliente y diagnóstico (fija) | `sistema.preparar` | — | — | ✔ |
+| Área | Acción | id | Niveles | Cajero | Dueño | Técnico |
+|---|---|---|---|:---:|:---:|:---:|
+| Venta | Vender y cobrar 🔒 | `venta.vender` | no · sí | ✔ | ✔ | — |
+| Venta | Descuento por línea y al total 🔒 | `venta.descuento` | no · sí · motivo · PIN | ✔ (≤ 10 %, al pasar: PIN) | ✔ | — |
+| Venta | Precio libre (F4) 🔒 | `venta.precio_libre` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Vender sin existencia 🔒 | `venta.sin_existencia` | no · sí · motivo · PIN | ✔ | ✔ (tope del negocio = el del cajero) | — |
+| Venta | Vender unidades apartadas 🔒 | `venta.apartadas` | no · sí · motivo · PIN | PIN | PIN | — |
+| Venta | Quitar líneas de una venta abierta 🔒 | `venta.quitar_linea` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Descartar una venta en espera 🔒 | `venta.descartar_espera` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Ver existencias al vender 🔒 | `venta.ver_existencia` | no · sí | — | ✔ | — |
+| Ventas cobradas | Ver tiquetes del día 🔒 | `ventas.ver` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Reimprimir tiquete 🔒 | `ventas.reimprimir` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Anular una venta 🔒 | `ventas.anular` | no · sí · motivo · PIN | — | PIN | — |
+| Ventas cobradas | Cambiar la forma de pago 🔒 | `ventas.cambiar_pago` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Ventas cobradas | Pendientes de factura 🔒 | `facturas.ver` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Marcar factura emitida 🔒 | `facturas.marcar` | no · sí | ✔ | ✔ | — |
+| Caja | Ver la caja y su turno 🔒 | `caja.ver` | no · sí | ✔ | ✔ | — |
+| Caja | Abrir caja 🔒 | `caja.abrir` | no · sí | ✔ | ✔ | — |
+| Caja | Cerrar caja (conteo y Z) 🔒 | `caja.cerrar` | no · sí | ✔ | ✔ | — |
+| Caja | Cerrar el turno de otro (de un día anterior) 🔒 | `caja.cerrar_otro` | no · sí | ✔ | ✔ | — |
+| Caja | Ver totales con el turno abierto 🔒 | `caja.ver_totales` | no · sí | — | ✔ | — |
+| Caja | Reabrir un turno 🔒 | `caja.reabrir` | no · siempre con PIN | — | PIN | — |
+| Caja | Entrada de efectivo 🔒 | `caja.entrada` | no · sí | ✔ | ✔ | — |
+| Caja | Salida de efectivo 🔒 | `caja.salida` | no · sí · motivo · PIN | ✔ (≤ ¢20.000, al pasar: PIN) | ✔ (≤ ¢20.000, al pasar: PIN) (tope del negocio = el del cajero) | — |
+| Caja | Corte con retiro 🔒 | `caja.corte` | no · sí | — | ✔ | — |
+| Caja | No venta (abrir la gaveta con motivo) 🔒 | `caja.no_venta` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Caja | Abrir la gaveta con orden del dueño 🔒 | `caja.gaveta_sin_venta` | no · siempre con PIN | PIN | PIN | — |
+| Caja | Historial de cierres y aperturas de gaveta 🔒 | `caja.historial` | no · sí | — | ✔ | — |
+| Caja | Reimprimir un cierre Z 🔒 | `caja.reimprimir_z` | no · siempre con PIN | PIN | PIN | — |
+| Caja | Corregir la fecha de negocio 🔒 | `caja.corregir_dia` | no · siempre con PIN | — | PIN | — |
+| Caja | Número inicial del consecutivo | `caja.consecutivo` | no · sí | — | ✔ | ✔ |
+| Caja | Opciones de caja y cierre | `caja.opciones` | no · sí | — | ✔ | ✔ |
+| Apartados y crédito | Crear y buscar apartados 🔒 | `cuentas.crear` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Recibir abonos y entregar 🔒 | `cuentas.abonar` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Ver todas las cuentas y estados de cuenta 🔒 | `cuentas.ver_todas` | no · sí | — | ✔ | — |
+| Apartados y crédito | Cancelar un apartado 🔒 | `cuentas.cancelar` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Anular un abono 🔒 | `cuentas.anular_abono` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Ajustar el saldo 🔒 | `cuentas.ajustar` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Condonar el saldo 🔒 | `cuentas.condonar` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Prorrogar la fecha límite 🔒 | `cuentas.prorrogar` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Vender a crédito 🔒 | `credito.vender` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Límites y opciones de crédito 🔒 | `credito.limite` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Opciones de apartados y crédito | `cuentas.opciones` | no · sí | — | ✔ | ✔ |
+| Proformas | Crear, buscar e imprimir proformas 🔒 | `proformas.crear` | no · sí | ✔ | ✔ | — |
+| Proformas | Pasar una proforma a venta 🔒 | `proformas.convertir` | no · sí | ✔ | ✔ | — |
+| Proformas | Anular una proforma 🔒 | `proformas.anular` | no · sí | — | ✔ | — |
+| Proformas | Reporte de proformas 🔒 | `proformas.admin` | no · sí | — | ✔ | — |
+| Proformas | Opciones de proformas | `proformas.opciones` | no · sí | — | ✔ | ✔ |
+| Productos | Crear productos y códigos | `productos.crear` | no · sí | — | ✔ | ✔ |
+| Productos | Editar productos | `productos.editar` | no · sí | — | ✔ | ✔ |
+| Productos | Cambiar precios de venta y descuentos fijos | `productos.precio` | no · sí | — | ✔ | — |
+| Productos | Desactivar productos | `productos.desactivar` | no · sí | — | ✔ | ✔ |
+| Productos | Favoritos | `productos.favoritos` | no · sí | — | ✔ | ✔ |
+| Productos | Imprimir etiquetas | `productos.etiquetas` | no · sí | — | ✔ | ✔ |
+| Productos | Importar CSV | `productos.importar` | no · sí | — | ✔ | ✔ |
+| Productos | Editar departamentos (nombre, orden, color) | `departamentos.editar` | no · sí | — | ✔ | ✔ |
+| Productos | Crear departamentos y cambiar su código | `departamentos.estructura` | no · sí | — | — | ✔ |
+| Inventario | Ver existencias y kardex 🔒 | `inventario.ver` | no · sí | — | ✔ | — |
+| Inventario | Ver costos, valor del inventario y utilidad | `inventario.costos` | no · sí | — | ✔ | — |
+| Inventario | Entradas de mercadería y proveedores 🔒 | `inventario.entradas` | no · sí | — | ✔ | — |
+| Inventario | Ajustes de inventario 🔒 | `inventario.ajustes` | no · sí | — | ✔ | — |
+| Inventario | Conteo físico y carga inicial 🔒 | `inventario.conteo` | no · sí | — | ✔ | — |
+| Inventario | Reportes de inventario 🔒 | `inventario.reportes` | no · sí | — | ✔ | — |
+| Inventario | Opciones de inventario 🔒 | `inventario.opciones` | no · sí | — | ✔ | — |
+| Clientes | Buscar y crear clientes (nombre, teléfono, cédula) 🔒 | `clientes.crear` | no · sí | ✔ | ✔ | — |
+| Clientes | Ver la lista y los datos completos 🔒 | `clientes.ver_todos` | no · sí | — | ✔ | — |
+| Clientes | Editar clientes 🔒 | `clientes.editar` | no · sí | — | ✔ | — |
+| Clientes | Exportar los datos de un cliente 🔒 | `clientes.exportar` | no · sí | — | ✔ | — |
+| Clientes | Anonimizar un cliente 🔒 | `clientes.anonimizar` | no · siempre con PIN | — | PIN | — |
+| Reportes | Reportes de ventas 🔒 | `reportes.ver` | no · sí | — | ✔ | — |
+| Administración | Usuarios (fija) | `usuarios.administrar` | no · sí | — | ✔ | ✔ |
+| Administración | Datos de contacto del negocio | `negocio.contacto` | no · sí | — | ✔ | ✔ |
+| Administración | Datos legales y logo | `negocio.legal` | no · sí | — | — | ✔ |
+| Administración | Formas de pago y bancos | `pagos.formas` | no · sí | — | — | ✔ |
+| Administración | Configurar impresoras y gaveta | `impresoras.configurar` | no · sí | — | — | ✔ |
+| Administración | Asignar y probar impresoras | `impresoras.asignar` | no · sí | — | ✔ | ✔ |
+| Administración | Configuración técnica (fija) | `config.tecnica` | no · sí | — | — | ✔ |
+| Administración | Respaldo 🔒 | `respaldo.crear` | no · sí | — | ✔ | — |
+| Administración | Restaurar un respaldo 🔒 | `respaldo.restaurar` | no · siempre con PIN | — | PIN | — |
+| Administración | Ver la bitácora | `bitacora.ver` | no · sí | — | ✔ | ✔ |
+| Administración | Editar permisos (fija) | `seguridad.editar` | no · sí | — | ✔ | ✔ |
+| Administración | Tiempo de bloqueo por inactividad (fija) | `seguridad.inactividad` | no · sí | — | ✔ | ✔ |
+| Administración | Preparar para el cliente y diagnóstico (fija) | `sistema.preparar` | no · sí | — | — | ✔ |
 
 #### Comando → acción
 
@@ -336,6 +353,7 @@ Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconoc
 | `usuarios_crear` | `usuarios.administrar` |
 | `usuarios_editar` | según argumento |
 | `usuarios_cambiar_pin` | según argumento |
+| `usuarios_codigo_recuperacion` | cualquier sesión |
 | `usuarios_eliminar` | según argumento |
 | `config_guardar` | según argumento |
 | `negocio_guardar` | según argumento |
@@ -419,7 +437,7 @@ Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconoc
 | `proforma_obtener` | `proformas.crear` |
 | `proforma_imprimir` | `proformas.crear` |
 | `proforma_anular` | `proformas.anular` |
-| `proforma_abrir` | `proformas.crear` |
+| `proforma_abrir` | `proformas.convertir` |
 | `proforma_reporte` | `proformas.admin` |
 | `reporte_rangos` | `reportes.ver` |
 | `reporte_ventas` | `reportes.ver` |
@@ -439,7 +457,7 @@ Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconoc
 | `inventario_estado` | `inventario.ver` |
 | `inventario_existencia` | `venta.ver_existencia` |
 | `inventario_alertas` | `inventario.ver` |
-| `inventario_producto` | `inventario.ver` |
+| `inventario_producto` | `inventario.opciones` |
 | `inventario_kardex` | `inventario.ver` |
 | `inventario_entrada` | `inventario.entradas` |
 | `inventario_entrada_obtener` | `inventario.entradas` |
@@ -465,6 +483,8 @@ Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconoc
 | `imprimir` | según argumento |
 | `list_printers` | `impresoras.configurar` |
 | `print_raw` | `impresoras.configurar` |
+
+<!-- tablas:fin -->
 
 #### Tabla por módulo (0.9.2, sigue igual con la Normal)
 

@@ -457,7 +457,10 @@ async fn dueno_bloqueado_lo_recupera_el_tecnico() {
         let _ = iniciar_sesion(p, &dueno.id, "000000", ahora + i).await.unwrap();
     }
     assert!(matches!(iniciar_sesion(p, &dueno.id, PIN, ahora + 10).await.unwrap(), Login::Rechazado { .. }), "bloqueado");
-    cambiar_pin(p, &tec, &dueno.id, "802468").await.unwrap();
+    // D1: con el código de recuperación (impreso al crear al dueño), lo use quien lo use.
+    let codigo = crate::usuarios::codigo_recuperacion(p, &dueno, PIN).await.unwrap();
+    assert!(cambiar_pin(p, &tec, &dueno.id, "802468", None, None).await.is_err(), "sin el código, no");
+    cambiar_pin(p, &tec, &dueno.id, "802468", None, Some(&codigo)).await.unwrap();
     match iniciar_sesion(p, &dueno.id, "802468", ahora + 20).await.unwrap() {
         Login::Ok { usuario } => assert!(usuario.debe_cambiar_pin, "debe cambiarlo al entrar"),
         otro => panic!("no entró: {otro:?}"),

@@ -204,7 +204,41 @@ try {
   await b.waitUntil(async () => (await b.$$("dialog.velo-bloqueo[open]")).length === 0, { timeout: 10000, timeoutMsg: "No se quitó el velo" });
   await ver("Lápiz de grafito");
   await captura("p8-sigue");
-  console.log("OK: opción C, PIN al pasar el límite, Z, aviso al dueño, bloqueo y desbloqueo sin perder la venta");
+
+  /** Bloquea por inactividad y vuelve a entrar con el mismo usuario (la pantalla de abajo sigue montada). */
+  async function bloquearYVolver(nombre, pin) {
+    await avanzar(2);
+    await ver("Pantalla bloqueada", 15000);
+    await (await b.$("dialog.velo-bloqueo").$(`button*=${nombre}`)).click();
+    await escribir("dialog.velo-bloqueo input.pin", pin);
+    await b.keys(["Enter"]);
+    await b.waitUntil(async () => (await b.$$("dialog.velo-bloqueo[open]")).length === 0, { timeout: 10000, timeoutMsg: "No se quitó el velo" });
+  }
+
+  paso("conteo de caja a medias: se bloquea y al volver sigue el monto escrito");
+  await sinDialogos();
+  await boton("Caja", true);
+  await boton("Cerrar caja");
+  await boton("Escribir el total");
+  const total = await b.$(".conteo-directo input");
+  await total.waitForDisplayed({ timeout: 10000 });
+  await total.setValue("4321");
+  await bloquearYVolver("Luis", "2580");
+  await b.waitUntil(async () => (await b.$(".conteo-directo input").getValue()).replace(/\D/g, "") === "4321", { timeout: 10000, timeoutMsg: "Se perdió el conteo a medias" });
+  await captura("p9-conteo-sigue");
+  await b.keys(["Escape"]);
+  await sinDialogos();
+
+  paso("borrador de entrada de mercadería: se bloquea y al volver sigue");
+  await boton("Cambiar usuario", true);
+  await entrar("Ana", "246813");
+  await boton("Inventario", true);
+  await boton("Entrada de mercadería", true);
+  await escribir("input[maxlength='40']", "F-777");
+  await bloquearYVolver("Ana", "246813");
+  await b.waitUntil(async () => (await b.$("input[maxlength='40']").getValue()) === "F-777", { timeout: 10000, timeoutMsg: "Se perdió el borrador de la entrada" });
+  await captura("p10-entrada-sigue");
+  console.log("OK: opción C, PIN al pasar el límite, Z, aviso al dueño, bloqueo y desbloqueo sin perder la venta, el conteo de caja ni el borrador de entrada");
 } catch (e) {
   if (b) await b.saveScreenshot(join(tmpdir(), "pos-e2e-permisos-fallo.png")).catch(() => undefined);
   console.error(`FALLÓ: ${e.message}\nCaptura: ${join(tmpdir(), "pos-e2e-permisos-fallo.png")}`);

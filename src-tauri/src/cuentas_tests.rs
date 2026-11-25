@@ -681,7 +681,7 @@ async fn el_z_cuadra_con_apartados_en_muchos_turnos() {
                     caja_modelo += efectivo;
                 }
                 2 | 3 => {
-                    let abiertas = buscar(p, &luis, "").await.unwrap().into_iter().filter(|k| k.estado == "abierta").collect::<Vec<_>>();
+                    let abiertas = listar(p, &ana, "abiertas").await.unwrap().into_iter().filter(|k| k.estado == "abierta").collect::<Vec<_>>();
                     if abiertas.is_empty() {
                         continue;
                     }

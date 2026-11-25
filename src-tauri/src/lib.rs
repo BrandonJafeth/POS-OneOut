@@ -32,6 +32,8 @@ mod anulacion_tests;
 #[cfg(test)]
 mod propiedades_tests;
 #[cfg(test)]
+mod auditoria_tests;
+#[cfg(test)]
 mod tipos_ts;
 mod inventario;
 mod negocio;
@@ -98,7 +100,7 @@ impl App {
     /// política del comando (acciones::COMANDOS → politica::efectiva). Un comando sin acción se niega.
     /// El guardia que devuelve evita que la sesión se bloquee mientras el comando corre.
     async fn comando(&self, cmd: &str) -> Res<(Actor, sesion::Guardia)> {
-        let (a, g) = self.sesion.actor(&self.seg()).await?;
+        let (a, g) = self.sesion.actor(&self.seg(), cmd).await?;
         if self.debe_cambiar_pin.load(Ordering::SeqCst) {
             return Err("DEBE_CAMBIAR_PIN".into());
         }
@@ -374,10 +376,13 @@ async fn seguridad_volver<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_
 
 /// PIN del dueño o motivo para la siguiente llamada de una acción («NECESITA_PIN» / «NECESITA_MOTIVO»).
 #[tauri::command]
-async fn seguridad_autorizar(st: St<'_>, accion: String, pin: Option<String>, motivo: Option<String>) -> Res<()> {
+async fn seguridad_autorizar(st: St<'_>, accion: String, comando: String, pin: Option<String>, motivo: Option<String>) -> Res<()> {
     let (a, _g) = st.comando("seguridad_autorizar").await?;
+    if acciones::destino(&comando).is_none() {
+        return Err("Comando desconocido".into());
+    }
     let (autorizo, motivo) = seguridad::autorizar(st.pool()?, &a, &accion, pin.as_deref(), motivo.as_deref()).await?;
-    st.sesion.autorizar(&accion, autorizo, motivo).await
+    st.sesion.autorizar(&accion, &comando, autorizo, motivo).await
 }
 
 #[tauri::command]
@@ -441,16 +446,25 @@ async fn usuarios_editar(st: St<'_>, id: String, nombre: Option<String>, activo:
 
 /// También sirve con un cambio de PIN pendiente (es lo único que se puede hacer en ese estado).
 #[tauri::command]
-async fn usuarios_cambiar_pin(st: St<'_>, id: String, pin: String) -> Res<()> {
-    let (a, _g) = st.sesion.actor(&st.seg()).await?;
+/// `actual`: el PIN propio de ahora (no hace falta en el cambio obligatorio). `codigo`: el código de
+/// recuperación del dueño cuyo PIN se restablece. Devuelve el código nuevo, si se generó.
+async fn usuarios_cambiar_pin(st: St<'_>, id: String, pin: String, actual: Option<String>, codigo: Option<String>) -> Res<Option<String>> {
+    let (a, _g) = st.sesion.actor(&st.seg(), "usuarios_cambiar_pin").await?;
     if st.debe_cambiar_pin.load(Ordering::SeqCst) && id != a.id {
         return Err("DEBE_CAMBIAR_PIN".into());
     }
-    usuarios::cambiar_pin(st.pool()?, &a, &id, &pin).await?;
+    let nuevo = usuarios::cambiar_pin(st.pool()?, &a, &id, &pin, actual.as_deref(), codigo.as_deref()).await?;
     if id == a.id {
         st.debe_cambiar_pin.store(false, Ordering::SeqCst);
     }
-    Ok(())
+    Ok(nuevo)
+}
+
+/// El dueño se hace un código de recuperación nuevo, con su PIN (el anterior deja de servir).
+#[tauri::command]
+async fn usuarios_codigo_recuperacion(st: St<'_>, pin: String) -> Res<String> {
+    let (a, _g) = st.comando("usuarios_codigo_recuperacion").await?;
+    usuarios::codigo_recuperacion(st.pool()?, &a, &pin).await
 }
 
 #[tauri::command]
@@ -541,13 +555,17 @@ async fn caja_necesita_nota(st: St<'_>, conteo: caja::Conteo) -> Res<bool> {
 async fn caja_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, conteo: caja::Conteo, nota: String) -> Res<caja::ResultadoCierre> {
     let (a, _g) = st.comando("caja_cerrar").await?;
     let r = caja::cerrar(st.pool()?, &a, caja::CAJA_1, &conteo, &nota).await?;
+    // El cierre ya quedó: el respaldo sale siempre y lo de abajo no lo convierte en error (M5).
+    respaldo_en_segundo_plano(app, "cierre");
     // Al cerrar también se revisa la cadena de versiones de permisos: si alguien la alteró, queda en
     // la bitácora, el dueño ve el aviso y desde ya se usa la última versión válida.
-    if politica::verificar(st.pool()?).await?.is_some() {
-        st.recargar_seguridad().await?;
+    match politica::verificar(st.pool()?).await {
+        Ok(Some(_)) => {
+            let _ = st.recargar_seguridad().await;
+        }
+        Ok(None) => {}
+        Err(err) => diagnostico::anotar(&st.dir, "permisos", &format!("No se pudo revisar la cadena al cerrar: {err}")),
     }
-    // Respaldo automático al cerrar el turno, en segundo plano (no demora el cierre).
-    respaldo_en_segundo_plano(app, "cierre");
     Ok(r)
 }
 
@@ -709,9 +727,9 @@ async fn venta_espera_descartar(st: St<'_>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn venta_autorizar_descuento(st: St<'_>, espera_id: String, pct: f64, pin: String) -> Res<ventas::AutorizacionEmitida> {
+async fn venta_autorizar_descuento(st: St<'_>, espera_id: String, estado: calculo::Estado, pin: String) -> Res<ventas::AutorizacionEmitida> {
     let (a, _g) = st.comando("venta_autorizar_descuento").await?;
-    ventas::autorizar_descuento(st.pool()?, &a, &espera_id, pct, &pin).await
+    ventas::autorizar_descuento(st.pool()?, &a, &espera_id, &estado, &pin).await
 }
 
 #[tauri::command]
@@ -1330,6 +1348,13 @@ async fn imprimir(st: St<'_>, documento: String, data: Vec<u8>) -> Res<String> {
             a.exigir("ventas.anular", "imprimir el comprobante de anulación")?;
             documento = "tiquete".into();
         }
+        // Código de recuperación de un dueño (D1): quien crea dueños o el mismo dueño; impresora de tiquetes.
+        "recuperacion" => {
+            if a.rol != Rol::Dueno {
+                a.exigir("usuarios.administrar", "imprimir el código de recuperación")?;
+            }
+            documento = "tiquete".into();
+        }
         _ => return Err("Ese documento se imprime desde su pantalla".into()),
     }
     impresoras::enviar(st.pool()?, caja::CAJA_1, &documento, &data).await
@@ -1407,7 +1432,7 @@ async fn semilla_e2e(pool: &sqlx::SqlitePool) -> Res<()> {
     let tec = sesion::Actor::nuevo(t.id, permisos::Rol::Tecnico, "Técnico");
     for (nombre, rol, pin) in [("Ana", permisos::Rol::Dueno, "246813"), ("Luis", permisos::Rol::Cajero, "2580")] {
         let u = usuarios::crear(pool, &tec, nombre, rol, pin).await?;
-        usuarios::cambiar_pin(pool, &sesion::Actor::nuevo(u.id.clone(), rol, nombre), &u.id, pin).await?;
+        usuarios::cambiar_pin(pool, &sesion::Actor::nuevo(u.id.clone(), rol, nombre), &u.id, pin, None, None).await?;
     }
     let id = util::ulid();
     sqlx::query("INSERT INTO productos (id, nombre, nombre_busqueda, departamento_id, precio) VALUES (?, 'Retablo tallado', 'retablo tallado', '00000000000000000000000D01', 20000)")
@@ -1537,6 +1562,7 @@ fn comandos<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         usuarios_crear,
         usuarios_editar,
         usuarios_cambiar_pin,
+        usuarios_codigo_recuperacion,
         usuarios_eliminar,
         config_guardar,
         negocio_guardar,
@@ -1716,7 +1742,12 @@ pub fn run() {
             // Permisos vigentes en memoria. La cadena de versiones se verifica aquí; si está rota se usa
             // la última válida (queda en la bitácora y el dueño ve el aviso).
             let seguridad = match &bd {
-                Ok(b) => tauri::async_runtime::block_on(politica::cargar(&b.pool)).unwrap_or_else(|_| politica::Vigente { version: 0, datos: politica::plantilla_normal(), rota_en: None }),
+                // Si no se pudo leer, no en silencio (M5): la Normal marcada como alterada (el dueño ve
+                // el aviso, guardar queda frenado) y el error en el registro para el técnico.
+                Ok(b) => tauri::async_runtime::block_on(politica::cargar(&b.pool)).unwrap_or_else(|err| {
+                    diagnostico::anotar(&dir, "permisos", &format!("No se pudieron leer los permisos: {err}"));
+                    politica::Vigente { version: 0, datos: politica::plantilla_normal(), rota_en: Some(0) }
+                }),
                 Err(_) => politica::Vigente { version: 0, datos: politica::plantilla_normal(), rota_en: None },
             };
             app.manage(App { bd, dir, clave, sesion: Sesion::default(), debe_cambiar_pin: AtomicBool::new(false), seguridad: std::sync::RwLock::new(std::sync::Arc::new(seguridad)) });

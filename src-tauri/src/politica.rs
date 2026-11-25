@@ -148,8 +148,9 @@ pub fn efectiva(d: &Datos, usuario_id: &str, rol: Rol, accion: &str) -> Politica
     let Some(a) = buscar(accion) else { return Politica::NO };
     match rol {
         Rol::Dueno if a.dueno_sigue_cajero => {
-            let c = d.cajero.get(accion).copied().unwrap_or(Politica::NO);
-            Politica { nivel: if c.nivel == Nivel::Si { Nivel::Si } else { Nivel::Pin }, motivo: false, limites: c.limites }
+            let c = a.ajustar(d.cajero.get(accion).copied().unwrap_or(Politica::NO));
+            // Con su PIN el dueño siempre puede: el «no deja» al pasar es para el cajero (A6).
+            Politica { nivel: if c.nivel == Nivel::Si { Nivel::Si } else { Nivel::Pin }, motivo: false, limites: Limites { al_pasar: AlPasar::Pin, ..c.limites } }
         }
         Rol::Dueno => a.dueno,
         Rol::Tecnico => {
@@ -158,22 +159,40 @@ pub fn efectiva(d: &Datos, usuario_id: &str, rol: Rol, accion: &str) -> Politica
             } else if a.no_delegable {
                 a.normal_tecnico
             } else {
-                d.tecnico.get(accion).copied().unwrap_or(Politica::NO)
+                a.ajustar(d.tecnico.get(accion).copied().unwrap_or(Politica::NO))
             }
         }
         Rol::Cajero => {
             if a.no_delegable {
                 return Politica::NO;
             }
-            d.usuarios.get(usuario_id).and_then(|m| m.get(accion)).or_else(|| d.cajero.get(accion)).copied().unwrap_or(Politica::NO)
+            a.ajustar(d.usuarios.get(usuario_id).and_then(|m| m.get(accion)).or_else(|| d.cajero.get(accion)).copied().unwrap_or(Politica::NO))
         }
     }
 }
 
-/// Revisa una configuración antes de guardarla (y al leerla). `cajeros`: ids de los usuarios con rol cajero.
+/// Revisa una configuración antes de guardarla o de volver a ella. `cajeros`: ids de los usuarios con rol cajero.
 pub fn validar(d: &Datos, cajeros: Option<&[String]>) -> Res<()> {
+    validar_con(d, cajeros, true)
+}
+
+/// Quita las acciones que ya no existen en el catálogo (una versión guardada por un programa anterior).
+pub fn sin_desconocidas(d: &mut Datos) {
+    d.cajero.retain(|id, _| buscar(id).is_some());
+    d.tecnico.retain(|id, _| buscar(id).is_some());
+    for m in d.usuarios.values_mut() {
+        m.retain(|id, _| buscar(id).is_some());
+    }
+}
+
+/// `estricto`: además, cada nivel debe ser uno que la acción aplica (al guardar). Al leer una versión
+/// vieja no: un nivel que ya no aplica se baja al más estricto (efectiva → Accion::ajustar).
+fn validar_con(d: &Datos, cajeros: Option<&[String]>, estricto: bool) -> Res<()> {
     let revisar = |quien: &str, id: &str, p: &Politica, es_tecnico: bool| -> Res<()> {
         let a = buscar(id).ok_or_else(|| format!("Acción desconocida: {id}"))?;
+        if estricto && !(es_tecnico && a.no_delegable) {
+            a.admite(p)?;
+        }
         if es_tecnico && a.protegida && p.nivel != Nivel::No {
             return Err(format!("El técnico no puede tener «{}»: lleva datos de clientes o dinero (Ley 8968).", a.nombre));
         }
@@ -292,6 +311,13 @@ pub fn mas_permisivo(vieja: &Datos, nueva: &Datos) -> Vec<String> {
     }
     if !vieja.ver_totales_confirmado && nueva.ver_totales_confirmado {
         v.push("caja.ver_totales (advertencia)".into());
+    }
+    // Avisar menos de las anulaciones o dejar de imprimir su comprobante también afloja (B11).
+    if nueva.umbral_aviso_anulaciones > vieja.umbral_aviso_anulaciones {
+        v.push("aviso de anulaciones".into());
+    }
+    if vieja.comprobante_anulacion_ab && !nueva.comprobante_anulacion_ab {
+        v.push("comprobante de anulación".into());
     }
     v.sort();
     v.dedup();
@@ -424,7 +450,11 @@ pub async fn leer(c: &mut SqliteConnection) -> Res<Option<Vigente>> {
         let s = |k: &str| f.try_get::<Option<String>, _>(k).ok().flatten().unwrap_or_default();
         let id: i64 = f.get("id");
         let esperado = hash_version(&prev, id, &s("creada_en"), &s("creada_por"), &s("pin_dueno_de"), &s("plantilla"), &s("motivo"), &s("datos"));
-        let datos = serde_json::from_str::<Datos>(&s("datos")).ok().filter(|d| validar(d, None).is_ok());
+        let datos = serde_json::from_str::<Datos>(&s("datos")).ok().map(|mut d| {
+            sin_desconocidas(&mut d);
+            d
+        });
+        let datos = datos.filter(|d| validar_con(d, None, false).is_ok());
         match datos {
             Some(d) if s("hash_anterior") == prev && s("hash") == esperado => {
                 ultima = Some(Vigente { version: id, datos: d, rota_en: None });

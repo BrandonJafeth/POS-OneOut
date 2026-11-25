@@ -90,7 +90,7 @@ export default function Caja() {
   useEffect(() => {
     setDetalle(null);
     if (turno && (usable || admin)) detalleTurno(turno.id).then(setDetalle, (e) => setError(textoError(e)));
-  }, [turno?.id, recarga, usable]);
+  }, [turno?.id, recarga, usable, admin]);
 
   const refrescar = async () => {
     await recargarCaja();

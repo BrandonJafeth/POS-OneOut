@@ -54,6 +54,8 @@ export interface LineaEntrada {
 }
 
 export interface Entrada {
+  /** Una por envío: el mismo dos veces (doble clic) queda una sola entrada. */
+  operacionId: string;
   proveedorId: string | null;
   factura: string;
   /** AAAA-MM-DD (día de la factura del proveedor). */

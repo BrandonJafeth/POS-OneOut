@@ -35,11 +35,23 @@ impl Actor {
     pub fn politica(&self, accion: &str) -> Politica {
         politica::efectiva(&self.seg.datos, &self.id, self.rol, accion)
     }
+    /// Para lo que es sí o no sin pedir nada (mostrar, elegir un camino). Solo «sí» cuenta: las
+    /// acciones que se usan así no admiten PIN ni motivo (acciones::N_SI, prueba en auditoria_tests).
     pub fn puede(&self, accion: &str) -> bool {
-        self.politica(accion).nivel != Nivel::No
+        self.politica(accion).nivel == Nivel::Si
     }
+    /// Que la tenga. Con «PIN» o «motivo» en una acción que no los maneja adentro (propia o que
+    /// siempre pide el PIN del dueño), los revisa aquí con la autorización de un solo uso (C1).
     pub fn exigir(&self, accion: &str, que: &str) -> Res<()> {
-        if self.puede(accion) { Ok(()) } else { Err(sin_permiso(que)) }
+        let p = self.politica(accion);
+        if p.nivel == Nivel::No {
+            return Err(sin_permiso(que));
+        }
+        let adentro = crate::acciones::buscar(accion).is_some_and(|a| a.propia || a.niveles == crate::acciones::N_CON_PIN);
+        if p.nivel == Nivel::Si || adentro {
+            return Ok(());
+        }
+        politica::aplicar(self, accion, &politica::Contexto::default()).map(|_| ())
     }
 }
 
@@ -58,6 +70,8 @@ struct Activa {
 #[derive(Debug, Clone)]
 pub struct Autorizacion {
     pub accion: String,
+    /// El comando que la pidió: solo ese la usa (M1).
+    pub comando: String,
     pub autorizo: Option<String>,
     pub motivo: Option<String>,
     pub vence: DateTime<FixedOffset>,
@@ -87,8 +101,11 @@ pub struct EstadoSesion {
     pub minutos: i64,
 }
 
+/// Venció el plazo, o el reloj de Windows se atrasó más de un minuto (M6: si no, la sesión quedaba
+/// abierta hasta que la hora volviera a alcanzar la de antes).
 fn vencida(a: &Activa, minutos: i64, ahora: DateTime<FixedOffset>) -> bool {
-    a.en_curso.load(Ordering::SeqCst) == 0 && (ahora - a.ultimo).num_milliseconds() >= minutos * 60_000
+    let pasado = (ahora - a.ultimo).num_milliseconds();
+    a.en_curso.load(Ordering::SeqCst) == 0 && (pasado >= minutos * 60_000 || pasado < -60_000)
 }
 
 impl Sesion {
@@ -100,8 +117,8 @@ impl Sesion {
         *self.0.lock().await = None;
     }
 
-    /// El usuario de la sesión para un comando. Si venció el tiempo, la bloquea.
-    pub async fn actor(&self, seg: &Arc<Vigente>) -> Res<(Actor, Guardia)> {
+    /// El usuario de la sesión para el comando `cmd`. Si venció el tiempo, la bloquea.
+    pub async fn actor(&self, seg: &Arc<Vigente>, cmd: &str) -> Res<(Actor, Guardia)> {
         let mut g = self.0.lock().await;
         let a = g.as_mut().ok_or(EXPIRADA)?;
         if !a.bloqueada && vencida(a, seg.datos.inactividad.minutos(a.rol), crate::util::ahora()) {
@@ -111,9 +128,12 @@ impl Sesion {
             return Err(BLOQUEADA.into());
         }
         a.en_curso.fetch_add(1, Ordering::SeqCst);
-        // Las autorizaciones pendientes van con este comando y se gastan aunque no las use.
+        // Las autorizaciones que pidió ESTE comando van con él y se gastan aunque no las use; las de
+        // otro comando esperan al suyo (vencen a los 2 minutos).
         let ahora = crate::util::ahora();
-        let autorizaciones = std::mem::take(&mut a.autorizaciones).into_iter().filter(|x| x.vence > ahora).collect();
+        a.autorizaciones.retain(|x| x.vence > ahora);
+        let (autorizaciones, resto) = std::mem::take(&mut a.autorizaciones).into_iter().partition(|x| x.comando == cmd);
+        a.autorizaciones = resto;
         Ok((Actor { id: a.id.clone(), rol: a.rol, nombre: a.nombre.clone(), seg: seg.clone(), autorizaciones }, Guardia(a.en_curso.clone())))
     }
 
@@ -162,12 +182,12 @@ impl Sesion {
     }
 
     /// Guarda una autorización de un solo uso (vence a los 2 minutos).
-    pub async fn autorizar(&self, accion: &str, autorizo: Option<String>, motivo: Option<String>) -> Res<()> {
+    pub async fn autorizar(&self, accion: &str, comando: &str, autorizo: Option<String>, motivo: Option<String>) -> Res<()> {
         let mut g = self.0.lock().await;
         let a = g.as_mut().ok_or(EXPIRADA)?;
         let vence = crate::util::ahora() + chrono::Duration::minutes(2);
-        a.autorizaciones.retain(|x| x.accion != accion);
-        a.autorizaciones.push(Autorizacion { accion: accion.into(), autorizo, motivo, vence });
+        a.autorizaciones.retain(|x| !(x.accion == accion && x.comando == comando));
+        a.autorizaciones.push(Autorizacion { accion: accion.into(), comando: comando.into(), autorizo, motivo, vence });
         Ok(())
     }
 
@@ -206,30 +226,30 @@ mod tests {
         s.iniciar(Actor::nuevo("c", Rol::Cajero, "Luis")).await;
         // Un comando no renueva el plazo.
         fijar_reloj("2026-11-24T10:09:00-06:00");
-        drop(s.actor(&v).await.unwrap());
+        drop(s.actor(&v, "x").await.unwrap());
         fijar_reloj("2026-11-24T10:09:59.950-06:00");
-        drop(s.actor(&v).await.unwrap());
+        drop(s.actor(&v, "x").await.unwrap());
         fijar_reloj("2026-11-24T10:10:00.050-06:00");
-        assert_eq!(s.actor(&v).await.unwrap_err(), BLOQUEADA);
+        assert_eq!(s.actor(&v, "x").await.unwrap_err(), BLOQUEADA);
         // Bloqueada: tocar no la revive; nada corre.
         assert_eq!(s.tocar(&v).await.unwrap_err(), BLOQUEADA);
         assert!(s.vigente(&v).await.is_none());
         // Otro usuario no la desbloquea; el mismo sí.
         assert!(!s.desbloquear("otro").await);
         assert!(s.desbloquear("c").await);
-        drop(s.actor(&v).await.unwrap());
+        drop(s.actor(&v, "x").await.unwrap());
         // La actividad real renueva.
         fijar_reloj("2026-11-24T10:19:00-06:00");
         s.tocar(&v).await.unwrap();
         fijar_reloj("2026-11-24T10:28:59-06:00");
-        drop(s.actor(&v).await.unwrap());
+        drop(s.actor(&v, "x").await.unwrap());
         // Dueño con su propio tiempo (3 min).
         s.iniciar(Actor::nuevo("d", Rol::Dueno, "Ana")).await;
         fijar_reloj("2026-11-24T10:31:58-06:00");
         let r = s.estado(&v).await.unwrap().restante_ms;
         assert!((900..=1_100).contains(&r), "{r}");
         fijar_reloj("2026-11-24T10:31:59.050-06:00");
-        assert_eq!(s.actor(&v).await.unwrap_err(), BLOQUEADA);
+        assert_eq!(s.actor(&v, "x").await.unwrap_err(), BLOQUEADA);
         assert!(s.estado(&v).await.unwrap().bloqueada);
     }
 
@@ -238,17 +258,17 @@ mod tests {
         let s = Sesion::default();
         fijar_reloj("2026-11-24T10:00:00-06:00");
         s.iniciar(Actor::nuevo("c", Rol::Cajero, "Luis")).await;
-        let (_, cobro) = s.actor(&seg(1)).await.unwrap();
+        let (_, cobro) = s.actor(&seg(1), "x").await.unwrap();
         // El cobro sigue en curso pasado el minuto: otro comando (la impresión) corre.
         fijar_reloj("2026-11-24T10:05:00-06:00");
-        drop(s.actor(&seg(1)).await.unwrap());
+        drop(s.actor(&seg(1), "x").await.unwrap());
         drop(cobro);
         // Terminó: el siguiente bloquea.
-        assert_eq!(s.actor(&seg(1)).await.unwrap_err(), BLOQUEADA);
+        assert_eq!(s.actor(&seg(1), "x").await.unwrap_err(), BLOQUEADA);
         // El tiempo nuevo aplica en el siguiente comando, sin volver a entrar.
         s.iniciar(Actor::nuevo("c", Rol::Cajero, "Luis")).await;
         fijar_reloj("2026-11-24T10:07:00-06:00");
-        drop(s.actor(&seg(10)).await.unwrap());
-        assert_eq!(s.actor(&seg(1)).await.unwrap_err(), BLOQUEADA);
+        drop(s.actor(&seg(10), "x").await.unwrap());
+        assert_eq!(s.actor(&seg(1), "x").await.unwrap_err(), BLOQUEADA);
     }
 }

@@ -1007,8 +1007,8 @@ export default function Venta() {
           onCerrar={() => setPendiente(null)}
           onPin={async (pin) => {
             if (!activaId) return;
-            // Rust verifica el PIN y emite un permiso de un solo uso para esta venta y este %.
-            const a = await autorizarDescuento(activaId, calcularTotales(pendiente, config.redondeo_total).pctDescuento, pin);
+            // Rust verifica el PIN y emite un permiso de un solo uso para esta venta tal como está.
+            const a = await autorizarDescuento(activaId, { ...pendiente, autorizacion: null }, pin);
             actualizar({ ...pendiente, autorizacion: a });
             setPendiente(null);
           }}

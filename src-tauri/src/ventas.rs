@@ -74,6 +74,8 @@ fn estado_json(estado: &Estado) -> Res<String> {
 pub async fn crear_espera(pool: &SqlitePool, a: &Actor, caja_id: &str, estado: &Estado) -> Res<Espera> {
     a.exigir("venta.vender", "vender")?;
     let datos = estado_json(estado)?;
+    // Una pestaña que nace con líneas de precio libre pasa por la misma política que al agregarlas.
+    cambios_que_piden(a, &Estado::default(), estado)?;
     let id = ulid();
     let ahora = ahora_iso();
     let activas = "SELECT numero FROM ventas_espera WHERE caja_id = ?2 AND eliminado_en IS NULL";
@@ -123,35 +125,51 @@ pub fn lineas_quitadas(antes: &Estado, despues: &Estado) -> Vec<(String, i64, i6
     out
 }
 
+/// Lo que la política pide autorizar entre lo guardado de una venta (`antes`) y lo que llega:
+/// líneas de precio libre nuevas o cambiadas («venta.precio_libre») y líneas quitadas o con menos
+/// cantidad («venta.quitar_linea», con su monto). Devuelve lo quitado con lo que se aplicó.
+fn cambios_que_piden(a: &Actor, antes: &Estado, despues: &Estado) -> Res<Vec<(String, i64, i64, crate::politica::Aplicado)>> {
+    let ya_estaba = |l: &calculo::Linea| antes.lineas.iter().any(|x| x.id == l.id && x.producto_id.is_none() && x.precio_unitario == l.precio_unitario && x.cantidad >= l.cantidad);
+    if despues.lineas.iter().any(|l| l.producto_id.is_none() && !ya_estaba(l)) {
+        crate::politica::aplicar(a, "venta.precio_libre", &Default::default())?;
+    }
+    let mut out = vec![];
+    for (descripcion, cantidad, monto) in lineas_quitadas(antes, despues) {
+        let ap = crate::politica::aplicar(a, "venta.quitar_linea", &crate::politica::Contexto { monto: Some(monto), ..Default::default() })?;
+        out.push((descripcion, cantidad, monto, ap));
+    }
+    Ok(out)
+}
+
+/// Regla general (C2): lo guardado de la venta en espera solo llegó ahí pasando la política
+/// (guardar_espera). Al cobrar, apartar, vender a crédito o guardar la proforma, lo que llega distinto
+/// de lo guardado se revisa otra vez; sin su autorización (de ESTE comando), se rechaza. Lo quitado
+/// queda en la bitácora desde `caja_quitar_linea_bitacora` colones, o siempre que pidió PIN o motivo.
+pub(crate) async fn revisar_cambios(tx: &mut SqliteConnection, a: &Actor, espera_id: &str, est: &Estado) -> Res<()> {
+    let previa = sqlx::query("SELECT numero, datos FROM ventas_espera WHERE id = ? AND eliminado_en IS NULL").bind(espera_id).fetch_optional(&mut *tx).await.map_err(e)?;
+    let numero = previa.as_ref().map(|f| f.get::<i64, _>("numero"));
+    let antes: Estado = previa.and_then(|f| serde_json::from_str(&f.get::<String, _>("datos")).ok()).unwrap_or_default();
+    let quitadas = cambios_que_piden(a, &antes, est)?;
+    let umbral = config::entero_con(&mut *tx, "caja_quitar_linea_bitacora", 5000).await;
+    for (descripcion, cantidad, monto, ap) in quitadas {
+        if (umbral > 0 && monto >= umbral) || ap.autorizo.is_some() || ap.motivo.is_some() {
+            bitacora::registrar(&mut *tx, Some(&a.id), "venta_espera.quitar_linea", "venta_espera", Some(espera_id), &json!({"numero": numero, "descripcion": descripcion, "cantidad": cantidad, "monto": monto, "autorizadoPor": ap.autorizo, "motivo": ap.motivo})).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Se llama en cada cambio de la venta: si se va la luz, queda lo último.
-/// Quitar de una venta abierta algo de `caja_quitar_linea_bitacora` colones o más queda en la
-/// bitácora (el cajero puede hacerlo, pero el dueño lo ve).
 pub async fn guardar_espera(pool: &SqlitePool, a: &Actor, id: &str, estado: &Estado) -> Res<()> {
     a.exigir("venta.vender", "vender")?;
     let datos = estado_json(estado)?;
-    let umbral = config::entero(pool, "caja_quitar_linea_bitacora", 5000).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    let previa = sqlx::query("SELECT numero, datos FROM ventas_espera WHERE id = ? AND eliminado_en IS NULL").bind(id).fetch_optional(&mut *tx).await.map_err(e)?;
-    let Some(previa) = previa else {
+    let hay: Option<i64> = sqlx::query_scalar("SELECT 1 FROM ventas_espera WHERE id = ? AND eliminado_en IS NULL").bind(id).fetch_optional(&mut *tx).await.map_err(e)?;
+    if hay.is_none() {
         return Ok(());
-    };
-    let antes: Estado = serde_json::from_str(&previa.get::<String, _>("datos")).unwrap_or_default();
-    // Políticas «precio libre» (líneas nuevas sin producto) y «quitar líneas» (con su límite de monto).
-    if estado.lineas.iter().any(|l| l.producto_id.is_none() && !antes.lineas.iter().any(|x| x.id == l.id)) {
-        crate::politica::aplicar(a, "venta.precio_libre", &Default::default())?;
     }
-    let quitadas = lineas_quitadas(&antes, estado);
-    let mut aplicadas = vec![];
-    for (_, _, monto) in &quitadas {
-        aplicadas.push(crate::politica::aplicar(a, "venta.quitar_linea", &crate::politica::Contexto { monto: Some(*monto), ..Default::default() })?);
-    }
+    revisar_cambios(&mut tx, a, id, estado).await?;
     sqlx::query("UPDATE ventas_espera SET datos = ?, actualizado_en = ? WHERE id = ?").bind(datos).bind(ahora_iso()).bind(id).execute(&mut *tx).await.map_err(e)?;
-    for ((descripcion, cantidad, monto), ap) in quitadas.into_iter().zip(aplicadas) {
-        // Queda en la bitácora desde el monto configurado, o siempre que hizo falta PIN o motivo.
-        if (umbral > 0 && monto >= umbral) || ap.autorizo.is_some() || ap.motivo.is_some() {
-            bitacora::registrar(&mut tx, Some(&a.id), "venta_espera.quitar_linea", "venta_espera", Some(id), &json!({"numero": previa.get::<i64, _>("numero"), "descripcion": descripcion, "cantidad": cantidad, "monto": monto, "autorizadoPor": ap.autorizo, "motivo": ap.motivo})).await?;
-        }
-    }
     tx.commit().await.map_err(e)?;
     Ok(())
 }
@@ -178,9 +196,28 @@ pub async fn descartar_espera(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()>
 
 struct Permiso {
     dueno_id: String,
-    pct: f64,
     espera_id: String,
+    /// Huella de las líneas, precios, cantidades y descuentos (D5): si cambia algo, no vale.
+    huella: String,
+    /// Colones de descuento del rol (sin el fijo del producto) que se autorizaron.
+    monto: i64,
     vence: Instant,
+}
+
+/// Huella del contenido de la venta que importa para el descuento.
+pub(crate) fn huella(est: &Estado) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    for l in &est.lineas {
+        h.update(format!("{}|{}|{}|{}|{}|{}\n", l.id, l.producto_id.as_deref().unwrap_or(""), l.precio_unitario, l.cantidad, l.descuento, l.descuento_catalogo));
+    }
+    h.update(format!("total|{}", est.descuento_total));
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Colones de descuento que cuentan contra el tope del rol.
+pub(crate) fn descuento_rol(tot: &calculo::Totales, catalogo: &[i64]) -> i64 {
+    tot.descuento_lineas - catalogo.iter().sum::<i64>() + tot.descuento
 }
 
 fn autorizaciones() -> &'static Mutex<HashMap<String, Permiso>> {
@@ -193,30 +230,39 @@ fn autorizaciones() -> &'static Mutex<HashMap<String, Permiso>> {
 pub struct AutorizacionEmitida {
     pub dueno_id: String,
     pub pct: f64,
+    /// Colones de descuento autorizados.
+    pub monto: i64,
     pub token: String,
 }
 
-/// El dueño pone su PIN para un descuento mayor al tope. Vale para ESA venta, hasta ese %,
-/// una sola vez y por 30 minutos. El frontend solo guarda el token, nunca el PIN.
-pub async fn autorizar_descuento(pool: &SqlitePool, a: &Actor, espera_id: &str, pct: f64, pin: &str) -> Res<AutorizacionEmitida> {
+/// El dueño pone su PIN para el descuento de ESTA venta tal como está: vale para esa venta, ese
+/// contenido exacto (huella) y ese monto en colones, una sola vez y por 30 minutos. Si cambia una
+/// línea, no vale y se pide otra vez (D5). El frontend solo guarda el token, nunca el PIN.
+pub async fn autorizar_descuento(pool: &SqlitePool, a: &Actor, espera_id: &str, est: &Estado, pin: &str) -> Res<AutorizacionEmitida> {
     a.exigir("venta.vender", "vender")?;
-    if !(0.0..=100.0).contains(&pct) {
-        return Err("Porcentaje inválido".into());
+    for l in &est.lineas {
+        calculo::validar_linea(l)?;
     }
+    let (pct, monto) = {
+        let mut c = pool.acquire().await.map_err(e)?;
+        let (lineas, catalogo) = lineas_de_catalogo(&mut c, &est.lineas).await?;
+        let tot = calculo::totales(&Estado { lineas, ..est.clone() }, 1);
+        (tot_pct(&tot, &catalogo), descuento_rol(&tot, &catalogo))
+    };
     let dueno = usuarios::autorizar_dueno(pool, pin, "descuento", &a.id).await?;
     let token = ulid();
     let mut m = autorizaciones().lock().map_err(e)?;
     m.retain(|_, p| p.vence > Instant::now());
-    m.insert(token.clone(), Permiso { dueno_id: dueno.clone(), pct, espera_id: espera_id.into(), vence: Instant::now() + Duration::from_secs(1800) });
-    Ok(AutorizacionEmitida { dueno_id: dueno, pct, token })
+    m.insert(token.clone(), Permiso { dueno_id: dueno.clone(), espera_id: espera_id.into(), huella: huella(est), monto, vence: Instant::now() + Duration::from_secs(1800) });
+    Ok(AutorizacionEmitida { dueno_id: dueno, pct: (pct * 10.0).round() / 10.0, monto, token })
 }
 
 /// Revisa la autorización sin gastarla: si el cobro falla después (un pago mal escrito, etc.)
 /// el dueño no tiene que volver a poner el PIN.
-fn ver_autorizacion(token: &str, espera_id: &str, pct: f64) -> Option<String> {
+fn ver_autorizacion(token: &str, espera_id: &str, huella: &str, monto: i64) -> Option<String> {
     let m = autorizaciones().lock().ok()?;
     let p = m.get(token)?;
-    (p.espera_id == espera_id && p.vence > Instant::now() && pct <= p.pct + 1e-9).then(|| p.dueno_id.clone())
+    (p.espera_id == espera_id && p.huella == huella && monto <= p.monto && p.vence > Instant::now()).then(|| p.dueno_id.clone())
 }
 
 /// Se gasta recién cuando la venta quedó guardada (un solo uso).
@@ -410,7 +456,6 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     }
     revisar_precio_libre(a, est)?;
     let paso = config::entero(pool, "redondeo_total", 5).await;
-    let tope = tope_descuento(a);
     let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
     // El PIN se revisa antes de la transacción (la verificación escribe intentos fallidos).
     let sin_existencia_por = match pin_existencia.filter(|p| !p.is_empty()) {
@@ -420,35 +465,45 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
     caja::reloj_atrasado(&mut tx, "cobrar").await?;
+    revisar_cambios(&mut tx, a, espera_id, est).await?;
     // Venta ligada a una proforma: se convierte en esta misma transacción (proformas.rs).
     let conv = crate::proformas::preparar_conversion(&mut tx, est).await?;
+    if conv.is_some() {
+        a.exigir("proformas.convertir", "pasar proformas a venta")?;
+    }
     let (lineas, catalogo) = lineas_de_catalogo_con(&mut tx, &est.lineas, conv.as_ref().map(|c| &c.permitidos).unwrap_or(&Default::default())).await?;
     let e2 = Estado { lineas, ..est.clone() };
     // Inventario: precio libre (sin producto) y servicios (sin control) no mueven existencia.
     let sucursal = inventario::sucursal_de(&mut tx, caja_id).await?;
     let controladas = inventario::controladas(&mut tx, &e2.lineas.iter().map(|l| (l.producto_id.clone(), l.cantidad)).collect::<Vec<_>>()).await?;
     let mut sin_existencia = vec![];
-    let pol_sin = a.politica("venta.sin_existencia").nivel;
-    if pol_sin != Nivel::Si {
+    let mut sin_motivo = None;
+    // «Vender sin existencia» y «vender unidades apartadas» con todos sus niveles: el PIN del dueño llega
+    // en `pin_existencia` (la pantalla lo pide con SIN_EXISTENCIA) o como autorización del comando.
+    let revisar = |accion: &str, que: &str, lista: &[String]| -> Res<crate::politica::Aplicado> {
+        let apartado = accion == "venta.apartadas";
+        crate::politica::aplicar(a, accion, &crate::politica::Contexto { pin_de: sin_existencia_por.clone(), ..Default::default() }).map_err(|m| {
+            if m.starts_with(crate::politica::NECESITA_PIN) {
+                format!("{}{que}: {}. Para {} igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, lista.join(", "), if apartado { "venderlo" } else { "vender" })
+            } else if m.contains("No tiene permiso") {
+                format!("{que}: {}. No tiene permiso para {}.", lista.join(", "), if apartado { "venderlo" } else { "vender sin existencia" })
+            } else {
+                m
+            }
+        })
+    };
+    if a.politica("venta.sin_existencia").nivel != Nivel::Si {
         let ve_cantidad = a.puede("venta.ver_existencia");
         sin_existencia = inventario::faltantes(&mut tx, &sucursal, &controladas, ve_cantidad).await?;
-        if !sin_existencia.is_empty() && pol_sin == Nivel::No {
-            return Err(format!("No hay existencia de: {}. No tiene permiso para vender sin existencia.", sin_existencia.join(", ")));
-        }
-        if !sin_existencia.is_empty() && sin_existencia_por.is_none() {
-            return Err(format!("{}No hay existencia de: {}. Para vender igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, sin_existencia.join(", ")));
+        if !sin_existencia.is_empty() {
+            sin_motivo = revisar("venta.sin_existencia", "No hay existencia de", &sin_existencia)?.motivo;
         }
     }
-    // Lo apartado ya está prometido: venderlo pide el PIN del dueño aunque se permita vender sin existencia.
+    // Lo apartado ya está prometido: venderlo pide su propia autorización aunque se permita vender sin existencia.
     let apartadas = crate::cuentas::choques_con_apartados(&mut tx, &sucursal, &controladas).await?;
-    let pol_apartadas = a.politica("venta.apartadas").nivel;
-    if !apartadas.is_empty() && pol_apartadas == Nivel::No {
-        return Err(format!("Está apartado: {}. No tiene permiso para venderlo.", apartadas.join(", ")));
-    }
-    if !apartadas.is_empty() && pol_apartadas != Nivel::Si {
-        if sin_existencia_por.is_none() {
-            return Err(format!("{}Está apartado: {}. Para venderlo igual, pida el PIN del dueño.", inventario::SIN_EXISTENCIA, apartadas.join(", ")));
-        }
+    if !apartadas.is_empty() && a.politica("venta.apartadas").nivel != Nivel::Si {
+        let ap = revisar("venta.apartadas", "Está apartado", &apartadas)?;
+        sin_motivo = sin_motivo.or(ap.motivo);
         sin_existencia.extend(apartadas);
     }
     // El redondeo es del efectivo (no hay monedas de ¢1): tarjeta, SINPE y transferencia cobran el
@@ -459,7 +514,7 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
     // El descuento autorizado en la proforma vale si se cobra a su precio y con sus mismos descuentos.
     let autorizado_por = match conv.as_ref().and_then(|c| c.autorizado_por.clone()) {
         Some(d) => Some(d),
-        None => revisar_tope(&tot, &catalogo, tope, est, espera_id)?,
+        None => revisar_tope(a, &tot, &catalogo, est, espera_id)?,
     };
     if (est.requiere_factura || credito) && est.cliente.is_none() {
         return Err(if credito { "Para vender a crédito, elija el cliente".into() } else { "Para factura electrónica, elija o cree el cliente".into() });
@@ -535,7 +590,7 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         None
     };
     if !sin_existencia.is_empty() {
-        bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por})).await?;
+        bitacora::registrar(&mut tx, Some(&a.id), "venta.sin_existencia", "venta", Some(&venta_id), &json!({"productos": sin_existencia, "autorizadoPor": sin_existencia_por, "motivo": sin_motivo})).await?;
     }
     if !repetidas.is_empty() {
         bitacora::registrar(&mut tx, Some(&a.id), "venta.referencia_repetida", "venta", Some(&venta_id), &json!({"pagos": repetidas})).await?;
@@ -559,17 +614,25 @@ pub(crate) fn tot_pct(tot: &calculo::Totales, catalogo: &[i64]) -> f64 {
     if tot.bruto > 0 { ((tot.descuento_lineas - catalogo.iter().sum::<i64>() + tot.descuento) as f64 / tot.bruto as f64) * 100.0 } else { 0.0 }
 }
 
-/// Pasa del tope del rol: necesita el token de un solo uso que dio el PIN del dueño. Devuelve quién autorizó.
-pub(crate) fn revisar_tope(tot: &calculo::Totales, catalogo: &[i64], tope: Tope, est: &Estado, espera_id: &str) -> Res<Option<String>> {
+/// Política «venta.descuento» con el % y los colones de ESTA venta. El PIN del dueño llega como el
+/// token de autorizar_descuento (atado a la venta, su contenido y su monto); el motivo, como la
+/// autorización de un solo uso del comando. Devuelve quién autorizó.
+pub(crate) fn revisar_tope(a: &Actor, tot: &calculo::Totales, catalogo: &[i64], est: &Estado, espera_id: &str) -> Res<Option<String>> {
     let pct = tot_pct(tot, catalogo);
-    if pct <= tope.pct + 1e-9 {
+    if pct <= 1e-9 {
         return Ok(None);
     }
-    if tope.bloquear {
-        return Err(if tope.pct > 0.0 { format!("El descuento pasa su tope ({} %): no se puede dar", tope.pct) } else { sin_permiso("dar descuentos") });
+    let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref());
+    let pin_de = token.and_then(|t| ver_autorizacion(t, espera_id, &huella(est), descuento_rol(tot, catalogo)));
+    let tope = tope_descuento(a);
+    match crate::politica::aplicar(a, "venta.descuento", &crate::politica::Contexto { pct: Some(pct), pin_de, ..Default::default() }) {
+        Ok(ap) => Ok(ap.autorizo),
+        Err(m) if m.starts_with(crate::politica::NECESITA_PIN) && token.is_some() => Err("La autorización del descuento venció o ya no corresponde a esta venta (cambió algo): pida el PIN del dueño otra vez".into()),
+        Err(m) if m.starts_with(crate::politica::NECESITA_PIN) => Err("El descuento pasa su tope: necesita el PIN del dueño".into()),
+        Err(m) if m.starts_with("No se puede") => Err(format!("El descuento pasa su tope ({} %): no se puede dar", tope.pct)),
+        Err(m) if m.contains("No tiene permiso") => Err(sin_permiso("dar descuentos")),
+        Err(m) => Err(m),
     }
-    let token = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()).ok_or("El descuento pasa su tope: necesita el PIN del dueño")?;
-    Ok(Some(ver_autorizacion(token, espera_id, pct).ok_or("La autorización del descuento venció o no corresponde a esta venta: pida el PIN del dueño otra vez")?))
 }
 
 /// El token de descuento ya se usó (venta o apartado): no sirve otra vez.
@@ -979,21 +1042,21 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
     if motivo.chars().count() < 5 {
         return Err("Escriba el motivo de la corrección".into());
     }
-    let cerrado = {
+    let (cerrado, monto) = {
         let mut c = pool.acquire().await.map_err(e)?;
-        let tid: Option<String> = sqlx::query_scalar("SELECT v.turno_id FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id WHERE p.id = ? AND p.eliminado_en IS NULL")
+        let (tid, monto): (Option<String>, i64) = sqlx::query_as("SELECT v.turno_id, p.monto FROM venta_pagos p JOIN ventas v ON v.id = p.venta_id WHERE p.id = ? AND p.eliminado_en IS NULL")
             .bind(pago_id)
             .fetch_optional(&mut *c)
             .await
             .map_err(e)?
             .ok_or("Ese pago ya no existe. Vuelva a abrir la venta.")?;
-        turno_de_venta(&mut c, tid).await?.is_none()
+        (turno_de_venta(&mut c, tid).await?.is_none(), monto)
     };
     let pin_de = match pin_dueno.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => Some(usuarios::autorizar_dueno(pool, p, "corregir forma de pago", &a.id).await?),
         None => None,
     };
-    let ctx = crate::politica::Contexto { turno_abierto: Some(!cerrado), motivo: Some(motivo.clone()), pin_de, ..Default::default() };
+    let ctx = crate::politica::Contexto { monto: Some(monto), turno_abierto: Some(!cerrado), motivo: Some(motivo.clone()), pin_de, ..Default::default() };
     let ap = crate::politica::aplicar(a, "ventas.cambiar_pago", &ctx)?;
     let autorizado = Some(ap.autorizo.unwrap_or_else(|| a.id.clone()));
 
@@ -1548,7 +1611,7 @@ mod tests {
         assert!(cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 1000)]).await.unwrap_err().contains("PIN"));
         desc.autorizacion = Some(Autorizacion { dueno_id: dueno.id.clone(), pct: 50.0, token: Some("inventado".into()) });
         assert!(cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 1000)]).await.unwrap_err().contains("autorización"));
-        let aut = autorizar_descuento(p, &cajero, &esp.id, 50.0, "246813").await.unwrap();
+        let aut = autorizar_descuento(p, &cajero, &esp.id, &desc, "246813").await.unwrap();
         desc.autorizacion = Some(Autorizacion { dueno_id: aut.dueno_id, pct: 50.0, token: Some(aut.token) });
         // Un cobro que falla (falta dinero) no gasta la autorización.
         assert!(cobrar(p, &cajero, CAJA_1, &esp.id, &desc, &[pago(EF, 10)]).await.unwrap_err().contains("faltan"));
@@ -1958,7 +2021,8 @@ mod tests {
 
         // Supervisor del Z: abierto, los dueños activos; al cerrar un dueño, ese dueño.
         let tec = Actor::nuevo(crate::usuarios::tecnico_id(p).await.unwrap().unwrap(), Rol::Tecnico, "T");
-        crate::usuarios::crear(p, &tec, "Bea", Rol::Dueno, "864209").await.unwrap();
+        let _ = tec;
+        crate::usuarios::crear(p, &dueno, "Bea", Rol::Dueno, "864209").await.unwrap();
         assert_eq!(detalle(p, &dueno, &t.id).await.unwrap().resumen.supervisor, "Ana / Bea");
         let esperado = detalle(p, &dueno, &t.id).await.unwrap().resumen.efectivo_esperado;
         cerrar(p, &dueno, CAJA_1, &crate::caja::Conteo { total: Some(esperado), ..Default::default() }, "").await.unwrap();

@@ -58,7 +58,8 @@ export async function invocar<T = unknown>(cmd: string, args: Record<string, unk
     if (pedido && autorizador && !reintento && cmd !== "seguridad_autorizar") {
       const r = await autorizador(pedido);
       if (!r) throw new Error("No se hizo: hacía falta " + (pedido.tipo === "pin" ? "el PIN del dueño." : "un motivo."));
-      await invocar("seguridad_autorizar", { accion: pedido.accion, pin: r.pin ?? null, motivo: r.motivo ?? null }, true);
+      // La autorización es de ESTE comando (Rust no deja que la gaste otro).
+      await invocar("seguridad_autorizar", { accion: pedido.accion, comando: cmd, pin: r.pin ?? null, motivo: r.motivo ?? null }, true);
       return await invocar<T>(cmd, args, true);
     }
     if (pedido) throw new Error(pedido.tipo === "pin" ? `Hace falta el PIN del dueño${pedido.por ? `: ${pedido.por}` : ""}.` : "Escriba el motivo.");

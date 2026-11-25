@@ -674,15 +674,21 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
     if !motivo_permitido(&motivos, &m.tipo, &categoria) {
         return Err("Elija un motivo de la lista".into());
     }
-    // Salida grande: PIN del dueño en el momento (también si el que la hace es el dueño: el tope es
-    // del negocio, política «caja.salida»). Con «bloquear» al pasar, no se hace ni con PIN.
-    let tope = salida_max_sin_pin(a);
-    if m.tipo == "salida" && m.monto > tope && a.politica("caja.salida").limites.al_pasar == crate::acciones::AlPasar::Bloquear {
-        return Err(format!("Esta salida pasa el tope de ¢{tope}: no se puede hacer"));
-    }
-    let autorizado = if m.tipo == "salida" && m.monto > tope {
-        let p = pin_dueno.filter(|p| !p.is_empty()).ok_or("Esta salida pasa el tope: necesita el PIN del dueño")?;
-        Some(usuarios::autorizar_dueno(pool, p, "salida de caja", &a.id).await?)
+    // Salidas: política «caja.salida» con todos sus niveles (PIN del dueño en el momento o como
+    // autorización; el detalle escrito cuenta como motivo). También el dueño sigue el tope (es del
+    // negocio), con su PIN siempre puede (A6). Las entradas no piden nada más.
+    let autorizado = if m.tipo == "salida" {
+        let pin_de = match pin_dueno.filter(|p| !p.is_empty()) {
+            Some(p) => Some(usuarios::autorizar_dueno(pool, p, "salida de caja", &a.id).await?),
+            None => None,
+        };
+        let ctx = crate::politica::Contexto { monto: Some(m.monto), motivo: (!nota.is_empty()).then(|| nota.clone()), pin_de, ..Default::default() };
+        match crate::politica::aplicar(a, "caja.salida", &ctx) {
+            Ok(ap) => ap.autorizo,
+            Err(x) if x.starts_with(crate::politica::NECESITA_PIN) && a.politica("caja.salida").nivel == crate::acciones::Nivel::Si => return Err("Esta salida pasa el tope: necesita el PIN del dueño".into()),
+            Err(x) if x.starts_with("No se puede") => return Err(format!("Esta salida pasa el tope de ¢{}: no se puede hacer", salida_max_sin_pin(a))),
+            Err(x) => return Err(x),
+        }
     } else {
         None
     };

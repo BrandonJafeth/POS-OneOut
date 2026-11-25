@@ -236,7 +236,7 @@ async fn precio_libre_y_quitar_lineas_segun_la_politica() {
     assert!(crate::ventas::guardar_espera(p, &con_pin, &esp.id, &con_libre).await.unwrap_err().starts_with(NECESITA_PIN));
     let dueno_id: String = sqlx::query_scalar("SELECT id FROM usuarios WHERE rol = 'dueno'").fetch_one(p).await.unwrap();
     let autorizado = Actor {
-        autorizaciones: vec![crate::sesion::Autorizacion { accion: "venta.precio_libre".into(), autorizo: Some(dueno_id), motivo: None, vence: crate::util::ahora() + chrono::Duration::minutes(1) }],
+        autorizaciones: vec![crate::sesion::Autorizacion { accion: "venta.precio_libre".into(), comando: String::new(), autorizo: Some(dueno_id), motivo: None, vence: crate::util::ahora() + chrono::Duration::minutes(1) }],
         ..con_pin.clone()
     };
     crate::ventas::guardar_espera(p, &autorizado, &esp.id, &con_libre).await.unwrap();

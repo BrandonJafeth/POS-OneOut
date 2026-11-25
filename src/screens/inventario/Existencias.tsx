@@ -251,7 +251,7 @@ function KardexDialogo(p: { fila: FilaInventario; onCerrar(): void }) {
   useEffect(() => {
     if (!desde || !hasta) return;
     kardex(p.fila.productoId, ...rangoDias(desde, hasta)).then(setFilas, (e) => setError(textoError(e)));
-  }, [desde, hasta]);
+  }, [desde, hasta, p.fila.productoId]);
   return (
     <Modal titulo={`Kardex: ${p.fila.nombre}`} onCerrar={p.onCerrar} ancho={900}>
       <div className="row">

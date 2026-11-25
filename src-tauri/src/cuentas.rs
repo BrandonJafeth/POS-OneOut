@@ -451,7 +451,6 @@ pub async fn crear_apartado_con(
     }
     let paso = config::entero(pool, "redondeo_total", 5).await;
     ventas::revisar_precio_libre(a, est)?;
-    let tope = ventas::tope_descuento(a);
     let gaveta = config::booleano(pool, "abrir_gaveta_efectivo", true).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let rg = reglas_con(&mut tx).await;
@@ -462,8 +461,12 @@ pub async fn crear_apartado_con(
     cliente_con_consentimiento(&mut tx, &cliente.id).await?;
     let t = caja::turno_para_vender(&mut tx, caja_id, a).await?;
     caja::reloj_atrasado(&mut tx, "apartar").await?;
+    ventas::revisar_cambios(&mut tx, a, espera_id, est).await?;
     // Apartar una venta ligada a una proforma también la convierte (en esta transacción).
     let conv = crate::proformas::preparar_conversion(&mut tx, est).await?;
+    if conv.is_some() {
+        a.exigir("proformas.convertir", "pasar proformas a venta")?;
+    }
     let (lineas, catalogo) = ventas::lineas_de_catalogo_con(&mut tx, &est.lineas, conv.as_ref().map(|c| &c.permitidos).unwrap_or(&Default::default())).await?;
     let e2 = Estado { lineas, ..est.clone() };
     // Sin existencia libre (descontando lo ya apartado) solo se aparta si el negocio vende sin existencia.
@@ -484,7 +487,7 @@ pub async fn crear_apartado_con(
     let tot = calculo::totales(&e2, paso);
     let autorizado_por = match conv.as_ref().and_then(|c| c.autorizado_por.clone()) {
         Some(d) => Some(d),
-        None => ventas::revisar_tope(&tot, &catalogo, tope, est, espera_id)?,
+        None => ventas::revisar_tope(a, &tot, &catalogo, est, espera_id)?,
     };
     if tot.total <= 0 {
         return Err("Un apartado de ¢0 no tiene sentido: regístrelo como venta".into());
@@ -926,10 +929,27 @@ fn motivo_valido(m: &str) -> Res<String> {
 /// Cancela un apartado abierto. `devuelto`: lo que se le devuelve al cliente (el resto queda
 /// retenido); `en_efectivo`: la parte de lo devuelto que sale de la gaveta del turno abierto.
 #[allow(clippy::too_many_arguments)]
+/// Cancelar, condonar y anular un abono: política con su monto (Etapa 2). El dueño, con su PIN; el
+/// cajero, sin PIN solo hasta el monto máximo que le pongan (sin monto, solo con PIN: Accion::admite).
+/// Devuelve quién autorizó (el dueño que puso el PIN o el mismo usuario).
+fn autorizar_monto(a: &Actor, accion: &str, pin_de: Option<String>, motivo: &str, monto: i64) -> Res<String> {
+    let ap = crate::politica::aplicar(a, accion, &crate::politica::Contexto { monto: Some(monto), motivo: Some(motivo.to_string()), pin_de, ..Default::default() })?;
+    Ok(ap.autorizo.unwrap_or_else(|| a.id.clone()))
+}
+
+/// El PIN del dueño, si vino (se revisa antes que nada, como antes de la Etapa 2).
+async fn pin_si_vino(pool: &SqlitePool, a: &Actor, pin: &str, contexto: &str) -> Res<Option<String>> {
+    match pin.trim() {
+        "" => Ok(None),
+        p => Ok(Some(usuarios::autorizar_dueno(pool, p, contexto, &a.id).await?)),
+    }
+}
+
 pub async fn cancelar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, pin: &str, motivo: &str, devuelto: i64, en_efectivo: i64) -> Res<()> {
     a.exigir("cuentas.cancelar", "cancelar apartados")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.cancelar", pin, "cancelar apartado").await?;
+    let pin_de = pin_si_vino(pool, a, pin, "cancelar apartado").await?;
+    let dueno = autorizar_monto(a, "cuentas.cancelar", pin_de, &motivo, devuelto)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let k = sqlx::query("SELECT numero, tipo, estado, total, saldo, condonado FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Apartado no encontrado")?;
     if k.get::<String, _>("tipo") != APARTADO || k.get::<String, _>("estado") != "abierta" {
@@ -974,7 +994,9 @@ pub async fn cancelar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &s
 pub async fn anular_abono(pool: &SqlitePool, a: &Actor, caja_id: &str, abono_id: &str, pin: &str, motivo: &str, devolucion_efectivo: i64) -> Res<()> {
     a.exigir("cuentas.anular_abono", "anular abonos")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.anular_abono", pin, "anular abono").await?;
+    let pin_de = pin_si_vino(pool, a, pin, "anular abono").await?;
+    let monto: i64 = sqlx::query_scalar("SELECT monto FROM abonos WHERE id = ?").bind(abono_id).fetch_optional(pool).await.map_err(e)?.ok_or("Abono no encontrado")?;
+    let dueno = autorizar_monto(a, "cuentas.anular_abono", pin_de, &motivo, monto)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let f = sqlx::query("SELECT a.cuenta_id, a.monto, a.turno_id, a.anulado_en, k.estado, t.estado AS testado FROM abonos a JOIN cuentas k ON k.id = a.cuenta_id LEFT JOIN caja_turnos t ON t.id = a.turno_id WHERE a.id = ?")
         .bind(abono_id)
@@ -1042,10 +1064,15 @@ pub const CONDONAR_SIN_CAJA: &str = "Para condonar, abra la caja primero (se reg
 pub async fn condonar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, pin: &str, motivo: &str, entregar: bool) -> Res<Option<String>> {
     a.exigir("cuentas.condonar", "condonar saldos")?;
     let motivo = motivo_valido(motivo)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, "cuentas.condonar", pin, "condonar saldo").await?;
+    let pin_de = pin_si_vino(pool, a, pin, "condonar saldo").await?;
+    let antes: i64 = sqlx::query_scalar("SELECT saldo FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(pool).await.map_err(e)?.ok_or("Cuenta no encontrada")?;
+    let dueno = autorizar_monto(a, "cuentas.condonar", pin_de, &motivo, antes)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let k = sqlx::query("SELECT tipo, estado, saldo FROM cuentas WHERE id = ?").bind(cuenta_id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Cuenta no encontrada")?;
     let saldo: i64 = k.get("saldo");
+    if saldo != antes {
+        return Err("El saldo cambió mientras tanto (entró un abono). Vuelva a intentarlo.".into());
+    }
     if k.get::<String, _>("estado") != "abierta" || saldo == 0 {
         return Err("No hay saldo pendiente que condonar".into());
     }
@@ -1155,26 +1182,47 @@ fn a_fila(f: &sqlx::sqlite::SqliteRow, hoy: NaiveDate) -> CuentaFila {
     }
 }
 
-/// Búsqueda del cajero (F10): abiertas y pagadas sin entregar, por número, nombre, teléfono o cédula.
+/// Búsqueda del cajero (F10): abiertas y pagadas sin entregar, por número del apartado, teléfono
+/// (8 dígitos) o al menos 3 letras del nombre o de la descripción (D3). Sin cédula ni lista vacía: el
+/// cajero no recorre los clientes. Quien no ve todas las cuentas recibe el teléfono tapado.
 pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str) -> Res<Vec<CuentaFila>> {
     a.exigir("cuentas.crear", "buscar apartados")?;
     let q = q.trim();
     let hoy = ahora().date_naive();
-    let num: Option<i64> = q.trim_start_matches(['A', 'a', 'C', 'c']).trim_start_matches('-').parse().ok();
-    let like = format!("%{}%", normalizar(q));
+    let digitos: String = q.chars().filter(char::is_ascii_digit).collect();
+    let solo_numero = q.trim_start_matches(['A', 'a', 'C', 'c']).trim_start_matches('-');
+    let num: Option<i64> = solo_numero.parse().ok().filter(|_| solo_numero.len() <= 7);
+    let telefono = (digitos.len() >= 8 && q.chars().all(|c| c.is_ascii_digit() || " -+()".contains(c))).then(|| digitos[digitos.len() - 8..].to_string());
+    let letras = q.chars().filter(|c| c.is_alphabetic()).count();
+    if num.is_none() && telefono.is_none() && letras < 3 {
+        return Err("Escriba el número del apartado, el teléfono o al menos 3 letras del nombre.".into());
+    }
+    // «!» escapa los comodines: un «%» o «_» escrito se busca tal cual (no lista todo).
+    let like = if letras >= 3 { format!("%{}%", normalizar(q).replace('!', "!!").replace('%', "!%").replace('_', "!_")) } else { String::new() };
     let filas = sqlx::query(&format!(
         "{SELECT_FILA} WHERE k.eliminado_en IS NULL AND k.estado IN ('abierta', 'pagada') AND (k.tipo = 'credito' OR k.estado = 'abierta' OR k.fecha_entrega IS NULL)
-           AND (?1 = '' OR k.consecutivo = ?2 OR c.nombre_busqueda LIKE ?3 OR c.telefono LIKE ?4 OR c.cedula LIKE ?4 OR k.descripcion LIKE ?4)
+           AND (k.consecutivo = ?1
+             OR (?2 <> '' AND substr(replace(replace(replace(replace(c.telefono, '-', ''), ' ', ''), '+', ''), '(', ''), -8) = ?2)
+             OR (?3 <> '' AND (c.nombre_busqueda LIKE ?3 ESCAPE '!' OR k.descripcion LIKE ?3 ESCAPE '!')))
          ORDER BY k.fecha DESC LIMIT 50"
     ))
-    .bind(q)
     .bind(num.unwrap_or(-1))
+    .bind(telefono.unwrap_or_default())
     .bind(&like)
-    .bind(format!("%{q}%"))
     .fetch_all(pool)
     .await
     .map_err(e)?;
-    Ok(filas.iter().map(|f| a_fila(f, hoy)).collect())
+    let completo = a.puede("cuentas.ver_todas");
+    Ok(filas
+        .iter()
+        .map(|f| {
+            let mut x = a_fila(f, hoy);
+            if !completo {
+                x.telefono = x.telefono.map(|t| format!("••••{}", t.chars().rev().filter(char::is_ascii_digit).take(4).collect::<Vec<_>>().into_iter().rev().collect::<String>()));
+            }
+            x
+        })
+        .collect())
 }
 
 /// Lista del dueño: "abiertas", "vencidas", "pagadas" (sin entregar), "cerradas" o "credito".

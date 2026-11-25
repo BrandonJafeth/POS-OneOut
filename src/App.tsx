@@ -157,6 +157,11 @@ export default function App() {
   );
   // Una acción pide PIN del dueño o motivo (política): diálogo y lib/invocar reintenta.
   useEffect(() => alPedirAutorizacion((p) => new Promise((listo) => setPedido({ p, listo: (r) => (setPedido(null), listo(r)) }))), []);
+  // Se bloqueó con ese diálogo abierto (M10): se cancela (no queda encima del velo ni lo completa
+  // otro usuario); al volver, la acción se repite.
+  useEffect(() => {
+    if (bloqueo && pedido) pedido.listo(null);
+  }, [bloqueo, pedido]);
   // Cambiaron los permisos (otra persona guardó): se vuelven a pedir sin cerrar sesión.
   useEffect(() => {
     if (!isTauri()) return;

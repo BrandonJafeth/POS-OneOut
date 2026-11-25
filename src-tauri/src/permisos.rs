@@ -28,11 +28,13 @@ impl Rol {
     }
 }
 
-/// Roles que `rol` puede crear o administrar (además de cambiar su propio PIN).
+/// Roles que `rol` puede crear o administrar (además de cambiar su propio PIN). Dueños: el técnico
+/// solo en la instalación y el PIN de un dueño solo con su código de recuperación (usuarios.rs, D1);
+/// después, otro dueño lo crea un dueño.
 pub fn administrables(rol: Rol) -> &'static [Rol] {
     match rol {
         Rol::Tecnico => &[Rol::Dueno, Rol::Cajero],
-        Rol::Dueno => &[Rol::Cajero],
+        Rol::Dueno => &[Rol::Dueno, Rol::Cajero],
         Rol::Cajero => &[],
     }
 }

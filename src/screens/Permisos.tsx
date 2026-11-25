@@ -20,6 +20,10 @@ import {
   seguridadPlantilla,
   seguridadVersion,
   seguridadVolver,
+  N_CON_PIN,
+  N_MOTIVO,
+  N_PIN,
+  N_SI,
   type AccionInfo,
   type Datos,
   type Inactividad,
@@ -142,6 +146,11 @@ function Celda(p: { a: AccionInfo; quien: string; valor: Politica | undefined; f
   if (p.fijo) return <span className="muted">{p.fijo}</span>;
   const v = p.valor;
   const id = `n-${p.quien}-${p.a.id}`;
+  // Solo los niveles que esta acción aplica de verdad (D4). Si siempre pide el PIN, «sí» = «con PIN».
+  const conPin = p.a.niveles === N_CON_PIN;
+  const bit = { no: 0, pin: N_PIN, motivo: N_MOTIVO, si: N_SI } as const;
+  const opciones = NIVELES.filter((x) => x.valor === "no" || (conPin ? x.valor === "pin" : (p.a.niveles & bit[x.valor]) > 0)).map((x) => (conPin && x.valor === "pin" ? { ...x, texto: "Sí, siempre con PIN del dueño" } : x));
+  const valor = conPin && v?.nivel === "si" ? "pin" : (v?.nivel ?? "no");
   const lim = (cambio: Partial<Politica["limites"]>) => v && p.onCambio({ ...v, limites: { ...v.limites, ...cambio } });
   const num = (x: string) => (x.trim() === "" ? null : Math.max(0, Math.round(Number(x.replace(/\D/g, "")))));
   return (
@@ -149,7 +158,7 @@ function Celda(p: { a: AccionInfo; quien: string; valor: Politica | undefined; f
       <select
         id={id}
         aria-label={`${p.a.nombre}: ${p.quien}`}
-        value={p.heredado ? "" : (v?.nivel ?? "no")}
+        value={p.heredado ? "" : valor}
         onChange={async (e) => {
           const n = e.target.value as Politica["nivel"] | "";
           if (n === "") return p.onCambio(undefined);
@@ -166,7 +175,7 @@ function Celda(p: { a: AccionInfo; quien: string; valor: Politica | undefined; f
         }}
       >
         {p.heredado !== undefined && <option value="">Como su rol</option>}
-        {NIVELES.map((x) => (
+        {opciones.map((x) => (
           <option key={x.valor} value={x.valor}>
             {x.texto}
           </option>
@@ -176,7 +185,7 @@ function Celda(p: { a: AccionInfo; quien: string; valor: Politica | undefined; f
         <div className="limites">
           {(p.a.limites & L_MONTO) > 0 && (
             <label>
-              Hasta ¢ <input inputMode="numeric" value={v.limites.montoMax ?? ""} onChange={(e) => lim({ montoMax: num(e.target.value) })} placeholder="sin tope" />
+              Hasta ¢ <input inputMode="numeric" value={v.limites.montoMax ?? ""} onChange={(e) => lim({ montoMax: num(e.target.value) })} placeholder={p.a.montoOPin ? "obligatorio" : "sin tope"} required={p.a.montoOPin} />
             </label>
           )}
           {(p.a.limites & L_PCT) > 0 && (
@@ -350,7 +359,7 @@ function Anulacion(p: { d: Datos; setD(d: Datos): void }) {
       {op === "C" && actual && (
         <>
           <Celda
-            a={{ id: "ventas.anular", area: "", nombre: "Anular una venta", sensible: true, protegida: true, noDelegable: false, limites: L_MONTO | L_CANTIDAD | L_TURNO | L_VENTANA, dueno: actual, duenoSigueCajero: false, normalCajero: actual, normalTecnico: actual }}
+            a={{ id: "ventas.anular", area: "", nombre: "Anular una venta", sensible: true, protegida: true, noDelegable: false, limites: L_MONTO | L_CANTIDAD | L_TURNO | L_VENTANA, dueno: actual, duenoSigueCajero: false, normalCajero: actual, normalTecnico: actual, niveles: N_PIN | N_MOTIVO | N_SI, montoOPin: false }}
             quien="cajero"
             valor={actual}
             onCambio={(v) => {
@@ -427,7 +436,7 @@ function Guardar(p: { s: Seguridad; d: Datos; lista: string[]; plantilla: string
   useEffect(() => {
     if (!p.lista.length) return setPidePin(false);
     seguridadDiferencias(p.d).then((x) => setPidePin(x.length > 0), () => setPidePin(false));
-  }, [p.d]);
+  }, [p.d, p.lista.length]);
   async function pdf() {
     try {
       const n = await leerNegocio();

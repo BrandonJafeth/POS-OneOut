@@ -99,6 +99,11 @@ export function necesitaAutorizacion(e: EstadoEspera, pct: number, tope: number)
   return !e.autorizacion || pct > e.autorizacion.pct + ε;
 }
 
+/** Lo que ata la autorización de descuento (igual que ventas::huella en Rust): si cambia, no vale. */
+export function huellaDescuento(e: EstadoEspera): string {
+  return JSON.stringify([e.lineas.map((l) => [l.id, l.productoId ?? "", l.precioUnitario, l.cantidad, l.descuento, l.descuentoCatalogo ?? 0]), e.descuentoTotal]);
+}
+
 export function estadoVacio(): EstadoEspera {
   return { lineas: [], descuentoTotal: 0, cliente: null, nombreTiquete: null, requiereFactura: false, autorizacion: null };
 }

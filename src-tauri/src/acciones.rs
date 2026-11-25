@@ -79,6 +79,17 @@ pub const L_CANTIDAD: u8 = 4;
 pub const L_TURNO: u8 = 8;
 pub const L_VENTANA: u8 = 16;
 
+// Niveles que la acción puede aplicar de verdad, además de «no» (D4). La pantalla Permisos ofrece solo
+// esos y politica::validar rechaza los demás; uno que llegue igual (versión vieja) se baja al más
+// estricto que sí aplique (Accion::ajustar), nunca vale como «sí».
+pub const N_PIN: u8 = 1;
+pub const N_MOTIVO: u8 = 2;
+pub const N_SI: u8 = 4;
+/// El comando revisa la política con sus argumentos (politica::aplicar) o pasa por la puerta común.
+pub const N_TODOS: u8 = N_PIN | N_MOTIVO | N_SI;
+/// El comando siempre pide el PIN del dueño (usuarios::confirmar_dueno): «sí» y «con PIN» son lo mismo.
+pub const N_CON_PIN: u8 = N_PIN | N_SI;
+
 #[derive(Debug)]
 pub struct Accion {
     pub id: &'static str,
@@ -102,10 +113,14 @@ pub struct Accion {
     /// El tope es del negocio, no del cajero: el dueño sigue los límites del rol cajero (con PIN al
     /// pasarlos, nunca «no»). Salidas de caja y vender sin existencia (0.9.2: también el dueño).
     pub dueno_sigue_cajero: bool,
+    /// Niveles que aplica (N_*).
+    pub niveles: u8,
+    /// Sin un monto máximo configurado, el cajero la tiene solo con PIN (dinero que sale sin venta).
+    pub monto_o_pin: bool,
 }
 
 const fn a(id: &'static str, area: &'static str, nombre: &'static str, c: Politica, t: Politica) -> Accion {
-    Accion { id, area, nombre, sensible: false, protegida: false, no_delegable: false, propia: false, limites: 0, normal_cajero: c, normal_tecnico: t, dueno: Politica::SI, dueno_sigue_cajero: false }
+    Accion { id, area, nombre, sensible: false, protegida: false, no_delegable: false, propia: false, limites: 0, normal_cajero: c, normal_tecnico: t, dueno: Politica::SI, dueno_sigue_cajero: false, niveles: N_SI, monto_o_pin: false }
 }
 impl Accion {
     const fn sensible(mut self) -> Self {
@@ -135,6 +150,51 @@ impl Accion {
         self.no_delegable = true;
         self
     }
+    const fn todos(mut self) -> Self {
+        self.niveles = N_TODOS;
+        self
+    }
+    const fn con_pin(mut self) -> Self {
+        self.niveles = N_CON_PIN;
+        self
+    }
+    const fn monto_o_pin(mut self) -> Self {
+        self.monto_o_pin = true;
+        self
+    }
+
+    /// ¿Esta acción aplica esa política? Err con el texto para la pantalla.
+    pub fn admite(&self, p: &Politica) -> Result<(), String> {
+        let bit = match p.nivel {
+            Nivel::No => return Ok(()),
+            Nivel::Pin => N_PIN,
+            Nivel::Motivo => N_MOTIVO,
+            Nivel::Si => N_SI,
+        };
+        if self.niveles & bit == 0 || (p.motivo && self.niveles & N_MOTIVO == 0) {
+            return Err(format!("«{}» no se puede pedir con PIN o motivo: solo «sí» o «no».", self.nombre));
+        }
+        if self.monto_o_pin && p.nivel > Nivel::Pin && p.limites.monto_max.is_none() {
+            return Err(format!("«{}»: sin un monto máximo, solo con PIN del dueño.", self.nombre));
+        }
+        Ok(())
+    }
+
+    /// La política que de verdad se aplica: si esta acción no admite `p`, el nivel más estricto que sí
+    /// admita (nunca uno más permisivo). Lo usa politica::efectiva con cada fila del cajero y el técnico.
+    pub fn ajustar(&self, p: Politica) -> Politica {
+        if self.admite(&p).is_ok() {
+            return p;
+        }
+        let motivo = (p.motivo || p.nivel == Nivel::Motivo) && self.niveles & N_MOTIVO != 0;
+        for n in [Nivel::Si, Nivel::Motivo, Nivel::Pin] {
+            let q = Politica { nivel: n, motivo: motivo && n != Nivel::Si, limites: p.limites };
+            if n <= p.nivel && self.admite(&q).is_ok() {
+                return q;
+            }
+        }
+        Politica::NO
+    }
 }
 
 use Politica as P;
@@ -147,18 +207,18 @@ pub const CAJA_SALIDA_DEFECTO: i64 = 20_000;
 pub static CATALOGO: &[Accion] = &[
     // Venta
     a("venta.vender", "Venta", "Vender y cobrar", SI, NO).p(),
-    a("venta.descuento", "Venta", "Descuento por línea y al total", P::con(Nivel::Si, Limites { pct_max: Some(VENTA_DESCUENTO_DEFECTO), ..Limites::NINGUNO }), NO).p().propia(L_PCT),
-    a("venta.precio_libre", "Venta", "Precio libre (F4)", SI, NO).p().propia(0),
-    a("venta.sin_existencia", "Venta", "Vender sin existencia", SI, NO).p().propia(0).sigue_cajero(),
-    a("venta.apartadas", "Venta", "Vender unidades apartadas", P::PIN, NO).p().propia(0).dueno(P::PIN),
-    a("venta.quitar_linea", "Venta", "Quitar líneas de una venta abierta", SI, NO).p().propia(L_MONTO),
-    a("venta.descartar_espera", "Venta", "Descartar una venta en espera", SI, NO).p(),
+    a("venta.descuento", "Venta", "Descuento por línea y al total", P::con(Nivel::Si, Limites { pct_max: Some(VENTA_DESCUENTO_DEFECTO), ..Limites::NINGUNO }), NO).p().propia(L_PCT).todos(),
+    a("venta.precio_libre", "Venta", "Precio libre (F4)", SI, NO).p().propia(0).todos(),
+    a("venta.sin_existencia", "Venta", "Vender sin existencia", SI, NO).p().propia(0).sigue_cajero().todos(),
+    a("venta.apartadas", "Venta", "Vender unidades apartadas", P::PIN, NO).p().propia(0).dueno(P::PIN).todos(),
+    a("venta.quitar_linea", "Venta", "Quitar líneas de una venta abierta", SI, NO).p().propia(L_MONTO).todos(),
+    a("venta.descartar_espera", "Venta", "Descartar una venta en espera", SI, NO).p().todos(),
     a("venta.ver_existencia", "Venta", "Ver existencias al vender", NO, NO).p(),
     // Ventas cobradas
     a("ventas.ver", "Ventas cobradas", "Ver tiquetes del día", SI, NO).p(),
     a("ventas.reimprimir", "Ventas cobradas", "Reimprimir tiquete", SI, NO).p(),
-    a("ventas.anular", "Ventas cobradas", "Anular una venta", NO, NO).p().propia(L_MONTO | L_CANTIDAD | L_TURNO | L_VENTANA).dueno(P::PIN_MOTIVO),
-    a("ventas.cambiar_pago", "Ventas cobradas", "Cambiar la forma de pago", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
+    a("ventas.anular", "Ventas cobradas", "Anular una venta", NO, NO).p().propia(L_MONTO | L_CANTIDAD | L_TURNO | L_VENTANA).dueno(P::PIN_MOTIVO).todos(),
+    a("ventas.cambiar_pago", "Ventas cobradas", "Cambiar la forma de pago", NO, NO).p().propia(L_MONTO).dueno(P::PIN_MOTIVO).todos().monto_o_pin(),
     a("facturas.ver", "Ventas cobradas", "Pendientes de factura", SI, NO).p(),
     a("facturas.marcar", "Ventas cobradas", "Marcar factura emitida", SI, NO).p(),
     // Caja
@@ -167,28 +227,28 @@ pub static CATALOGO: &[Accion] = &[
     a("caja.cerrar", "Caja", "Cerrar caja (conteo y Z)", SI, NO).p(),
     a("caja.cerrar_otro", "Caja", "Cerrar el turno de otro (de un día anterior)", SI, NO).p().propia(0),
     a("caja.ver_totales", "Caja", "Ver totales con el turno abierto", NO, NO).p().propia(0),
-    a("caja.reabrir", "Caja", "Reabrir un turno", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
+    a("caja.reabrir", "Caja", "Reabrir un turno", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO).con_pin(),
     a("caja.entrada", "Caja", "Entrada de efectivo", SI, NO).p(),
-    a("caja.salida", "Caja", "Salida de efectivo", P::con(Nivel::Si, Limites { monto_max: Some(CAJA_SALIDA_DEFECTO), ..Limites::NINGUNO }), NO).p().propia(L_MONTO).sigue_cajero(),
+    a("caja.salida", "Caja", "Salida de efectivo", P::con(Nivel::Si, Limites { monto_max: Some(CAJA_SALIDA_DEFECTO), ..Limites::NINGUNO }), NO).p().propia(L_MONTO).sigue_cajero().todos(),
     a("caja.corte", "Caja", "Corte con retiro", NO, NO).p().propia(0),
-    a("caja.no_venta", "Caja", "No venta (abrir la gaveta con motivo)", SI, NO).p().propia(L_CANTIDAD),
-    a("caja.gaveta_sin_venta", "Caja", "Abrir la gaveta con orden del dueño", P::PIN, NO).p().propia(0).dueno(P::PIN),
+    a("caja.no_venta", "Caja", "No venta (abrir la gaveta con motivo)", SI, NO).p().propia(L_CANTIDAD).todos(),
+    a("caja.gaveta_sin_venta", "Caja", "Abrir la gaveta con orden del dueño", P::PIN, NO).p().propia(0).dueno(P::PIN).con_pin(),
     a("caja.historial", "Caja", "Historial de cierres y aperturas de gaveta", NO, NO).p(),
-    a("caja.reimprimir_z", "Caja", "Reimprimir un cierre Z", P::PIN, NO).p().propia(0).dueno(P::PIN),
-    a("caja.corregir_dia", "Caja", "Corregir la fecha de negocio", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
+    a("caja.reimprimir_z", "Caja", "Reimprimir un cierre Z", P::PIN, NO).p().propia(0).dueno(P::PIN).con_pin(),
+    a("caja.corregir_dia", "Caja", "Corregir la fecha de negocio", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO).con_pin(),
     a("caja.consecutivo", "Caja", "Número inicial del consecutivo", NO, SI).sensible(),
     a("caja.opciones", "Caja", "Opciones de caja y cierre", NO, SI).sensible(),
     // Apartados y crédito
     a("cuentas.crear", "Apartados y crédito", "Crear y buscar apartados", SI, NO).p(),
     a("cuentas.abonar", "Apartados y crédito", "Recibir abonos y entregar", SI, NO).p(),
     a("cuentas.ver_todas", "Apartados y crédito", "Ver todas las cuentas y estados de cuenta", NO, NO).p(),
-    a("cuentas.cancelar", "Apartados y crédito", "Cancelar un apartado", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
-    a("cuentas.anular_abono", "Apartados y crédito", "Anular un abono", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
-    a("cuentas.ajustar", "Apartados y crédito", "Ajustar el saldo", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
-    a("cuentas.condonar", "Apartados y crédito", "Condonar el saldo", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
-    a("cuentas.prorrogar", "Apartados y crédito", "Prorrogar la fecha límite", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
+    a("cuentas.cancelar", "Apartados y crédito", "Cancelar un apartado", NO, NO).p().propia(L_MONTO).dueno(P::PIN_MOTIVO).todos().monto_o_pin(),
+    a("cuentas.anular_abono", "Apartados y crédito", "Anular un abono", NO, NO).p().propia(L_MONTO).dueno(P::PIN_MOTIVO).todos().monto_o_pin(),
+    a("cuentas.ajustar", "Apartados y crédito", "Ajustar el saldo", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO).con_pin(),
+    a("cuentas.condonar", "Apartados y crédito", "Condonar el saldo", NO, NO).p().propia(L_MONTO).dueno(P::PIN_MOTIVO).todos().monto_o_pin(),
+    a("cuentas.prorrogar", "Apartados y crédito", "Prorrogar la fecha límite", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO).con_pin(),
     a("credito.vender", "Apartados y crédito", "Vender a crédito", SI, NO).p(),
-    a("credito.limite", "Apartados y crédito", "Límites y opciones de crédito", NO, NO).p().propia(0).dueno(P::PIN),
+    a("credito.limite", "Apartados y crédito", "Límites y opciones de crédito", NO, NO).p().propia(0).dueno(P::PIN).con_pin(),
     a("cuentas.opciones", "Apartados y crédito", "Opciones de apartados y crédito", NO, SI).sensible(),
     // Proformas
     a("proformas.crear", "Proformas", "Crear, buscar e imprimir proformas", SI, NO).p(),
@@ -197,16 +257,18 @@ pub static CATALOGO: &[Accion] = &[
     a("proformas.admin", "Proformas", "Reporte de proformas", NO, NO).p(),
     a("proformas.opciones", "Proformas", "Opciones de proformas", NO, SI),
     // Productos
-    a("productos.crear", "Productos", "Crear productos y códigos", NO, SI),
-    a("productos.editar", "Productos", "Editar productos", NO, SI),
-    a("productos.desactivar", "Productos", "Desactivar productos", NO, SI),
+    a("productos.crear", "Productos", "Crear productos y códigos", NO, SI).sensible(),
+    a("productos.editar", "Productos", "Editar productos", NO, SI).sensible(),
+    a("productos.precio", "Productos", "Cambiar precios de venta y descuentos fijos", NO, NO).sensible(),
+    a("productos.desactivar", "Productos", "Desactivar productos", NO, SI).sensible(),
     a("productos.favoritos", "Productos", "Favoritos", NO, SI),
     a("productos.etiquetas", "Productos", "Imprimir etiquetas", NO, SI),
-    a("productos.importar", "Productos", "Importar CSV", NO, SI),
+    a("productos.importar", "Productos", "Importar CSV", NO, SI).sensible(),
     a("departamentos.editar", "Productos", "Editar departamentos (nombre, orden, color)", NO, SI),
     a("departamentos.estructura", "Productos", "Crear departamentos y cambiar su código", NO, SI).dueno(P::NO),
     // Inventario
     a("inventario.ver", "Inventario", "Ver existencias y kardex", NO, NO).p(),
+    a("inventario.costos", "Inventario", "Ver costos, valor del inventario y utilidad", NO, NO).sensible(),
     a("inventario.entradas", "Inventario", "Entradas de mercadería y proveedores", NO, NO).p(),
     a("inventario.ajustes", "Inventario", "Ajustes de inventario", NO, NO).p(),
     a("inventario.conteo", "Inventario", "Conteo físico y carga inicial", NO, NO).p(),
@@ -217,10 +279,9 @@ pub static CATALOGO: &[Accion] = &[
     a("clientes.ver_todos", "Clientes", "Ver la lista y los datos completos", NO, NO).p(),
     a("clientes.editar", "Clientes", "Editar clientes", NO, NO).p(),
     a("clientes.exportar", "Clientes", "Exportar los datos de un cliente", NO, NO).p(),
-    a("clientes.anonimizar", "Clientes", "Anonimizar un cliente", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO),
+    a("clientes.anonimizar", "Clientes", "Anonimizar un cliente", NO, NO).p().propia(0).dueno(P::PIN_MOTIVO).con_pin(),
     // Reportes
     a("reportes.ver", "Reportes", "Reportes de ventas", NO, NO).p(),
-    a("reportes.exportar", "Reportes", "Exportar reportes y cierres", NO, NO).p(),
     // Administración
     a("usuarios.administrar", "Administración", "Usuarios", NO, SI).fija(),
     a("negocio.contacto", "Administración", "Datos de contacto del negocio", NO, SI),
@@ -230,7 +291,7 @@ pub static CATALOGO: &[Accion] = &[
     a("impresoras.asignar", "Administración", "Asignar y probar impresoras", NO, SI),
     a("config.tecnica", "Administración", "Configuración técnica", NO, SI).fija().dueno(P::NO),
     a("respaldo.crear", "Administración", "Respaldo", NO, NO).p(),
-    a("respaldo.restaurar", "Administración", "Restaurar un respaldo", NO, NO).p().propia(0).dueno(P::PIN),
+    a("respaldo.restaurar", "Administración", "Restaurar un respaldo", NO, NO).p().propia(0).dueno(P::PIN).con_pin(),
     a("bitacora.ver", "Administración", "Ver la bitácora", NO, SI),
     a("seguridad.editar", "Administración", "Editar permisos", NO, SI).fija(),
     a("seguridad.inactividad", "Administración", "Tiempo de bloqueo por inactividad", NO, SI).fija(),
@@ -288,6 +349,7 @@ pub static COMANDOS: &[(&str, Destino)] = &[
     ("usuarios_crear", Ac("usuarios.administrar")),
     ("usuarios_editar", SegunArgumento),
     ("usuarios_cambiar_pin", SegunArgumento),
+    ("usuarios_codigo_recuperacion", CualquierSesion),
     ("usuarios_eliminar", SegunArgumento),
     ("config_guardar", SegunArgumento),
     ("negocio_guardar", SegunArgumento),
@@ -371,7 +433,7 @@ pub static COMANDOS: &[(&str, Destino)] = &[
     ("proforma_obtener", Ac("proformas.crear")),
     ("proforma_imprimir", Ac("proformas.crear")),
     ("proforma_anular", Ac("proformas.anular")),
-    ("proforma_abrir", Ac("proformas.crear")),
+    ("proforma_abrir", Ac("proformas.convertir")),
     ("proforma_reporte", Ac("proformas.admin")),
     ("reporte_rangos", Ac("reportes.ver")),
     ("reporte_ventas", Ac("reportes.ver")),
@@ -391,7 +453,7 @@ pub static COMANDOS: &[(&str, Destino)] = &[
     ("inventario_estado", Ac("inventario.ver")),
     ("inventario_existencia", Ac("venta.ver_existencia")),
     ("inventario_alertas", Ac("inventario.ver")),
-    ("inventario_producto", Ac("inventario.ver")),
+    ("inventario_producto", Ac("inventario.opciones")),
     ("inventario_kardex", Ac("inventario.ver")),
     ("inventario_entrada", Ac("inventario.entradas")),
     ("inventario_entrada_obtener", Ac("inventario.entradas")),

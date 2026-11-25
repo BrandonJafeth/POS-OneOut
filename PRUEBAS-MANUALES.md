@@ -278,6 +278,23 @@ Usuarios: Ana (dueña), Luis (cajero), el técnico. Caja abierta para las ventas
 14. **No corta un cobro.** Con el tiempo en 1 min, cobrar justo antes de que venza. → El cobro y el tiquete salen; el bloqueo viene después.
 15. **Preparar para el cliente.** → «Permisos y bloqueo por inactividad»: versión y minutos por rol. Revisarlo con el dueño.
 
+## Y. Ajustes de seguridad (0.9.4)
+
+Usuarios: Ana (dueña), Luis (cajero), el técnico. Caja abierta.
+
+1. **Niveles que se pueden elegir.** Ana → Permisos. «Ver totales con el turno abierto», «Ver la caja», «Ver ventas»: solo **No / Sí**. Reabrir turno, corregir el día, gaveta con orden del dueño: **No / Sí, siempre con PIN del dueño**. Anular, salidas, no venta, descuentos, precio libre, quitar líneas, sin existencia, apartadas, cancelar, condonar, anular abono, cambiar forma de pago: **No / Sí / Sí, con motivo / Con PIN**. Cancelar, condonar, anular abono y cambiar forma de pago: «Sí» o «con motivo» sin monto máximo → no guarda («solo con PIN»).
+2. **Precio libre cancelado (antes pasaba).** Plantilla Estricto. Luis: F4 → precio → pide PIN → Cancelar → F12. → Vuelve a pedir el PIN; sin él no cobra. Igual al apartar y al guardar proforma. Quitar una línea cuando pide PIN: lo pide al cobrar.
+3. **Descuento atado a la venta.** Luis: carrito de ¢2.000 con 50 % → PIN de Ana → agregar otro producto. → La autorización se borra y se pide el PIN otra vez. Cobrar sin cambios → pasa una sola vez.
+4. **Con motivo.** «Salida de efectivo» = Sí, con motivo. Luis: salida sin detalle → pide el motivo. «No venta» con «por turno» = 0 → siempre pide el PIN.
+5. **Código de recuperación.** Ana → Usuarios → Nuevo usuario «Marco», rol Dueño. → Sale **Código de recuperación de Marco** (4 grupos de 5) con **Imprimir** (impresora de tiquetes) y «¿Ya lo guardó?» al cerrar sin imprimir. El técnico: «Nuevo usuario» con rol Dueño → no deja (ya hay dueño).
+6. **Restablecer el PIN de un dueño.** Técnico → Usuarios → Marco → Cambiar PIN: sin código o con uno equivocado → no deja (y frena tras 4 intentos). Con el código impreso → guarda y sale un **código nuevo** para imprimir; el viejo ya no sirve. Marco entra → «Su PIN fue restablecido el …» y debe cambiarlo.
+7. **PIN propio.** Ana → Usuarios → su fila → Cambiar PIN: pide el **PIN actual**. «Código de recuperación» (su fila) → con su PIN → código nuevo.
+8. **F10.** Luis → F10 → vacío, «ab», «%» o una cédula → no lista nada y explica qué escribir. Número, teléfono completo o 3 letras del nombre → encuentra; el teléfono sale tapado (••••1234).
+9. **Entrada de mercadería.** Ana: doble clic rápido en «Guardar entrada». → Una sola entrada (existencia una vez).
+10. **Precios y costos.** Darle a Luis «Editar productos» (sin «Cambiar precios»): renombra un producto, pero cambiar el precio → «No tiene permiso». Darle Inventario sin «Ver costos»: la lista y el kardex sin costo; «Valor del inventario» no abre.
+11. **Caja y cierre.** Administración → Caja y cierre → «Aviso en el cierre» dice que el PIN por cantidad está en Permisos.
+12. **Preparar para el cliente.** → «Código de recuperación impreso y guardado» en verde solo si cada dueño tiene su código.
+
 ## U. Reportes y cierres de caja
 
 Como Ana, **Reportes**.

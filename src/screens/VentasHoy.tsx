@@ -479,7 +479,7 @@ function CorregirPago(p: { pago: VentaPago; turnoAbierto: boolean; onCerrar(): v
         {/* Solo el dueño corrige, y siempre con su PIN. */}
         <label className="campo">
           {p.turnoAbierto ? "Su PIN de dueño" : "Su PIN de dueño (la caja de esta venta ya cerró: queda como ajuste en la de hoy)"}
-          <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+          <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </label>
         {sinCambios && <Alert tono="info">Esa ya es la forma de pago registrada. Elija la forma correcta (o cambie el banco o la referencia).</Alert>}
         {error && <Alert tono="error">{error}</Alert>}
@@ -568,7 +568,7 @@ function Anular(p: { ventaId: string; numero: string; total: number; efectivo: n
         )}
         {conPin && (
           <Field label={dueno ? "Su PIN de dueño" : "PIN del dueño"}>
-            <input className="pin" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+            <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </Field>
         )}
         {error && <Alert tono="error">{error}</Alert>}
