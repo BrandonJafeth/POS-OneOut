@@ -52,6 +52,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 ts-rs = { version = "11", default-features = false, features = ["serde-compat"] }
 # Runtime simulado: la prueba tabla_comandos llama cada comando por IPC, como la pantalla.
 tauri = { version = "2", features = ["test"] }
+# Pruebas basadas en propiedades (propiedades_tests.rs): totales, pagos, reparto del Z, abonos, fechas y permisos.
+proptest = { version = "1.5", default-features = false, features = ["std"] }
 
 # Argon2 sin optimizar (modo dev) tarda varios segundos por PIN: se compila optimizado siempre.
 [profile.dev.package.argon2]

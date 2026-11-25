@@ -30,6 +30,8 @@ mod permisos_tests;
 #[cfg(test)]
 mod anulacion_tests;
 #[cfg(test)]
+mod propiedades_tests;
+#[cfg(test)]
 mod tipos_ts;
 mod inventario;
 mod negocio;
