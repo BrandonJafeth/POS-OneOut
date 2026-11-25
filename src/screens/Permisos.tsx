@@ -171,7 +171,7 @@ function Celda(p: { a: AccionInfo; quien: string; valor: Politica | undefined; f
             });
             if (!ok) return;
           }
-          p.onCambio(politica(n, v));
+          p.onCambio(conPin ? { ...politica(n, v), motivo: false } : politica(n, v));
         }}
       >
         {p.heredado !== undefined && <option value="">Como su rol</option>}
