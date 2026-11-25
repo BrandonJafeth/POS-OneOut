@@ -106,7 +106,7 @@ pub fn leer(bytes: &[u8]) -> Res<Tabla> {
             continue;
         }
         // + 1 por el encabezado.
-        if filas.len() >= MAX_FILAS + 1 {
+        if filas.len() > MAX_FILAS {
             return Err("El archivo tiene más de 20.000 filas y no se lee. Divídalo en partes.".into());
         }
         filas.push(FilaTabla { linea: reg.position().map(|p| p.line()).unwrap_or(0), celdas });

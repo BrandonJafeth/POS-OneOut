@@ -245,8 +245,8 @@ async fn existencia_igual_al_kardex_en_una_base_grande() {
     drop(c);
     // Y unas ventas y anulaciones por el camino normal.
     abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
-    for i in 0..30 {
-        let e = est(&ids[i], 500, 1 + r.n(3));
+    for (i, id) in ids.iter().take(30).enumerate() {
+        let e = est(id, 500, 1 + r.n(3));
         let esp = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
         let v = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago(EF, e.lineas[0].cantidad * 500)]).await.unwrap();
         if i % 4 == 0 {

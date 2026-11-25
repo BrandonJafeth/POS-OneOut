@@ -211,11 +211,10 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
         if p.referencia.as_deref().is_some_and(|r| r.chars().count() > 60 || r.chars().any(char::is_control)) {
             errores.push(format!("{}: referencia inválida", f.nombre));
         }
-        if let Some(u) = p.ultimos4.as_deref().filter(|u| !u.is_empty()) {
-            if !(f.pide_ultimos4 && u.len() == 4 && u.chars().all(|c| c.is_ascii_digit())) {
+        if let Some(u) = p.ultimos4.as_deref().filter(|u| !u.is_empty())
+            && !(f.pide_ultimos4 && u.len() == 4 && u.chars().all(|c| c.is_ascii_digit())) {
                 errores.push(format!("{}: los últimos 4 dígitos son 4 números", f.nombre));
             }
-        }
         if let Err(m) = validar_pagador(f.pide_pagador, p.pagador.as_deref()) {
             errores.push(format!("{}: {m}", f.nombre));
         }

@@ -122,7 +122,7 @@ mod imp {
         let mut buf = vec![0u8; 1024];
         let mut req = 0u32;
         unsafe { SetupDiGetDeviceRegistryPropertyW(info, dato, prop, None, Some(&mut buf), Some(&mut req)).ok()? };
-        let w: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
+        let w: Vec<u16> = buf.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
         let s = String::from_utf16_lossy(&w).trim().to_string();
         (!s.is_empty()).then_some(s)
     }
@@ -388,5 +388,4 @@ pub mod simulada {
 #[cfg(not(test))]
 pub use imp::{detectar, enviar, list_printers, print_raw};
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 pub use simulada::{detectar, enviar, list_printers, print_raw};

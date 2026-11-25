@@ -217,14 +217,13 @@ pub async fn denominaciones(pool: &SqlitePool) -> Vec<i64> {
 
 /// Total del conteo, validado contra las denominaciones configuradas. Devuelve (total, JSON limpio).
 pub fn total_conteo(c: &Conteo, validas: &[i64]) -> Res<(i64, Value)> {
-    if c.cantidades.values().all(|n| *n == 0) {
-        if let Some(t) = c.total {
+    if c.cantidades.values().all(|n| *n == 0)
+        && let Some(t) = c.total {
             if !(0..=100_000_000).contains(&t) {
                 return Err("El total contado no es válido".into());
             }
             return Ok((t, json!({ "total": t })));
         }
-    }
     let mut total = 0i64;
     let mut limpio = serde_json::Map::new();
     for (k, n) in &c.cantidades {

@@ -1,6 +1,6 @@
-# Auditoría 0.9.4 — Etapa 1 (hallazgos, sin corregir)
+# Auditoría 0.9.4
 
-_2026-11-24. Base: rama `entrega-0.9.3` (commit `d7e4ad4`). Solo se leyó y se probó: nada de lo de abajo está corregido todavía._
+_2026-11-24. Base: rama `entrega-0.9.3` (commit `d7e4ad4`). Etapa 1: hallazgos (secciones 1 a 6, tal como se encontraron). Etapas 2 y 3: lo corregido y lo pendiente, en «Estado al cierre» (abajo) y en la sección 7 (decisiones tomadas)._
 
 Gravedad (criterio del pedido): **Crítica** pierde o descuadra dinero, pierde datos, salta un permiso, expone datos personales o cierra la app · **Alta** resultado incorrecto que el usuario puede no notar · **Media** error visible con salida fácil · **Baja** detalle.
 
@@ -16,6 +16,44 @@ Origen: **[RI]** revisión independiente 0.9.2→0.9.3 (subagente sin contexto) 
 | Baja / Info | 24 | Ver tabla |
 
 Herramientas: clippy pedantic 378 avisos (2 sitios reales de pánico); `cargo audit`/`cargo deny` fallan por 2 avisos actualizables y 2 sin arreglo; `npm audit --omit=dev` 0; eslint 57 `exhaustive-deps` + 1 `any`; proptest 8 propiedades × 400 casos en verde; fast-check 2 × 400 en verde; legacy-scan sin nada que cause errores; mutantes: sección 5. Revisión independiente: el mapeo comando → acción de la 0.9.3 da los mismos roles que la 0.9.2 en todos los comandos (sin desajustes).
+
+## Estado al cierre (etapas 2 y 3)
+
+Cada crítico y alto tiene primero una prueba que lo reproduce (falló antes de corregir) en `src-tauri/src/auditoria_tests.rs`; C1 y C2 son además las regresiones de los dos críticos de la 0.9.3.
+
+| # | Estado | Cómo | Prueba |
+|---|---|---|---|
+| C1 | Corregido (D4) | `Accion::niveles`/`admite`/`ajustar`; `validar` estricto al guardar y al volver; `puede` = solo «sí»; `exigir` con PIN/motivo usa la autorización; salidas, no venta, sin existencia, apartadas y descuento por `politica::aplicar` | `c1_un_nivel_que_la_accion_no_aplica_no_vale_como_si`, `politica_efectiva` (proptest), `cada_comando_cada_rol_cada_politica` |
+| C2 | Corregido + regla general | `ventas::revisar_cambios` en cobro, crédito, apartado y proforma; `crear_espera` también; proformas.convertir cableada | `c2_lo_que_pide_pin_en_la_venta_se_revisa_al_cobrar` |
+| C3 | Corregido (D1) | Código de recuperación (migración 26, Argon2id, una vez, impreso); técnico solo en la instalación; restablecer con código, nuevo código, aviso al entrar; punto en «Preparar» | `c3_el_tecnico_no_se_hace_dueno`, `pin_puesto_por_el_tecnico_no_autoriza`, `dueno_bloqueado_lo_recupera_el_tecnico` |
+| C4 | Corregido (D2) | `cambiar_pin(…, actual, codigo)` | `c4_cambiar_el_pin_propio_pide_el_actual` |
+| C5 | Corregido (D5) | Token con huella de líneas + monto en colones; la pantalla lo borra si cambia la venta | `c5_la_autorizacion_de_descuento_no_sirve_para_otro_carrito`, `tests/auditoria.test.ts` |
+| A1 | Corregido | Guardar con la cadena rota falla con «fueron alterados… restaure un respaldo» | `a1_cadena_rota_guardar_falla_claro` |
+| A2 | Corregido | No venta por `aplicar` (0 = siempre PIN) | `a2_cero_por_turno_siempre_pide_pin` |
+| A3 | Corregido | Caja y cierre: «Aviso en el cierre» y dónde está el PIN | manual (Y.11) |
+| A4 | Corregido | `operacion_id` (índice único) + candado por ref | `a4_entrada_de_mercaderia_idempotente` |
+| A5 | Corregido (D3) | Número, teléfono (8) o 3 letras; sin cédula; comodines escapados; teléfono tapado | `a5_buscar_cuentas_pide_un_dato`, `tests/auditoria.test.ts` |
+| A6 | Corregido | El dueño siempre «al pasar: PIN» | `a6_…`, `politica_efectiva` |
+| M1 | Corregido | Autorización atada a acción **y** comando; se gasta solo en ese comando | `m1_la_autorizacion_es_del_comando_que_la_pidio` |
+| M2 | Corregido | `caja.reimprimir_z` y `proformas.convertir` cableadas; `reportes.exportar` quitada (la exportación es de la pantalla); acciones desconocidas de versiones viejas se ignoran al leer | `cada_comando_cada_rol_cada_politica`, `tabla_comandos` |
+| M3 | Corregido | `bd_lote` solo anota en la bitácora `producto.*`, `codigo.*`, `departamento.*`, `forma_pago.*`, `banco.*` | `m3_la_pantalla_no_escribe_cualquier_cosa_en_la_bitacora` |
+| M4 | Corregido | `inventario_producto` → `inventario.opciones`; el costo solo con `inventario.costos` | `tabla_comandos` |
+| M5 | Corregido | Sin poder leer los permisos: Normal marcada alterada + `errores.log`; al cerrar caja el respaldo sale siempre y la verificación no da error | revisión |
+| M6 | Corregido | Reloj atrasado > 1 min → bloquea | `m6_reloj_hacia_atras_bloquea` |
+| M7 | Corregido / excepción | `url` 2.5.9 y `cookie` 0.18.3; SQLite de SQLCipher (pide sqlx 0.9) y `chrono` documentados en SEGURIDAD.md | `cargo audit`, `cargo deny` |
+| M8 | Pendiente (proceso) | Instalador sin firma y compilado en la PC de desarrollo (ver ENTREGAS.md) | — |
+| M9 | Revisado | 57 avisos uno por uno: 3 podían dejar datos viejos (kardex al cambiar de producto, detalle de caja al cambiar «admin», PIN de Permisos al vaciar la lista) y se corrigieron; el doble envío real era la entrada (A4); el resto son efectos «al montar» o con clave de contenido, a propósito | `tsc`, vitest |
+| M10 | Corregido | Al bloquear con el diálogo de PIN abierto, se cancela | revisión (manual) |
+| B1 | Corregido | `get(..3)` en nombres de puerto | clippy |
+| B2 | Justificado | `expect` restantes comentados (azar del sistema, `sentencias.json` embebido, arranque de Tauri, build.rs) | clippy `unwrap_used/expect_used/panic` |
+| B3 | Mejorado | Números separados por guion/espacio también se tapan; los nombres no se pueden distinguir (documentado) | `diagnostico` |
+| B4 | Corregido | `bd_leer` con tope de 200.000 filas | revisión |
+| B8, B9, B10 | Corregidos | técnico inicial dentro de la transacción; el cajero no se cambia el nombre; `guardar_en` con `create_new` | B9: `tabla_comandos` (DELIBERADOS); B8 y B10: revisión |
+| B11 | Corregido | Subir el umbral del aviso o apagar el comprobante A/B piden PIN; `productos.*` sensibles | `mas_permisivo_detecta_aflojar` |
+| B16, B17, B21, B24 | Corregidos | PIN sin autocompletar; SEGURIDAD.md dice qué hay en `errores.log`; `tools/msedgedriver` fuera de git; comentario de `audit.toml` | — |
+| B5, B6, B7, B12, B13, B14, B15, B18, B19, B20, B22, B23 | Pendientes | Bajos sin impacto inmediato: validaciones extra de catálogo, cadena de hashes con clave, parámetros de Argon2 del respaldo, tope propio del dueño, textos, versiones más nuevas al volver atrás, comando de prueba en la final (no hace nada), CSP, pánicos antes de `setup`, npm de e2e, fecha de comprobantes en la pantalla | — |
+
+Etapa 2: `productos.precio` y `inventario.costos` (solo el dueño por defecto) con prueba de llamada directa; monto máximo en cancelar, condonar, anular abono y cambiar forma de pago (sin monto, solo PIN); tablas de SEGURIDAD.md generadas y comparadas con el catálogo (`seguridad_md_igual_al_catalogo`, `tools/tablas-seguridad.ps1`); conteo de caja y borrador de entrada sobreviven el bloqueo (e2e `permisos.e2e.mjs`). Rendimiento con 500 apartados y 1.000 proformas: lista 36 ms, F10 7 ms, reporte de proformas 65 ms (`rapido_con_500_apartados_y_1000_proformas`).
 
 ---
 
@@ -114,7 +152,7 @@ _(se completa al terminar la corrida)_
 - **Bloqueo:** ningún comando corre bloqueado; otro usuario empieza sin pases; el contador de comandos en curso se suelta siempre [RI].
 - **Reintento automático de PIN/motivo:** todo `NECESITA_*` sale antes de escribir; no duplica cobros [RI].
 
-## 7. Decisiones que necesito (cambian algo visible o una decisión ya tomada)
+## 7. Decisiones (tomadas el 2026-11-24: sí a las cinco, con los detalles del pedido)
 - **D1 (C3)** ¿El técnico deja de poder crear o resetear dueños, salvo en la instalación (sin ningún dueño con PIN)? Recuperar a un dueño que olvidó su PIN pasaría a necesitar a otro dueño, o un procedimiento del técnico con un código de un solo uso que el dueño confirma. Recomiendo: solo en la instalación, y para recuperar, otro dueño; si es dueño único, restaurar un respaldo o un procedimiento aparte (a definir).
 - **D2 (C4)** ¿Pedir el PIN actual para cambiar el propio? Recomiendo sí.
 - **D3 (A5)** F10 con búsqueda vacía hoy muestra los 50 apartados abiertos. ¿Se quita la lista (pedir al menos número, 3 letras del nombre o el teléfono completo)? Recomiendo sí.

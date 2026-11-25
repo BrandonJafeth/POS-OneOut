@@ -945,6 +945,7 @@ async fn pin_si_vino(pool: &SqlitePool, a: &Actor, pin: &str, contexto: &str) ->
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cancelar(pool: &SqlitePool, a: &Actor, caja_id: &str, cuenta_id: &str, pin: &str, motivo: &str, devuelto: i64, en_efectivo: i64) -> Res<()> {
     a.exigir("cuentas.cancelar", "cancelar apartados")?;
     let motivo = motivo_valido(motivo)?;
@@ -1035,11 +1036,10 @@ pub async fn anular_abono(pool: &SqlitePool, a: &Actor, caja_id: &str, abono_id:
         .map_err(e)?;
     sqlx::query("UPDATE cuentas SET saldo = saldo + ?, actualizado_en = ? WHERE id = ?").bind(monto).bind(&fecha).bind(&cuenta_id).execute(&mut *tx).await.map_err(e)?;
     if abierto {
-        if let Some(t) = caja::turno(&mut tx, turno_abono.as_deref().unwrap_or_default()).await? {
-            if caja::resumen(&mut tx, &t).await?.efectivo_esperado < 0 {
+        if let Some(t) = caja::turno(&mut tx, turno_abono.as_deref().unwrap_or_default()).await?
+            && caja::resumen(&mut tx, &t).await?.efectivo_esperado < 0 {
                 return Err(ventas::SIN_EFECTIVO.into());
             }
-        }
     } else if devolucion_efectivo > 0 {
         if !(0..=monto).contains(&devolucion_efectivo) {
             return Err("La devolución no puede pasar del abono".into());

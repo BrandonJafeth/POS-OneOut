@@ -395,7 +395,7 @@ fn seguridad_md_igual_al_catalogo() {
     let miles = |n: i64| {
         let s = n.to_string();
         s.chars().enumerate().fold(String::new(), |mut o, (i, c)| {
-            if i > 0 && (s.len() - i) % 3 == 0 {
+            if i > 0 && (s.len() - i).is_multiple_of(3) {
                 o.push('.');
             }
             o.push(c);

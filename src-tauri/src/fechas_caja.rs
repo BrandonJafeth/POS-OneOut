@@ -538,13 +538,12 @@ async fn el_z_cuadra_en_cientos_de_turnos() {
             }
         }
         // Anulación de una venta de un turno anterior, con devolución en efectivo (sale como salida).
-        if r.n(4) == 0 {
-            if let Some((vid, ef)) = anteriores.pop() {
+        if r.n(4) == 0
+            && let Some((vid, ef)) = anteriores.pop() {
                 let dev = ef.min(esperado);
                 anular(p, &dueno, CAJA_1, &vid, PIN, "Devolución de otro día", dev).await.unwrap();
                 esperado -= dev;
             }
-        }
         match r.n(5) {
             0 => {
                 let m = 500 + 100 * r.n(30);

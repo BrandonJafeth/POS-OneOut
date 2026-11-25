@@ -599,11 +599,10 @@ pub async fn cobrar_opc(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: 
         bitacora::registrar(&mut tx, Some(&a.id), "venta.descuento_autorizado", "venta", Some(&venta_id), &json!({"pct": (tot_pct(&tot, &catalogo) * 10.0).round() / 10.0, "autorizadoPor": d})).await?;
     }
     tx.commit().await.map_err(e)?;
-    if autorizado_por.is_some() {
-        if let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
+    if autorizado_por.is_some()
+        && let Some(t) = est.autorizacion.as_ref().and_then(|x| x.token.as_deref()) {
             gastar_autorizacion(t);
         }
-    }
     let efectivo: Vec<&str> = fs.iter().filter(|f| f.da_vuelto).map(|f| f.id.as_str()).collect();
     let hay_efectivo = rp.aplicados.iter().any(|x| efectivo.contains(&x.pago.forma_pago_id.as_str()));
     Ok(ResultadoCobro { venta_id, numero, vuelto: rp.vuelto, hay_efectivo, abrir_gaveta: hay_efectivo && gaveta, cuenta_id })
@@ -629,7 +628,7 @@ pub(crate) fn revisar_tope(a: &Actor, tot: &calculo::Totales, catalogo: &[i64], 
         Ok(ap) => Ok(ap.autorizo),
         Err(m) if m.starts_with(crate::politica::NECESITA_PIN) && token.is_some() => Err("La autorización del descuento venció o ya no corresponde a esta venta (cambió algo): pida el PIN del dueño otra vez".into()),
         Err(m) if m.starts_with(crate::politica::NECESITA_PIN) => Err("El descuento pasa su tope: necesita el PIN del dueño".into()),
-        Err(m) if m.starts_with("No se puede") => Err(format!("El descuento pasa su tope ({} %): no se puede dar", tope.pct)),
+        Err(m) if m.starts_with("No se puede") && tope.bloquear => Err(format!("El descuento pasa su tope ({} %): no se puede dar", tope.pct)),
         Err(m) if m.contains("No tiene permiso") => Err(sin_permiso("dar descuentos")),
         Err(m) => Err(m),
     }
@@ -647,11 +646,10 @@ pub(crate) async fn revisar_pagos(tx: &mut SqliteConnection, pagos: &[PagoEntrad
     let mut repetidas = vec![];
     for p in pagos {
         banco_valido(&mut *tx, p.banco_id.as_deref()).await?;
-        if let Some(r) = p.referencia.as_deref() {
-            if let Some(tiquete) = referencia_repetida(&mut *tx, &p.forma_pago_id, r).await? {
+        if let Some(r) = p.referencia.as_deref()
+            && let Some(tiquete) = referencia_repetida(&mut *tx, &p.forma_pago_id, r).await? {
                 repetidas.push(json!({"referencia": r.trim(), "monto": p.monto, "yaUsadaEn": tiquete}));
             }
-        }
     }
     Ok(repetidas)
 }
@@ -1087,11 +1085,10 @@ pub async fn corregir_pago(pool: &SqlitePool, a: &Actor, caja_id: &str, pago_id:
     if nueva.requiere_referencia && referencia.is_empty() {
         return Err(format!("{}: escriba la referencia", nueva.nombre));
     }
-    if let Some(u) = cambio.ultimos4.as_deref().filter(|u| !u.is_empty()) {
-        if u.len() != 4 || !u.chars().all(|c| c.is_ascii_digit()) {
+    if let Some(u) = cambio.ultimos4.as_deref().filter(|u| !u.is_empty())
+        && (u.len() != 4 || !u.chars().all(|c| c.is_ascii_digit())) {
             return Err("Los últimos 4 dígitos son 4 números".into());
         }
-    }
     let n_banco = if nueva.requiere_banco { cambio.banco_id.clone().filter(|s| !s.is_empty()) } else { None };
     let n_ref = (!referencia.is_empty()).then_some(referencia);
     let n_u4 = if nueva.pide_ultimos4 { cambio.ultimos4.clone().filter(|s| !s.is_empty()) } else { None };
@@ -1364,13 +1361,11 @@ pub async fn anular(pool: &SqlitePool, a: &Actor, caja_id: &str, venta_id: &str,
         .map_err(e)?;
     // Turno abierto: la anulación saca de la caja el efectivo de la venta. Si ese dinero ya salió
     // (retiro, salida), no hay de dónde devolverlo y el efectivo esperado quedaría negativo.
-    if !cerrado {
-        if let Some(t) = turno_de_venta(&mut tx, v.get("turno_id")).await? {
-            if caja::resumen(&mut tx, &t).await?.efectivo_esperado < 0 {
+    if !cerrado
+        && let Some(t) = turno_de_venta(&mut tx, v.get("turno_id")).await?
+            && caja::resumen(&mut tx, &t).await?.efectivo_esperado < 0 {
                 return Err(SIN_EFECTIVO.into());
             }
-        }
-    }
     let mut det = json!({"numero": numero, "total": total, "motivo": motivo, "autorizadoPor": dueno, "politica": letra, "version": a.seg.version, "sinPin": sin_pin, "pidioPinPor": ap.por});
     // Con factura electrónica hecha, falta la nota de crédito en el otro sistema: queda anotado.
     if v.get::<i64, _>("factura_emitida") == 1 {

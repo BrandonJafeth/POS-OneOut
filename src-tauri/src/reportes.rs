@@ -530,7 +530,7 @@ pub async fn ventas(pool: &SqlitePool, a: &Actor, desde: &str, hasta: &str) -> R
             u
         })
         .collect();
-    r.utilidad.sort_by(|a, b| b.utilidad.cmp(&a.utilidad));
+    r.utilidad.sort_by_key(|u| std::cmp::Reverse(u.utilidad));
     r.sin_costo = sin_costo.into_iter().collect();
     // Utilidad = venta − costo: sin «inventario.costos» no se manda (Etapa 2).
     if !crate::inventario::ve_costos(a) {

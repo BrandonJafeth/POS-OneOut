@@ -78,11 +78,10 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, accion: &str, nueva: &Datos, 
         return Err(format!("Los permisos guardados fueron alterados fuera del programa (versión {r}): no se puede guardar ningún cambio. Restaure un respaldo de antes de esa fecha o llame al técnico."));
     }
     let motivo = texto(motivo, 300, "motivo", false)?;
-    if let Some(p) = plantilla {
-        if !matches!(p, "estricto" | "normal" | "flexible") {
+    if let Some(p) = plantilla
+        && !matches!(p, "estricto" | "normal" | "flexible") {
             return Err("Plantilla desconocida".into());
         }
-    }
     let mut c = pool.acquire().await.map_err(e)?;
     let cajeros = politica::cajeros(&mut c).await?;
     drop(c);

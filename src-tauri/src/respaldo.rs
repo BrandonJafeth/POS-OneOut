@@ -768,7 +768,7 @@ pub mod tests {
         let mut d = crate::politica::plantilla("flexible", &normal).unwrap();
         d.inactividad.general = 5;
         let mut tx = bd.pool.begin().await.unwrap();
-        crate::politica::agregar(&mut tx, None, None, Some("flexible"), "Fixture 0.9.3", &d).await.unwrap();
+        crate::politica::agregar(&mut tx, None, None, Some("flexible"), concat!("Fixture ", env!("CARGO_PKG_VERSION")), &d).await.unwrap();
         tx.commit().await.unwrap();
         let m: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations").fetch_one(&bd.pool).await.unwrap();
         let archivo = cifrar(&bytes_en_claro(&bd).await.unwrap(), CONTRASENA_FIXTURE, m).unwrap();

@@ -573,16 +573,14 @@ async fn caja_cerrar<R: tauri::Runtime>(app: tauri::AppHandle<R>, st: St<'_>, co
 fn respaldo_en_segundo_plano<R: tauri::Runtime>(app: tauri::AppHandle<R>, motivo: &'static str) {
     tauri::async_runtime::spawn(async move {
         let st = app.state::<App>();
-        if let Ok(b) = &st.bd {
-            if let Err(err) = respaldo::automatico(b, motivo).await {
-                if let Ok(mut tx) = b.pool.begin_with("BEGIN IMMEDIATE").await {
+        if let Ok(b) = &st.bd
+            && let Err(err) = respaldo::automatico(b, motivo).await
+                && let Ok(mut tx) = b.pool.begin_with("BEGIN IMMEDIATE").await {
                     let motivo_err = err.trim_start_matches(util::TECNICO).to_string();
                     if bitacora::registrar(&mut tx, None, "respaldo.automatico_fallido", "respaldo", None, &json!({"motivo": motivo_err})).await.is_ok() {
                         let _ = tx.commit().await;
                     }
                 }
-            }
-        }
     });
 }
 
@@ -1407,16 +1405,14 @@ async fn preparar(dir: &std::path::Path) -> (Result<Bd, String>, Option<[u8; 32]
     let bd = Bd::abrir(dir, clave).await;
     // Prueba de punta a punta (solo compilación de desarrollo, base vacía): usuarios y un producto.
     #[cfg(debug_assertions)]
-    if let (Ok(b), Ok("1")) = (&bd, std::env::var("POS_E2E").as_deref()) {
-        if let Err(err) = semilla_e2e(&b.pool).await {
+    if let (Ok(b), Ok("1")) = (&bd, std::env::var("POS_E2E").as_deref())
+        && let Err(err) = semilla_e2e(&b.pool).await {
             return (Err(format!("Semilla de prueba: {err}")), clave);
         }
-    }
-    if let (Ok(b), Some(anterior)) = (&bd, &restaurada) {
-        if let Err(err) = respaldo::anotar_restauracion(b, anterior, clave.as_ref()).await {
+    if let (Ok(b), Some(anterior)) = (&bd, &restaurada)
+        && let Err(err) = respaldo::anotar_restauracion(b, anterior, clave.as_ref()).await {
             return (Err(format!("Se restauró el respaldo pero no se pudo anotar en la bitácora: {err}")), clave);
         }
-    }
     (bd, clave)
 }
 
@@ -1729,13 +1725,11 @@ pub fn run() {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
                         let r: Result<String, _> = sqlx::query_scalar("PRAGMA quick_check").fetch_one(&pool).await;
-                        if !matches!(r.as_deref(), Ok("ok")) {
-                            if let Ok(mut tx) = pool.begin_with("BEGIN IMMEDIATE").await {
-                                if bitacora::registrar(&mut tx, None, "bd.integridad_fallida", "bd", None, &json!({})).await.is_ok() {
+                        if !matches!(r.as_deref(), Ok("ok"))
+                            && let Ok(mut tx) = pool.begin_with("BEGIN IMMEDIATE").await
+                                && bitacora::registrar(&mut tx, None, "bd.integridad_fallida", "bd", None, &json!({})).await.is_ok() {
                                     let _ = tx.commit().await;
                                 }
-                            }
-                        }
                     }
                 });
             }
@@ -1764,5 +1758,7 @@ pub fn run() {
         })
         .invoke_handler(comandos())
         .run(tauri::generate_context!())
+        // expect justificado: si Tauri no arranca no hay ventana donde mostrar nada y la app se cierra
+        // (no queda en errores.log: el registro se arma dentro de setup, B20 pendiente).
         .expect("error al iniciar la aplicación Tauri");
 }

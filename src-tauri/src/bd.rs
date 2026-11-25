@@ -118,6 +118,8 @@ pub struct Bd {
     registro: HashMap<String, Sentencia>,
 }
 
+/// expect justificado: sentencias.json va embebido al compilar (no lo cambia nadie en la PC del
+/// cliente) y la prueba todo_comando_tiene_accion lo lee entero: si estuviera mal, no se entrega.
 fn registro() -> HashMap<String, Sentencia> {
     let v: Map<String, Value> = serde_json::from_str(include_str!("../../src/db/sentencias.json")).expect("sentencias.json inválido");
     v.into_iter()
@@ -152,11 +154,10 @@ impl Bd {
         std::fs::create_dir_all(dir).map_err(e)?;
         let ruta = dir.join("pos.db");
         let destino = format!("sqlite:{}", ruta.to_string_lossy());
-        if let Some(k) = &clave {
-            if ruta.exists() && es_texto_plano(&ruta) {
+        if let Some(k) = &clave
+            && ruta.exists() && es_texto_plano(&ruta) {
                 cifrar_existente(&ruta, k).await?;
             }
-        }
         let opts = opciones(&destino, clave.as_ref())?;
         let pool = SqlitePoolOptions::new().max_connections(4).connect_with(opts.clone()).await.map_err(|err| {
             format!("No se pudo abrir la base de datos ({err}). Si cambió el usuario de Windows, restaure un respaldo.")
@@ -204,7 +205,6 @@ impl Bd {
             q = bind(q, p);
         }
         // Con tope de filas (B4): una consulta que no termina (WITH RECURSIVE…) no agota la memoria.
-        use futures_core::Stream;
         let mut st = q.fetch(&self.lectura);
         let mut out = Vec::new();
         while let Some(f) = std::future::poll_fn(|cx| st.as_mut().poll_next(cx)).await {
@@ -330,8 +330,8 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
             env!("CARGO_PKG_VERSION")
         ));
     }
-    if let Some(d) = dir {
-        if aplicadas > 0 && aplicadas < ultima {
+    if let Some(d) = dir
+        && aplicadas > 0 && aplicadas < ultima {
             if hay_turno_abierto(pool).await {
                 return Err("Hay una caja abierta. Para actualizar: vuelva a instalar la versión anterior, cierre la caja y luego instale esta versión.".into());
             }
@@ -341,7 +341,6 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
             let marca = chrono::Local::now().format("%Y%m%d-%H%M%S");
             std::fs::copy(ruta, carpeta.join(format!("pos-antes-v{}-{marca}.db", aplicadas + 1))).map_err(e)?;
         }
-    }
     reparar_sumas(pool).await?;
     Migrator::new(Lista(MIGRACIONES.len())).await.map_err(e)?.run(pool).await.map_err(e)?;
     bitacora::encadenar_pendientes(pool).await?;

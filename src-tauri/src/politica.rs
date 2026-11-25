@@ -221,11 +221,10 @@ fn validar_con(d: &Datos, cajeros: Option<&[String]>, estricto: bool) -> Res<()>
         revisar("El técnico", id, p, true)?;
     }
     for (u, m) in &d.usuarios {
-        if let Some(c) = cajeros {
-            if !c.contains(u) {
+        if let Some(c) = cajeros
+            && !c.contains(u) {
                 return Err("Las excepciones por usuario son solo para cajeros".into());
             }
-        }
         for (id, p) in m {
             revisar("Un cajero", id, p, false)?;
         }
@@ -373,7 +372,7 @@ pub fn aplicar(a: &crate::sesion::Actor, accion: &str, ctx: &Contexto) -> Res<Ap
         let s = n.abs().to_string();
         let mut o = String::new();
         for (i, ch) in s.chars().enumerate() {
-            if i > 0 && (s.len() - i) % 3 == 0 {
+            if i > 0 && (s.len() - i).is_multiple_of(3) {
                 o.push('.');
             }
             o.push(ch);
@@ -381,29 +380,25 @@ pub fn aplicar(a: &crate::sesion::Actor, accion: &str, ctx: &Contexto) -> Res<Ap
         o
     };
     let mut exceso: Option<String> = None;
-    if let (Some(m), Some(x)) = (l.monto_max, ctx.monto) {
-        if x > m {
+    if let (Some(m), Some(x)) = (l.monto_max, ctx.monto)
+        && x > m {
             exceso = Some(format!("pasa de ¢{}", miles(m)));
         }
-    }
-    if let (Some(m), Some(x)) = (l.pct_max, ctx.pct) {
-        if x > m + 1e-9 {
+    if let (Some(m), Some(x)) = (l.pct_max, ctx.pct)
+        && x > m + 1e-9 {
             exceso.get_or_insert(format!("pasa del {m} %"));
         }
-    }
-    if let (Some(m), Some(x)) = (l.cantidad_turno, ctx.hechas_turno) {
-        if x >= m {
+    if let (Some(m), Some(x)) = (l.cantidad_turno, ctx.hechas_turno)
+        && x >= m {
             exceso.get_or_insert(format!("ya van {x} en este turno (máximo {m})"));
         }
-    }
     if l.solo_turno_abierto && ctx.turno_abierto == Some(false) {
         exceso.get_or_insert("es de un turno cerrado".into());
     }
-    if let (Some(m), Some(x)) = (l.ventana_min, ctx.minutos_desde) {
-        if x > m {
+    if let (Some(m), Some(x)) = (l.ventana_min, ctx.minutos_desde)
+        && x > m {
             exceso.get_or_insert(format!("pasaron más de {m} minutos"));
         }
-    }
     if exceso.is_some() && l.al_pasar == AlPasar::Bloquear {
         return Err(format!("No se puede: {}.", exceso.unwrap_or_default()));
     }
@@ -501,21 +496,19 @@ pub async fn agregar(c: &mut SqliteConnection, creada_por: Option<&str>, pin_due
 pub async fn inicial_desde_config(c: &mut SqliteConnection) -> Res<(Datos, Vec<String>)> {
     let mut d = plantilla_normal();
     let mut notas = vec![];
-    if let Some(p) = config::valor_con(c, "descuento_max_pct").await.and_then(|v| v.get("cajero").and_then(|x| x.as_f64())) {
-        if let Some(pol) = d.cajero.get_mut("venta.descuento") {
+    if let Some(p) = config::valor_con(c, "descuento_max_pct").await.and_then(|v| v.get("cajero").and_then(|x| x.as_f64()))
+        && let Some(pol) = d.cajero.get_mut("venta.descuento") {
             pol.limites.pct_max = Some(p.clamp(0.0, 100.0));
         }
-    }
     let salida = config::entero_con(c, "caja_salida_max_sin_pin", acciones::CAJA_SALIDA_DEFECTO).await;
     if let Some(pol) = d.cajero.get_mut("caja.salida") {
         pol.limites.monto_max = Some(salida.clamp(0, 100_000_000));
     }
     let nv = config::entero_con(c, "caja_no_venta_umbral", 5).await;
-    if nv > 0 {
-        if let Some(pol) = d.cajero.get_mut("caja.no_venta") {
+    if nv > 0
+        && let Some(pol) = d.cajero.get_mut("caja.no_venta") {
             pol.limites.cantidad_turno = Some(nv.clamp(0, 1000));
         }
-    }
     if !config::booleano_con(c, "permitir_vender_sin_existencia", true).await {
         d.cajero.insert("venta.sin_existencia".into(), Politica::PIN);
     }

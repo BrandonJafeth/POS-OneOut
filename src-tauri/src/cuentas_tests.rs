@@ -715,12 +715,11 @@ async fn el_z_cuadra_con_apartados_en_muchos_turnos() {
                     .fetch_optional(p)
                     .await
                     .unwrap();
-                    if let Some((id, monto, ef)) = f {
-                        if ef == 0 || monto <= caja_modelo {
+                    if let Some((id, monto, ef)) = f
+                        && (ef == 0 || monto <= caja_modelo) {
                             anular_abono(p, &ana, CAJA_1, &id, PIN, "Se registró mal", 0).await.unwrap();
                             caja_modelo -= if ef == 1 { monto } else { 0 };
                         }
-                    }
                 }
             }
         }
@@ -741,4 +740,51 @@ async fn el_z_cuadra_con_apartados_en_muchos_turnos() {
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM abonos").fetch_one(p).await.unwrap();
     assert!(n > 20, "la prueba tiene que mover abonos de verdad ({n})");
     assert_eq!(en_z, reales);
+}
+
+/// Rendimiento (0.9.4): con 500 apartados abiertos y 1.000 proformas, la lista del dueño, la búsqueda
+/// F10, los vencidos, la búsqueda de proformas y su reporte responden rápido. El mejor de 3 (con toda
+/// la suite corriendo en paralelo, una sola medida mide también la carga de la máquina).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rapido_con_500_apartados_y_1000_proformas() {
+    let (bd, _, ana, luis) = base_con_usuarios().await;
+    let p = &bd.pool;
+    reloj("2026-11-16T10:00:00-06:00");
+    abrir(p, &luis, CAJA_1, &conteo(&[(1000, 10)])).await.unwrap();
+    let pid = producto(p, 20000, 0).await;
+    let cl = cliente(p).await;
+    for _ in 0..500 {
+        apartar(p, &luis, &cl, &pid, 20000, 1, 10000).await;
+    }
+    for i in 0..1000 {
+        let est = Estado { lineas: vec![linea(&pid, 20000, 1 + i % 3)], nombre_tiquete: Some(format!("Cliente {i}")), ..Default::default() };
+        let esp = crear_espera(p, &luis, CAJA_1, &est).await.unwrap();
+        crate::proformas::guardar(p, &luis, CAJA_1, &esp.id, &est, None).await.unwrap();
+    }
+    let medir = |ms: &mut u128, ini: std::time::Instant| *ms = (*ms).min(ini.elapsed().as_millis());
+    let (mut lista, mut f10, mut tel, mut venc, mut pf, mut rep) = (u128::MAX, u128::MAX, u128::MAX, u128::MAX, u128::MAX, u128::MAX);
+    for _ in 0..3 {
+        let t = std::time::Instant::now();
+        assert_eq!(listar(p, &ana, "abiertas").await.unwrap().len(), 500);
+        medir(&mut lista, t);
+        let t = std::time::Instant::now();
+        assert_eq!(buscar(p, &luis, "marta").await.unwrap().len(), 50);
+        medir(&mut f10, t);
+        let t = std::time::Instant::now();
+        assert_eq!(buscar(p, &luis, "8888-7777").await.unwrap().len(), 50);
+        medir(&mut tel, t);
+        let t = std::time::Instant::now();
+        vencidas(p, &ana).await.unwrap();
+        medir(&mut venc, t);
+        let t = std::time::Instant::now();
+        assert!(!crate::proformas::buscar(p, &luis, "cliente 99", "").await.unwrap().is_empty());
+        medir(&mut pf, t);
+        let t = std::time::Instant::now();
+        crate::proformas::reporte(p, &ana, "2026-11-01", "2026-11-30").await.unwrap();
+        medir(&mut rep, t);
+    }
+    println!("500 apartados / 1.000 proformas: lista {lista} ms, F10 {f10} ms, teléfono {tel} ms, vencidas {venc} ms, proformas {pf} ms, reporte {rep} ms");
+    for (que, ms) in [("lista", lista), ("F10", f10), ("teléfono", tel), ("vencidas", venc), ("buscar proformas", pf), ("reporte de proformas", rep)] {
+        assert!(ms < 1000, "{que}: {ms} ms");
+    }
 }
