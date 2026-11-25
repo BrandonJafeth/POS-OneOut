@@ -134,20 +134,20 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     let x = "00000000000000000000000000";
     let mut v: Vec<(&'static str, bool)> = vec![];
     let mut s = |n: &'static str, den: bool| v.push((n, !den));
-    // Comandos que revisan el permiso en lib.rs (antes de llamar al módulo): misma revisión aquí.
+    // Comandos que revisan el permiso en lib.rs (antes de llamar al módulo): misma acción aquí.
     let lib = |perm: &str| denegado(a.exigir(perm, "x"));
-    s("usuarios_listar", lib("usuarios"));
+    s("usuarios_listar", lib("usuarios.administrar"));
     s("usuarios_crear (cajero)", denegado(usuarios::crear(p, a, "Nuevo", Rol::Cajero, "1593").await));
     s("usuarios_editar", denegado(usuarios::editar(p, a, otro, Some("Otro nombre"), None).await));
-    s("usuarios_cambiar_pin (de otro)", denegado(usuarios::cambiar_pin(p, a, otro, "975319").await));
+    s("usuarios_cambiar_pin (de otro)", denegado(usuarios::cambiar_pin(p, a, otro, "975319", None, None).await));
     s("usuarios_eliminar", denegado(usuarios::eliminar(p, a, otro).await));
     s("config_guardar (tema)", denegado(config::guardar(p, a, "tema", &json!("claro")).await));
     s("config_guardar (técnica)", denegado(config::guardar(p, a, "redondeo_total", &json!(5)).await));
     s("config_guardar (caja_*)", denegado(config::guardar(p, a, "caja_umbral_diferencia", &json!(1000)).await));
-    s("config_guardar (inventario)", denegado(config::guardar(p, a, "venta_mostrar_existencia", &json!(false)).await));
+    s("config_guardar (inventario)", denegado(config::guardar(p, a, "inventario_motivos_ajuste", &json!(["Dañado"])).await));
     s("negocio_guardar (contacto)", denegado(negocio::guardar(p, a, &de(json!({"telefono": "2222-2222"}))).await));
     s("negocio_logo", denegado(negocio::guardar_logo(p, a, None).await));
-    s("bitacora_listar / verificar", lib("reportes"));
+    s("bitacora_listar / verificar", lib("bitacora.ver"));
     s("caja_estado", denegado(caja::estado(p, a, CAJA_1).await));
     s("caja_abrir", denegado(caja::abrir(p, a, CAJA_1, &conteo(&[(1000, 1)])).await));
     s("caja_queda", denegado(caja::queda_en_gaveta(p, a, x, 0).await));
@@ -172,7 +172,7 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("gaveta_aperturas", denegado(gaveta::listar(p, a, CAJA_1, "2000-01-01", "2999-01-01", None).await));
     s("venta_esperas / crear / guardar", denegado(ventas::listar_esperas(p, a, CAJA_1).await));
     s("venta_espera_descartar", denegado(ventas::descartar_espera(p, a, x).await));
-    s("venta_autorizar_descuento", denegado(ventas::autorizar_descuento(p, a, x, 50.0, "000000").await));
+    s("venta_autorizar_descuento", denegado(ventas::autorizar_descuento(p, a, x, &Default::default(), "000000").await));
     s("venta_faltantes", denegado(ventas::faltantes(p, a, CAJA_1, &[]).await));
     s("venta_referencia_usada", denegado(ventas::referencia_usada(p, a, x, "12345").await));
     s("venta_cobrar", denegado(ventas::cobrar_con(p, a, CAJA_1, x, &de(json!({"lineas": [], "descuentoTotal": 0, "requiereFactura": false})), &[], None).await));
@@ -236,11 +236,11 @@ async fn real(bd: &Bd, a: &Actor, otro: &str) -> Vec<(&'static str, bool)> {
     s("impresoras_detectar / guardar / eliminar", denegado(impresoras::detectar(a)));
     s("impresora_ajustes (formato, sin destino)", denegado(impresoras::ajustes(p, CAJA_1, "tiquete").await));
     // imprimir: el permiso depende del documento (lib.rs).
-    s("imprimir (movimiento)", lib("caja"));
-    s("imprimir (etiqueta)", lib("productos"));
-    s("imprimir (cierre)", lib("caja.admin"));
-    s("imprimir (entrada)", lib("inventario"));
-    s("list_printers / print_raw (diagnóstico)", lib("config.tecnica"));
+    s("imprimir (movimiento)", lib("caja.ver"));
+    s("imprimir (etiqueta)", lib("productos.etiquetas"));
+    s("imprimir (cierre)", lib("caja.historial"));
+    s("imprimir (entrada)", lib("inventario.entradas"));
+    s("list_printers / print_raw (diagnóstico)", lib("impresoras.configurar"));
     s("sistema_preparacion / diagnostico_exportar", denegado(crate::preparacion::revisar(bd, a).await));
     v
 }

@@ -2,6 +2,7 @@ import { KeyRound, LogOut } from "lucide-react";
 import { useState } from "react";
 import { textoError } from "../components/Mensaje";
 import { cambiarPin, pinMinimo } from "../db/usuarios";
+import { fechaHora } from "../lib/tickets";
 import type { Usuario } from "../tipos";
 import Alert from "../ui/Alert";
 import Button from "../ui/Button";
@@ -18,9 +19,11 @@ export default function CambiarPinObligatorio(p: { usuario: Usuario; onListo(): 
   const [ocupado, setOcupado] = useState(false);
   const min = pinMinimo(p.usuario.rol);
 
-  const motivo = p.usuario.pinCorto
-    ? `Su PIN actual tiene menos de ${min} dígitos, que es el mínimo requerido para su rol. Escoja uno nuevo.`
-    : "Por seguridad, debe cambiar el PIN temporal que le asignaron antes de continuar.";
+  const motivo = p.usuario.pinRestablecidoEn
+    ? `Su PIN fue restablecido el ${fechaHora(new Date(p.usuario.pinRestablecidoEn))} con su código de recuperación. Si no fue usted, avise al técnico. Escoja un PIN nuevo.`
+    : p.usuario.pinCorto
+      ? `Su PIN actual tiene menos de ${min} dígitos, que es el mínimo requerido para su rol. Escoja uno nuevo.`
+      : "Por seguridad, debe cambiar el PIN temporal que le asignaron antes de continuar.";
 
   return (
     <main className="centro">

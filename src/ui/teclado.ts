@@ -28,7 +28,14 @@ function vacia(el: HTMLElement): boolean {
   return true; // una fila de resultados: Enter en el buscador baja a la primera
 }
 
+/** La pantalla está bloqueada por inactividad: lo que queda debajo del velo no escucha el teclado
+ *  (los atajos y el lector de la venta seguían recibiendo teclas a través de `window`). */
+export function pantallaBloqueada(): boolean {
+  return document.querySelector("dialog.velo-bloqueo[open]") !== null;
+}
+
 export function navegarCampos(e: KeyboardEvent): void {
+  if (pantallaBloqueada()) return;
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
   if (e.key !== "Enter" && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   const el = document.activeElement as HTMLElement | null;

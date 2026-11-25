@@ -11,9 +11,10 @@ import { obtenerCaja } from "../db/cajas";
 import { guardarConfig, leerConfigCruda } from "../db/config";
 import { aSettings, ajustesDe } from "../db/impresoras";
 import { estadoSistema, type EstadoSistema } from "../db/usuarios";
-import { PERMISOS, type Permiso } from "../lib/permisos";
+import { seguridadObtener, type Datos } from "../db/seguridad";
+import { Bloqueo } from "./Permisos";
 import { DEFAULT_SETTINGS, type TicketSettings } from "../lib/tickets";
-import { ROL_NOMBRE, type Caja, type EntradaBitacora, type Rol } from "../tipos";
+import { type Caja, type EntradaBitacora } from "../tipos";
 import { Bancos, FormasPago } from "./config/FormasPago";
 import Departamentos from "./Departamentos";
 import Preparacion from "./config/Preparacion";
@@ -28,7 +29,7 @@ const TABS = [
   ["formas", "Formas de pago"],
   ["bancos", "Bancos"],
   ["tiquete", "Formato del tiquete"],
-  ["permisos", "Permisos por rol"],
+  ["bloqueo", "Bloqueo por inactividad"],
   ["bitacora", "Bitácora"],
   ["sistema", "Sistema"],
 ] as const;
@@ -55,7 +56,7 @@ export default function ConfigTecnica() {
       {tab === "tiquete" && (
         <Reservado texto="Formato del tiquete (logo o nombre, copias, tiquete por departamento): pendiente. Hoy el encabezado y el pie salen de Datos del negocio, y en Claves están imprime_tiquete, texto_no_factura, abrir_gaveta_efectivo y redondeo_total." />
       )}
-      {tab === "permisos" && <Permisos />}
+      {tab === "bloqueo" && <BloqueoTecnico />}
       {tab === "bitacora" && <Bitacora />}
       {tab === "sistema" && <Sistema />}
     </div>
@@ -176,61 +177,13 @@ function Hardware() {
   );
 }
 
-const NOMBRE_PERMISO: Record<Permiso, string> = {
-  venta: "Venta",
-  productos: "Productos y códigos",
-  "productos.importar": "Importar productos",
-  departamentos: "Departamentos (nombre, orden)",
-  "departamentos.estructura": "Departamentos (crear, códigos)",
-  usuarios: "Usuarios",
-  negocio: "Negocio: contacto y pie",
-  "negocio.legal": "Negocio: datos legales y logo",
-  "config.tecnica": "Configuración técnica",
-  reportes: "Reportes",
-  "clientes.basico": "Clientes: nombre y teléfono (apartados)",
-  clientes: "Clientes: lista, datos, exportar, anonimizar",
-  respaldo: "Respaldo cifrado (lleva datos de clientes)",
-  facturas: "Pendientes de factura electrónica",
-  caja: "Caja: abrir, movimientos, no venta, cerrar (conteo ciego)",
-  "caja.admin": "Caja: totales en vivo, cortes, todos los turnos, reabrir, anular",
-  impresoras: "Impresoras: agregar, cambiar, quitar y gaveta",
-  "impresoras.asignar": "Impresoras: ver, probar y asignar documentos",
-  inventario: "Inventario: existencias, entradas, ajustes, conteos, costos",
-  cuentas: "Apartados y crédito: crear, buscar, abonar, entregar",
-  "cuentas.admin": "Apartados: todos, cancelar, anular abonos, condonar, límites",
-  "reportes.ventas": "Reportes de ventas e historial de cierres",
-  proformas: "Proformas: crear, buscar, imprimir, pasar a venta",
-  "proformas.anular": "Proformas: anular (con motivo)",
-  "proformas.admin": "Proformas: opciones y reporte",
-};
-
-function Permisos() {
-  const roles: Rol[] = ["cajero", "dueno", "tecnico"];
-  return (
-    <section className="card">
-      <p className="muted">Hoy son fijos. Más adelante se podrán ajustar por negocio desde aquí.</p>
-      <table className="tbl tbl-grande">
-        <thead>
-          <tr>
-            <th>Permiso</th>
-            {roles.map((r) => (
-              <th key={r}>{ROL_NOMBRE[r]}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {(Object.keys(NOMBRE_PERMISO) as Permiso[]).map((p) => (
-            <tr key={p}>
-              <td>{NOMBRE_PERMISO[p]}</td>
-              {roles.map((r) => (
-                <td key={r}>{PERMISOS[r].includes(p) ? "✓" : ""}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
+/** Tiempo de bloqueo (los permisos completos están en Administración → Permisos). */
+function BloqueoTecnico() {
+  const [d, setD] = useState<Datos | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => void seguridadObtener().then((s) => setD(s.datos), (e) => setError(textoError(e))), []);
+  if (error) return <Mensaje error={error} />;
+  return d ? <Bloqueo d={d} soloEsto /> : <p className="muted">Cargando…</p>;
 }
 
 function Bitacora() {

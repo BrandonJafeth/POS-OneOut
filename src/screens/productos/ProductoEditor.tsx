@@ -22,6 +22,7 @@ import { estadoInventario, registrarEntrada } from "../../db/inventario";
 import { isValidEan13 } from "../../lib/ean13";
 import { leerMontoEntero, limpiarNombre } from "../../lib/texto";
 import { colones, monto } from "../../lib/tickets";
+import { ulid } from "../../lib/ulid";
 import { useEscaner } from "../../lib/useEscaner";
 import type { Codigo, Departamento, ProductoConCodigos, TipoCodigo } from "../../tipos";
 import Etiqueta from "./Etiqueta";
@@ -130,6 +131,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
         await cargar(nuevoId);
         if (existenciaNum > 0)
           await registrarEntrada({
+            operacionId: ulid(),
             proveedorId: null,
             factura: "",
             fecha: new Date().toLocaleDateString("sv-SE"),
@@ -199,7 +201,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
   async function eliminar() {
     if (!id) return;
     // Si tiene unidades, que el dueño sepa que dejan de contarse en el inventario.
-    const inv = puede("inventario") ? (await estadoInventario([id]).catch(() => []))[0] : undefined;
+    const inv = puede("inventario.ver") ? (await estadoInventario([id]).catch(() => []))[0] : undefined;
     const conUnidades = inv?.controla && inv.existencia !== 0 ? ` Tiene ${inv.existencia} unidad(es) en inventario: dejan de contarse en el inventario valorizado (su kardex se conserva).` : "";
     if (!(await confirmar({ titulo: `¿Eliminar "${nombre}"?`, texto: `Deja de aparecer en el catálogo y en la venta. Las ventas anteriores no cambian.${conUnidades}`, aceptar: "Eliminar producto", peligro: true }))) return;
     try {
@@ -270,7 +272,7 @@ export default function ProductoEditor({ productoId, departamentos, codigoInicia
             Descuento %
             <input className="small" inputMode="numeric" placeholder="0" value={descuento} onChange={(e) => setDescuento(e.target.value.replace(/\D/g, "").slice(0, 3))} />
           </label>
-          {!id && puede("inventario") && (
+          {!id && puede("inventario.ver") && (
             <label className="campo">
               Unidades que hay
               <input className="small" inputMode="numeric" placeholder="0" value={existencia} onChange={(e) => setExistencia(e.target.value.replace(/\D/g, "").slice(0, 6))} />

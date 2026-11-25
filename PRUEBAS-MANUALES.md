@@ -258,6 +258,43 @@ Antes, como técnico: **Técnico → Claves de configuración**, `usa_credito` �
 11. **Reporte (Ana).** Reportes → Ventas → **Proformas**: emitidas, convertidas, vencidas y anuladas con montos. No suman a las ventas.
 12. **Opciones (Ana).** Proformas → Opciones: vigencia, días, precio al convertir, condiciones y días para borrar el nombre.
 
+## X. Permisos y bloqueo por inactividad (0.9.3)
+
+Usuarios: Ana (dueña), Luis (cajero), el técnico. Caja abierta para las ventas.
+
+1. **Igual que antes.** Recién actualizado, como Luis: vender, descuento hasta 10 % sin PIN (más pide el PIN de Ana), salida de ¢20.000 sin PIN y ¢25.000 con PIN, no ve totales con el turno abierto, no ve Anular. → Todo como en la 0.9.2.
+2. **La pantalla Permisos.** Ana → Administración → **Permisos**. → Matriz por área con buscador; cada celda dice en palabras qué significa; la columna del dueño no se cambia; al técnico, lo de clientes y dinero sale «No (Ley 8968 o dinero)».
+3. **Opción C con PIN.** Pestaña **Anulación por el cajero** → C (hasta ¢10.000, 3 por turno, turno abierto, 30 min) → Guardar. → Pide el PIN de Ana. Sin PIN no guarda.
+4. **Se aplica sin volver a entrar.** Con Luis dentro (en otra sesión antes de que Ana cambie, o cambiando de usuario): Ventas del día → una venta de ¢2.000 → **Anular venta** → motivo de la lista (con «Otro», escribir cuál) → sin PIN. → Sale el **comprobante** con firma; en la bitácora «opción C: cajero sin PIN».
+5. **Pasa un límite.** Anular una de ¢15.000 → pide el PIN de Ana («pasa de ¢10.000»). Una facturada o de un turno cerrado → siempre PIN. Una que liquida un apartado → «Corríjalo en Apartados».
+6. **Z.** Cerrar la caja. → Sección **«Anulaciones por cajero sin PIN»** (papel, PDF y pantalla) con motivo y usuario; las que llevaron PIN no salen ahí.
+7. **Aviso.** Ana entra. → «Hubo N anulaciones sin PIN» con «Ver el detalle». Con más de 3 en un día, el día sale marcado en Reportes → Cierres de caja.
+8. **Excepción.** Por usuario → un segundo cajero (Fabricio) con «Anular» = Sí, con motivo. → Fabricio anula sin PIN; Luis (con su rol en A) no ve Anular.
+9. **Reglas fijas.** El técnico intenta darle «Clientes» al técnico o a Luis «Editar permisos». → No deja. Desactivar al único dueño → no deja.
+10. **Plantillas e historial.** Elegir «Estricto» → lista de diferencias → usar → Guardar. Historial → «Ver» la versión anterior → **Volver a esta versión** (PIN de Ana). → Vuelve como una versión nueva.
+11. **PDF para firmar.** → Documentos\Punto de venta\Reportes\AAAA-MM\permisos-vN.pdf con la tabla, los límites y la línea de firma. Firmarlo con Ana y guardarlo.
+12. **Bloqueo.** Técnico → Configuración técnica → **Bloqueo por inactividad**: 5 min sin PIN; 20 min pide el PIN de Ana; 0 o «nunca» no se aceptan; técnico 16 no. → «Si nadie toca la caja por 5 minutos, se pide el PIN otra vez.»
+13. **Se bloquea sin perder nada.** Luis: una venta en espera con productos, un conteo de cierre a medias y una entrada de mercadería (como Ana) a medias. Esperar sin tocar. → A falta de 1 minuto, aviso; una tecla lo cierra. Al vencer, **Pantalla bloqueada**. Luis pone su PIN → todo sigue igual. Si en cambio entra Ana, empieza de cero y no ve nada de la pantalla de Luis.
+14. **No corta un cobro.** Con el tiempo en 1 min, cobrar justo antes de que venza. → El cobro y el tiquete salen; el bloqueo viene después.
+15. **Preparar para el cliente.** → «Permisos y bloqueo por inactividad»: versión y minutos por rol. Revisarlo con el dueño.
+
+## Y. Ajustes de seguridad (0.9.4)
+
+Usuarios: Ana (dueña), Luis (cajero), el técnico. Caja abierta.
+
+1. **Niveles que se pueden elegir.** Ana → Permisos. «Ver totales con el turno abierto», «Ver la caja», «Ver ventas»: solo **No / Sí**. Reabrir turno, corregir el día, gaveta con orden del dueño: **No / Sí, siempre con PIN del dueño**. Anular, salidas, no venta, descuentos, precio libre, quitar líneas, sin existencia, apartadas, cancelar, condonar, anular abono, cambiar forma de pago: **No / Sí / Sí, con motivo / Con PIN**. Cancelar, condonar, anular abono y cambiar forma de pago: «Sí» o «con motivo» sin monto máximo → no guarda («solo con PIN»).
+2. **Precio libre cancelado (antes pasaba).** Plantilla Estricto. Luis: F4 → precio → pide PIN → Cancelar → F12. → Vuelve a pedir el PIN; sin él no cobra. Igual al apartar y al guardar proforma. Quitar una línea cuando pide PIN: lo pide al cobrar.
+3. **Descuento atado a la venta.** Luis: carrito de ¢2.000 con 50 % → PIN de Ana → agregar otro producto. → La autorización se borra y se pide el PIN otra vez. Cobrar sin cambios → pasa una sola vez.
+4. **Con motivo.** «Salida de efectivo» = Sí, con motivo. Luis: salida sin detalle → pide el motivo. «No venta» con «por turno» = 0 → siempre pide el PIN.
+5. **Código de recuperación.** Ana → Usuarios → Nuevo usuario «Marco», rol Dueño. → Sale **Código de recuperación de Marco** (4 grupos de 5) con **Imprimir** (impresora de tiquetes) y «¿Ya lo guardó?» al cerrar sin imprimir. El técnico: «Nuevo usuario» con rol Dueño → no deja (ya hay dueño).
+6. **Restablecer el PIN de un dueño.** Técnico → Usuarios → Marco → Cambiar PIN: sin código o con uno equivocado → no deja (y frena tras 4 intentos). Con el código impreso → guarda y sale un **código nuevo** para imprimir; el viejo ya no sirve. Marco entra → «Su PIN fue restablecido el …» y debe cambiarlo.
+7. **PIN propio.** Ana → Usuarios → su fila → Cambiar PIN: pide el **PIN actual**. «Código de recuperación» (su fila) → con su PIN → código nuevo.
+8. **F10.** Luis → F10 → vacío, «ab», «%» o una cédula → no lista nada y explica qué escribir. Número, teléfono completo o 3 letras del nombre → encuentra; el teléfono sale tapado (••••1234).
+9. **Entrada de mercadería.** Ana: doble clic rápido en «Guardar entrada». → Una sola entrada (existencia una vez).
+10. **Precios y costos.** Darle a Luis «Editar productos» (sin «Cambiar precios»): renombra un producto, pero cambiar el precio → «No tiene permiso». Darle Inventario sin «Ver costos»: la lista y el kardex sin costo; «Valor del inventario» no abre.
+11. **Caja y cierre.** Administración → Caja y cierre → «Aviso en el cierre» dice que el PIN por cantidad está en Permisos.
+12. **Preparar para el cliente.** → «Código de recuperación impreso y guardado» en verde solo si cada dueño tiene su código.
+
 ## U. Reportes y cierres de caja
 
 Como Ana, **Reportes**.
@@ -304,6 +341,7 @@ Se hace una vez, en la computadora del negocio, antes de dejarla en uso. Marque 
 - [ ] 7. **Importar productos** (el archivo del cliente, ~719). → El resumen cuadra con el archivo; los que tienen error dicen la fila y por qué. Sin códigos internos inventados (salvo que lo marque).
 - [ ] 8. **Respaldo automático.** Como dueño, Administración → Respaldo: elija la contraseña, márquela como entendida y anótela **fuera de la computadora**. → «Hacer uno ahora» dice verificado.
 - [ ] 9. **Preparar para el cliente** otra vez. → Todo listo; «Sin datos de prueba» listo.
+- [ ] 9b. **Permisos (0.9.3).** Con el dueño: revisar Administración → Permisos (por defecto «Normal», igual que antes), decidir la anulación por el cajero (A, B o C) y el tiempo de bloqueo; imprimir **PDF para firmar**, firmarlo y guardarlo. (Sección X.)
 
 ### Vender
 - [ ] 10. Abrir caja con fondo. → Abre; queda en la bitácora.

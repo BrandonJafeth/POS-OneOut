@@ -1,7 +1,7 @@
 # Seguridad del Punto de Venta
 
 Este documento explica cómo se protege la aplicación. También dice qué cosas no cubre y qué debe hacer cada negocio.
-Aplica a la versión 0.9.2 (versión de prueba en el negocio), con las migraciones 1 a 24.
+Aplica a la versión 0.9.3 (versión de prueba en el negocio), con las migraciones 1 a 25.
 
 ## 1. Modelo de amenazas
 
@@ -30,9 +30,9 @@ Aplica a la versión 0.9.2 (versión de prueba en el negocio), con las migracion
 
 ### Lógica de negocio en Rust
 Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.rs`.
-- **Sesión**: vive en Rust (`sesion.rs`). Cada comando toma el usuario de ahí, nunca de un parámetro, y vence por inactividad (`sesion_inactividad_min`, 10 min por defecto).
+- **Sesión**: vive en Rust (`sesion.rs`). Cada comando toma el usuario de ahí, nunca de un parámetro. Se **bloquea** por inactividad (sección «Bloqueo por inactividad»).
   - La pantalla también se bloquea sola al vencer el plazo.
-- **Permisos**: tabla fija en `permisos.rs`. `src/lib/permisos.ts` es una copia que solo sirve para mostrar u ocultar botones.
+- **Permisos**: configurables por rol y por cajero (sección «Permisos configurables»). Un solo lugar decide: `politica::efectiva`. La pantalla recibe la política efectiva del usuario (`sesion_permisos`) y solo muestra u oculta; ya no hay una copia de la tabla en TS.
   - El técnico no vende, no toca la caja y no ve clientes.
 - **Dinero**: en colones enteros (`i64`) y en una sola transacción `BEGIN IMMEDIATE`. Rust vuelve a calcular totales, IVA, descuentos y vuelto (`calculo.rs`). El precio de un producto sale de la base, no de la pantalla.
   - **Autorización de descuento**: el PIN del dueño genera un token de un solo uso, válido para esa venta y ese porcentaje durante 30 minutos. Antes la pantalla mandaba el id del dueño y se le creía.
@@ -50,7 +50,10 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - Argon2id (`pin.rs`). El PIN mínimo es de 6 dígitos para dueño y técnico y de 4 para cajero, configurable. Se rechazan los PIN con el mismo dígito repetido.
 - Hay que cambiar el PIN en la primera entrada si lo puso otra persona o si es más corto que el mínimo. Hasta hacerlo, Rust responde `DEBE_CAMBIAR_PIN` a todo.
 - La entrada no revela si un usuario existe: "no existe", "inactivo" y "PIN incorrecto" dan la misma respuesta.
-- Las acciones sensibles piden el PIN cada vez y no guardan la autorización. Son: reabrir caja, salida grande, anular, corregir un pago de un turno cerrado, anonimizar y restaurar.
+- Las acciones sensibles piden el PIN cada vez y no guardan la autorización. Son: reabrir caja, salida grande, anular, corregir un pago de un turno cerrado, anonimizar y restaurar. Darle una de estas acciones a un cajero no le quita el PIN del dueño (`usuarios::confirmar_dueno` revisa la acción y siempre pide el PIN).
+- Lo que la política pide con «PIN» o «motivo» y el comando no recibe como argumento se autoriza con `seguridad_autorizar`: una autorización de **un solo uso** para esa acción **y ese comando** (0.9.4: otro comando no la gasta ni la usa), que vence a los 2 minutos y se gasta cuando corre ese comando (aunque falle). Queda en la bitácora (`permiso.autorizado`) con la versión y quién autorizó.
+- Cambiar el PIN propio pide el PIN actual (0.9.4, D2), salvo el cambio obligatorio del primer ingreso o después de un restablecimiento.
+- **Recuperar el PIN de un dueño (0.9.4, D1)**: al crear cada dueño se genera un código de recuperación (4 grupos de 5 caracteres, ≈ 99 bits), se muestra una sola vez y se imprime para guardarlo en un sobre; en la base queda solo su hash (Argon2id). Restablecer el PIN de un dueño exige ese código, lo use quien lo use (también el técnico), con el mismo freno de intentos que el PIN del dueño; queda en la bitácora, obliga a cambiar el PIN al entrar, el código usado deja de servir y sale uno nuevo. Al entrar, el dueño ve «Su PIN fue restablecido el …». El técnico solo crea o restablece un dueño sin código mientras no exista ningún dueño con su PIN (la instalación); después, otro dueño lo crea un dueño. **Sin el código y sin otro dueño, la única salida es restaurar un respaldo** (Administración → Respaldo, o «Restaurar desde respaldo» si la base no abre).
 - El técnico entra por una entrada oculta (Ctrl+Alt+T); no aparece en la lista.
 
 ### Datos en disco
@@ -67,7 +70,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
   - Cada intento fallido con el PIN del dueño ya dado (contraseña equivocada, archivo alterado, no se pudo poner al día) queda en la bitácora como `respaldo.restaurar_fallido`, con el motivo técnico. La pantalla solo muestra un mensaje claro.
   - **Formato versionado**: `POSBAK02` lleva en el encabezado la versión del programa y la última migración. El encabezado va en claro (para rechazar un respaldo de una versión más nueva antes de pedir nada) pero autenticado por GCM: cambiarlo hace fallar el descifrado. El lector sigue aceptando `POSBAK01` (sin encabezado). Un formato nuevo agrega un lector; no reemplaza los anteriores.
   - `tests/fixtures/` guarda un respaldo de prueba por versión (sin datos reales). La prueba que los restaura todos no se borra.
-- Los archivos temporales y el registro no llevan datos personales ni PIN. No hay archivo de log de la app.
+- Los archivos temporales y el registro no llevan datos personales ni PIN. El único registro es `errores.log` en la carpeta de datos (errores técnicos para el técnico, máx. 512 KB con una rotación): números de 6 o más dígitos —también separados por guiones o espacios, como teléfonos y cédulas— se guardan como «#». Los mensajes de error no llevan nombres.
 
 ### Bitácora
 - Solo se puede agregar. Hay triggers contra `UPDATE`/`DELETE` y contra insertar sin hash.
@@ -112,7 +115,7 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Totales ocultos al cajero con el turno abierto** (`caja::ve_totales`): `caja_detalle` le manda solo fondo, movimientos y aperturas sin venta; `caja_turnos` le manda las ventas y el total en `null`; `venta_listar_dia`, `venta_obtener`, `venta_imprimir` y `venta_pendientes_factura` le dan los tiquetes de todos los cajeros, uno por uno y sin sumas (para atender un reclamo aunque no esté quien cobró; el riesgo aceptado es que sume a mano tiquete por tiquete); `caja_z` falla con el turno abierto; `caja_corte` es del dueño; y `bd_leer` no deja leer `ventas` ni `venta_lineas` a nadie. Una salida rechazada por falta de efectivo queda en la bitácora (`caja.salida_rechazada`), para que el mensaje no sirva para adivinar lo esperado sin dejar rastro.
 - **Conteo ciego y bloqueado**: el cajero cuenta (total o billete por billete) sin ver lo esperado; al confirmar se cierra el turno y el trigger `caja_turnos_conteo_bloqueado` impide cambiar conteo, contado, esperado, diferencia o totales de un turno cerrado. Solo `reabrir` (dueño, PIN, motivo, mismo día, último turno) vuelve a abrirlo; el cierre anterior queda en la bitácora.
 - **Cierre Z**: los totales congelados se revisan otra vez al leerlos (departamentos, detalle, formas de pago y efectivo deben cuadrar). Si no cuadran, Rust no imprime. La reimpresión exige el PIN del dueño y la marca "*** COPIA ***" en cada papel.
-- **Anular y corregir pagos**: solo el dueño, con su PIN y motivo (`confirmar_dueno`). La venta anulada no se borra.
+- **Anular y corregir pagos**: según la política `ventas.anular` / `ventas.cambiar_pago` (por defecto, solo el dueño con su PIN y motivo). La venta anulada no se borra. Anulación por el cajero: sección «Anulación por el cajero».
 - Los pagos y los montos de una venta de un turno cerrado no se pueden cambiar (triggers). Una corrección posterior queda como `caja_ajustes` en el turno actual, la hace solo el dueño con PIN, y una devolución de efectivo entra como salida.
 
 ### Apartados y crédito
@@ -149,10 +152,13 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 ### Cadena de suministro
 - `package-lock.json` y `Cargo.lock` están fijados. Se quitó `tauri-plugin-sql`, que ya no se usa.
 - `npm audit --omit=dev`: 0 vulnerabilidades. Las alertas de `npm audit` completo vienen de `webdriverio` (solo para la prueba de punta a punta; no va en el instalador). `cargo deny check`: advisories, bans, licenses y sources en ok.
-- `cargo audit`: sin hallazgos aplicables. Hay 3 excepciones justificadas en `src-tauri/.cargo/audit.toml`:
+- `cargo audit` y `cargo deny check`: pasan. Excepciones justificadas en `src-tauri/.cargo/audit.toml` (y las dos últimas también en `deny.toml`):
   - `rsa`: viene por el driver MySQL opcional de sqlx, que no se compila.
   - `glib` y `proc-macro-error`: son dependencias de Linux.
-  - Se verificó con `cargo tree -i <crate> --target all`.
+  - Se verificó con `cargo tree -i <crate> --target x86_64-pc-windows-msvc`.
+  - **RUSTSEC-2026-0459 (SQLite dentro de SQLCipher, `libsqlite3-sys` 0.30)**: sí se compila. El arreglo está en `libsqlite3-sys` ≥ 0.31, que solo acepta sqlx 0.9 (cambio mayor de la capa de base de datos, no compatible con la 0.8.6 de esta versión). Riesgo: la base es local y cifrada; el programa no ejecuta SQL de terceros (todo el SQL está en Rust o en `sentencias.json`, embebido); `bd_leer` acepta solo `SELECT` sobre las tablas del esquema, con tope de filas. Un atacante necesitaría ya poder escribir la base o mandar comandos a la app. Pendiente: pasar a sqlx 0.9 en una versión futura.
+  - **RUSTSEC-2026-0543 (`chrono` sin mantenimiento)**: aviso informativo, sin falla conocida. Pendiente: migrar a `time` o `jiff` en una versión futura.
+- `url` y `cookie` se actualizaron en el lockfile (0.9.4) por RUSTSEC-2026-0592 y RUSTSEC-2026-0594.
 - Compilación release: LTO, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
 - Instalador **sin firmar**. Cada entrega se publica con su SHA-256 (ver la sección 6).
 
@@ -172,8 +178,316 @@ Todo lo que protege dinero o permisos se valida en el backend: `src-tauri/src/*.
 - **Contraseña perdida = respaldos perdidos.** No hay recuperación posible (es el punto del cifrado). La pantalla lo advierte con casilla de «entendido» al hacer un respaldo y al activar el automático.
 - Registro local de errores técnicos `errores.log` (rota a los 512 KB): origen y mensaje técnico, sin control, máx. 400 caracteres y toda secuencia de 6+ dígitos cambiada por «#». También los cierres inesperados de Rust (panic). «Exportar diagnóstico» (solo técnico) arma un `.txt` en Descargas con versión, base, integridad, bitácora, conteos (nunca nombres) y las últimas líneas del registro.
 
+### Permisos configurables (0.9.3, DISENO-PERMISOS.md)
+- **Modelo**: cada comando corresponde a una acción del catálogo (`acciones.rs`). Para cada acción y rol hay una política: no · sí · sí con motivo · con PIN del dueño (y motivo), con límites opcionales (monto, %, cantidad por turno, solo el turno abierto, minutos desde la venta) y qué pasa al pasarlos (pide PIN o no deja). Excepciones por cajero. Política efectiva (un solo lugar, `politica::efectiva`): reglas fijas → excepción del usuario → su rol → **no** (lo que no tiene política se niega).
+- **Puerta común** (`App::comando` en lib.rs): bloqueo por inactividad, cambio de PIN pendiente y la política del comando. Un comando sin acción en `acciones::COMANDOS` se niega. Las acciones con límites los revisan dentro de su transacción (`politica::aplicar`), con los datos de esa misma transacción.
+- **Guardado**: `seguridad_versiones` (migración 25), solo agregar: triggers contra `UPDATE` y `DELETE`, cada fila con el hash de la anterior (como la bitácora) y el JSON validado contra un esquema en Rust al leer (`deny_unknown_fields` + `politica::validar`). Vigente = la última de la cadena sana. Se verifica **al abrir la app y al cerrar la caja**: si está rota se usa la última válida, queda en la bitácora (`seguridad.alterada`) y el dueño ve el aviso al entrar.
+- **En memoria**: la vigente vive en `App.seguridad` y se vuelve a leer solo al agregar una versión (`seguridad_guardar`, `seguridad_inactividad`, `seguridad_volver` o al cerrar la caja si la cadena se rompió). Cada comando toma una copia (`Actor.seg`): un cambio aplica en el siguiente comando, sin cerrar sesión; la pantalla recibe el evento `seguridad-cambiada` y vuelve a pedir sus permisos.
+- **Quién edita**: dueño y técnico (`seguridad.editar`, fija). Lo que **da más permiso** sobre dinero, caja, clientes o anulaciones (o sube el bloqueo de 10 min) pide además el PIN de un dueño, aunque lo haga el técnico o el mismo dueño (`politica::mas_permisivo`). Volver a una versión anterior: siempre con PIN; crea una versión nueva con los datos de la vieja (el historial no se reescribe).
+- **Reglas fijas** (Rust las aplica al calcular y al validar; la pantalla las muestra deshabilitadas):
+  1. La fila del dueño es fija e igual a la 0.9.2 (incluido su PIN donde se pedía). En «vender sin existencia» y «salida de efectivo» el tope es del negocio: el dueño sigue el del cajero (con PIN al pasar), como antes.
+  2. Siempre queda al menos un dueño activo **con su PIN propio** (sin cambio pendiente): no se desactiva ni se elimina el último (`usuarios::no_quedar_sin_dueno`). No hay comando para cambiar el rol de un usuario.
+  3. Editar permisos e inactividad: fijo para dueño y técnico; nadie se lo quita.
+  4. La bitácora no se apaga ni se edita (no hay acción para eso; triggers).
+  5. El técnico nunca tiene una acción protegida (🔒: clientes, ventas, dinero; Ley 8968), aunque venga en los datos: la versión se rechaza.
+  6. El cajero nunca tiene «editar permisos», «tiempo de bloqueo», «usuarios», «configuración técnica» ni «preparar» (ni por excepción).
+  7. «Ver totales con el turno abierto» para el cajero solo se guarda con la advertencia confirmada.
+  8. El bloqueo por inactividad no se desactiva (1 a 60 min; técnico hasta 15).
+- **Plantillas**: Estricto, Normal (= 0.9.2) y Flexible (anular C hasta ¢10.000, 3 por turno, 30 min; descuento 15 %; salida hasta ¢30.000). Antes de aplicar se ve la lista de diferencias.
+- Los topes que antes eran claves de configuración (`descuento_max_pct`, `caja_salida_max_sin_pin`, `permitir_vender_sin_existencia`, `venta_mostrar_existencia`, `sesion_inactividad_min`) pasaron a la versión 1 de los permisos con su valor; `config_guardar` ya no los acepta. `caja_no_venta_umbral` sigue como el aviso del Z; el PIN desde cierta cantidad es el límite de `caja.no_venta`.
+
+### Auditoría 0.9.4 (AUDITORIA-0.9.4.md)
+- **Niveles que cada acción aplica (D4)**: el catálogo dice qué niveles puede aplicar cada acción (`Accion::niveles`: no·sí; no·sí·motivo·PIN; o «siempre con PIN del dueño»). La pantalla Permisos ofrece solo esos y Rust rechaza guardar otro (también por comando directo y al volver a una versión vieja). Uno que llegue igual en una versión guardada antes se baja al más estricto que la acción aplique (`Accion::ajustar`), nunca vale como «sí». `Actor::puede` (mostrar o elegir un camino) es solo «sí»; `Actor::exigir` con «PIN» o «motivo» los revisa con la autorización de un solo uso. Las acciones de dinero (anular, cambiar forma de pago, salidas, no venta, descuentos, precio libre, quitar líneas, vender sin existencia o apartado, cancelar, condonar, anular abono) aplican todos sus niveles.
+- **Regla general al cobrar (C2)**: lo guardado de la venta en espera solo llega ahí pasando la política. Al cobrar, apartar, vender a crédito, guardar o convertir una proforma, Rust compara la venta con lo guardado y vuelve a aplicar la política a lo distinto (precio libre nuevo o cambiado, líneas quitadas), además del descuento, la venta sin existencia y las unidades apartadas; sin la autorización de ese comando, se rechaza. Una pestaña nueva con precio libre también pasa por la política.
+- **Descuento (D5)**: la autorización del dueño queda atada a esa venta, a una huella de sus líneas (precios, cantidades, descuentos) y al monto en colones; si cambia algo no vale (la pantalla la borra y Rust la rechaza). Un solo uso.
+- **Cancelar, condonar y anular un abono** (con «cambiar forma de pago»): admiten monto máximo; sin monto, el cajero solo las tiene con PIN.
+- **Precios y costos**: «cambiar precios de venta y descuentos fijos» (`productos.precio`) y «ver costos, valor del inventario y utilidad» (`inventario.costos`) son acciones aparte, por defecto solo del dueño. Rust revisa el precio en la edición de productos, la importación y la entrada de mercadería, y quita costo, valor y utilidad de las respuestas (y de lo que se exporte de ellas).
+- **F10 (D3)**: buscar apartados pide número, teléfono (8 dígitos) o al menos 3 letras; sin cédula, sin lista vacía, los comodines se buscan tal cual y quien no ve todas las cuentas recibe el teléfono tapado.
+- **Otros**: cadena de permisos alterada → guardar falla con un error claro; «0 por turno» = siempre PIN; el dueño, con su PIN, nunca queda frenado por el «no deja» del cajero; la entrada de mercadería es idempotente (id de operación); la bitácora por `bd_lote` solo acepta lo que anota la pantalla de catálogo; reloj de Windows atrasado más de un minuto → la sesión se bloquea; si los permisos no se pueden leer al abrir, se usa la Normal marcada como alterada (no en silencio).
+- **Tablas**: las de abajo («Acciones…» y «Comando → acción») las genera y compara la prueba `permisos_tests::seguridad_md_igual_al_catalogo` (`tools/tablas-seguridad.ps1` las regenera).
+
+### Anulación por el cajero (0.9.3)
+- Opción A (solo el dueño, como antes), B (cajero con PIN del dueño) o C (cajero sin PIN, con motivo de la lista configurable y límites: monto, cantidad por turno, solo el turno abierto, minutos desde la venta; al pasar uno, PIN o no deja). Todo en la transacción de `ventas::anular`.
+- Siempre con PIN aunque cumpla los límites: turno cerrado, venta con factura electrónica, devolución de más dinero que el monto permitido. Las ventas que liquidan un apartado o un crédito con abonos no se anulan desde Ventas del día con ninguna opción.
+- `ventas.anulada_actor`, `anulada_politica` (A/B/C) y `anulada_version`; `anulada_por` es quien autorizó. Bitácora con la política, la versión, si fue sin PIN y el límite que pidió el PIN.
+- Comprobante (número, monto, motivo, usuario, fecha y hora real de Rust, firma del cajero) obligatorio en C; en A y B según la opción (apagada por defecto). Se reimprime desde la venta.
+- Z: sección «Anulaciones por cajero sin PIN» aparte (papel, PDF y pantalla). El dueño ve al entrar «Hubo N anulaciones sin PIN»; un día con más que el umbral sale marcado en Cierres de caja. Dinero, inventario y Z se ajustan igual en las tres opciones.
+
+### Bloqueo por inactividad (0.9.3)
+- Lo decide Rust con el reloj de `util::ahora` (inyectable): `Sesion` guarda la última actividad real. Solo `sesion_tocar` la renueva: la pantalla lo llama con teclado (incluido el lector de código de barras), mouse o táctil, a lo sumo cada 10 s. **Los comandos no renuevan** (una pantalla que recarga sola no mantiene viva la sesión). Si la pantalla deja de informar, el siguiente comando choca igual.
+- Al vencer, la sesión queda **bloqueada** (no se cierra): ningún comando corre (`SESION_BLOQUEADA`), aunque se llame directo. Un comando que ya empezó (cobro, impresión) termina: el guardia `en_curso` evita bloquear a la mitad y el bloqueo cae en el siguiente.
+- Mientras está bloqueada, lo de abajo no escucha el teclado: el lector de códigos y los atajos de la venta escuchan en `window` y se apagan con el velo puesto (`pantallaBloqueada`).
+- Desbloquear: el mismo usuario con su PIN (misma escalera de intentos y bitácora `sesion.desbloqueo`) sigue donde estaba (la pantalla quedó montada detrás de un velo opaco: venta en espera, conteo de caja a medias, entrada de mercadería, proforma). Otro usuario empieza de cero: la sesión anterior se descarta y la pantalla se vuelve a armar (borra el borrador de la entrada, que lleva costos).
+- Tiempo: general y opcional por rol, de 1 a 60 min (técnico hasta 15); 10 por defecto; no existe «nunca». Bajarlo, sin PIN; subirlo de 10, con PIN del dueño. Queda en la bitácora (antes, después, PIN) y en el historial de versiones. Aviso «Se bloquea en 1 minuto por inactividad» (con 1 minuto, a los 30 s); cualquier tecla lo cierra.
+
 ### Tabla de permisos (comando × rol)
-Fuente: `src-tauri/src/tabla_permisos.rs`. La prueba `cada_comando_con_cada_rol_respeta_la_tabla` llama cada comando con cada rol y compara con esta tabla: si un permiso cambia, cambian las dos. «Permitido» = el comando no responde con falta de permiso (puede fallar por otra cosa).
+Con la plantilla Normal (versión 1 después de actualizar), cada comando responde igual que en la 0.9.2. Lo prueban dos tablas:
+- `tabla_comandos::tabla_comandos_igual_que_la_foto`: llama **por IPC** (runtime simulado de Tauri, como la pantalla) los 161 comandos —203 variantes: cada clave de configuración, operación de catálogo, documento y carpeta— sin sesión, como cajero, dueño y técnico, y compara con `tests/casos/permisos_antes.json`, la foto tomada con el código de la 0.9.2 antes de tocar una validación. Los únicos cambios a propósito están listados en el código (`DELIBERADOS`: las 5 claves de configuración que pasaron a Permisos).
+- `tabla_permisos::cada_comando_con_cada_rol_respeta_la_tabla` (la tabla de abajo, por módulo). «Permitido» = el comando no responde con falta de permiso (puede fallar por otra cosa).
+- `permisos_tests::cada_comando_cada_rol_cada_politica`: cada comando con acción, como cajero y como técnico, con cada política (no, sí, motivo, PIN): se niega, pasa, pide el motivo o el PIN y pasa con la autorización (de un solo uso).
+
+<!-- tablas:inicio (las genera permisos_tests::seguridad_md_igual_al_catalogo; no editar a mano) -->
+#### Acciones y política Normal por rol (plantilla «Normal» = 0.9.2)
+
+🔒 = protegida (el técnico nunca). «fija» = no se cambia desde la pantalla. «Niveles»: los que la acción aplica de verdad (la pantalla ofrece solo esos y Rust rechaza otros, D4). Fuente: `acciones.rs` (lo calcula Rust).
+
+| Área | Acción | id | Niveles | Cajero | Dueño | Técnico |
+|---|---|---|---|:---:|:---:|:---:|
+| Venta | Vender y cobrar 🔒 | `venta.vender` | no · sí | ✔ | ✔ | — |
+| Venta | Descuento por línea y al total 🔒 | `venta.descuento` | no · sí · motivo · PIN | ✔ (≤ 10 %, al pasar: PIN) | ✔ | — |
+| Venta | Precio libre (F4) 🔒 | `venta.precio_libre` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Vender sin existencia 🔒 | `venta.sin_existencia` | no · sí · motivo · PIN | ✔ | ✔ (tope del negocio = el del cajero) | — |
+| Venta | Vender unidades apartadas 🔒 | `venta.apartadas` | no · sí · motivo · PIN | PIN | PIN | — |
+| Venta | Quitar líneas de una venta abierta 🔒 | `venta.quitar_linea` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Descartar una venta en espera 🔒 | `venta.descartar_espera` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Venta | Ver existencias al vender 🔒 | `venta.ver_existencia` | no · sí | — | ✔ | — |
+| Ventas cobradas | Ver tiquetes del día 🔒 | `ventas.ver` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Reimprimir tiquete 🔒 | `ventas.reimprimir` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Anular una venta 🔒 | `ventas.anular` | no · sí · motivo · PIN | — | PIN | — |
+| Ventas cobradas | Cambiar la forma de pago 🔒 | `ventas.cambiar_pago` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Ventas cobradas | Pendientes de factura 🔒 | `facturas.ver` | no · sí | ✔ | ✔ | — |
+| Ventas cobradas | Marcar factura emitida 🔒 | `facturas.marcar` | no · sí | ✔ | ✔ | — |
+| Caja | Ver la caja y su turno 🔒 | `caja.ver` | no · sí | ✔ | ✔ | — |
+| Caja | Abrir caja 🔒 | `caja.abrir` | no · sí | ✔ | ✔ | — |
+| Caja | Cerrar caja (conteo y Z) 🔒 | `caja.cerrar` | no · sí | ✔ | ✔ | — |
+| Caja | Cerrar el turno de otro (de un día anterior) 🔒 | `caja.cerrar_otro` | no · sí | ✔ | ✔ | — |
+| Caja | Ver totales con el turno abierto 🔒 | `caja.ver_totales` | no · sí | — | ✔ | — |
+| Caja | Reabrir un turno 🔒 | `caja.reabrir` | no · siempre con PIN | — | PIN | — |
+| Caja | Entrada de efectivo 🔒 | `caja.entrada` | no · sí | ✔ | ✔ | — |
+| Caja | Salida de efectivo 🔒 | `caja.salida` | no · sí · motivo · PIN | ✔ (≤ ¢20.000, al pasar: PIN) | ✔ (≤ ¢20.000, al pasar: PIN) (tope del negocio = el del cajero) | — |
+| Caja | Corte con retiro 🔒 | `caja.corte` | no · sí | — | ✔ | — |
+| Caja | No venta (abrir la gaveta con motivo) 🔒 | `caja.no_venta` | no · sí · motivo · PIN | ✔ | ✔ | — |
+| Caja | Abrir la gaveta con orden del dueño 🔒 | `caja.gaveta_sin_venta` | no · siempre con PIN | PIN | PIN | — |
+| Caja | Historial de cierres y aperturas de gaveta 🔒 | `caja.historial` | no · sí | — | ✔ | — |
+| Caja | Reimprimir un cierre Z 🔒 | `caja.reimprimir_z` | no · siempre con PIN | PIN | PIN | — |
+| Caja | Corregir la fecha de negocio 🔒 | `caja.corregir_dia` | no · siempre con PIN | — | PIN | — |
+| Caja | Número inicial del consecutivo | `caja.consecutivo` | no · sí | — | ✔ | ✔ |
+| Caja | Opciones de caja y cierre | `caja.opciones` | no · sí | — | ✔ | ✔ |
+| Apartados y crédito | Crear y buscar apartados 🔒 | `cuentas.crear` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Recibir abonos y entregar 🔒 | `cuentas.abonar` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Ver todas las cuentas y estados de cuenta 🔒 | `cuentas.ver_todas` | no · sí | — | ✔ | — |
+| Apartados y crédito | Cancelar un apartado 🔒 | `cuentas.cancelar` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Anular un abono 🔒 | `cuentas.anular_abono` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Ajustar el saldo 🔒 | `cuentas.ajustar` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Condonar el saldo 🔒 | `cuentas.condonar` | no · sí · motivo · PIN (sin monto máximo: solo PIN) | — | PIN | — |
+| Apartados y crédito | Prorrogar la fecha límite 🔒 | `cuentas.prorrogar` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Vender a crédito 🔒 | `credito.vender` | no · sí | ✔ | ✔ | — |
+| Apartados y crédito | Límites y opciones de crédito 🔒 | `credito.limite` | no · siempre con PIN | — | PIN | — |
+| Apartados y crédito | Opciones de apartados y crédito | `cuentas.opciones` | no · sí | — | ✔ | ✔ |
+| Proformas | Crear, buscar e imprimir proformas 🔒 | `proformas.crear` | no · sí | ✔ | ✔ | — |
+| Proformas | Pasar una proforma a venta 🔒 | `proformas.convertir` | no · sí | ✔ | ✔ | — |
+| Proformas | Anular una proforma 🔒 | `proformas.anular` | no · sí | — | ✔ | — |
+| Proformas | Reporte de proformas 🔒 | `proformas.admin` | no · sí | — | ✔ | — |
+| Proformas | Opciones de proformas | `proformas.opciones` | no · sí | — | ✔ | ✔ |
+| Productos | Crear productos y códigos | `productos.crear` | no · sí | — | ✔ | ✔ |
+| Productos | Editar productos | `productos.editar` | no · sí | — | ✔ | ✔ |
+| Productos | Cambiar precios de venta y descuentos fijos | `productos.precio` | no · sí | — | ✔ | — |
+| Productos | Desactivar productos | `productos.desactivar` | no · sí | — | ✔ | ✔ |
+| Productos | Favoritos | `productos.favoritos` | no · sí | — | ✔ | ✔ |
+| Productos | Imprimir etiquetas | `productos.etiquetas` | no · sí | — | ✔ | ✔ |
+| Productos | Importar CSV | `productos.importar` | no · sí | — | ✔ | ✔ |
+| Productos | Editar departamentos (nombre, orden, color) | `departamentos.editar` | no · sí | — | ✔ | ✔ |
+| Productos | Crear departamentos y cambiar su código | `departamentos.estructura` | no · sí | — | — | ✔ |
+| Inventario | Ver existencias y kardex 🔒 | `inventario.ver` | no · sí | — | ✔ | — |
+| Inventario | Ver costos, valor del inventario y utilidad | `inventario.costos` | no · sí | — | ✔ | — |
+| Inventario | Entradas de mercadería y proveedores 🔒 | `inventario.entradas` | no · sí | — | ✔ | — |
+| Inventario | Ajustes de inventario 🔒 | `inventario.ajustes` | no · sí | — | ✔ | — |
+| Inventario | Conteo físico y carga inicial 🔒 | `inventario.conteo` | no · sí | — | ✔ | — |
+| Inventario | Reportes de inventario 🔒 | `inventario.reportes` | no · sí | — | ✔ | — |
+| Inventario | Opciones de inventario 🔒 | `inventario.opciones` | no · sí | — | ✔ | — |
+| Clientes | Buscar y crear clientes (nombre, teléfono, cédula) 🔒 | `clientes.crear` | no · sí | ✔ | ✔ | — |
+| Clientes | Ver la lista y los datos completos 🔒 | `clientes.ver_todos` | no · sí | — | ✔ | — |
+| Clientes | Editar clientes 🔒 | `clientes.editar` | no · sí | — | ✔ | — |
+| Clientes | Exportar los datos de un cliente 🔒 | `clientes.exportar` | no · sí | — | ✔ | — |
+| Clientes | Anonimizar un cliente 🔒 | `clientes.anonimizar` | no · siempre con PIN | — | PIN | — |
+| Reportes | Reportes de ventas 🔒 | `reportes.ver` | no · sí | — | ✔ | — |
+| Administración | Usuarios (fija) | `usuarios.administrar` | no · sí | — | ✔ | ✔ |
+| Administración | Datos de contacto del negocio | `negocio.contacto` | no · sí | — | ✔ | ✔ |
+| Administración | Datos legales y logo | `negocio.legal` | no · sí | — | — | ✔ |
+| Administración | Formas de pago y bancos | `pagos.formas` | no · sí | — | — | ✔ |
+| Administración | Configurar impresoras y gaveta | `impresoras.configurar` | no · sí | — | — | ✔ |
+| Administración | Asignar y probar impresoras | `impresoras.asignar` | no · sí | — | ✔ | ✔ |
+| Administración | Configuración técnica (fija) | `config.tecnica` | no · sí | — | — | ✔ |
+| Administración | Respaldo 🔒 | `respaldo.crear` | no · sí | — | ✔ | — |
+| Administración | Restaurar un respaldo 🔒 | `respaldo.restaurar` | no · siempre con PIN | — | PIN | — |
+| Administración | Ver la bitácora | `bitacora.ver` | no · sí | — | ✔ | ✔ |
+| Administración | Editar permisos (fija) | `seguridad.editar` | no · sí | — | ✔ | ✔ |
+| Administración | Tiempo de bloqueo por inactividad (fija) | `seguridad.inactividad` | no · sí | — | ✔ | ✔ |
+| Administración | Preparar para el cliente y diagnóstico (fija) | `sistema.preparar` | no · sí | — | — | ✔ |
+
+#### Comando → acción
+
+Fuente: `acciones::COMANDOS`. La prueba `todo_comando_tiene_accion_y_lo_desconocido_se_niega` falla si un comando registrado no está aquí. «Según argumento»: la acción sale de la clave de configuración (`config::accion_de`), la operación (`sentencias.json`), el documento (`imprimir`), los campos (`negocio_guardar`), el usuario destino (`usuarios_*`: además la jerarquía fija) o el movimiento (`caja_movimiento`: entrada o salida).
+
+| Comando | Acción |
+|---|---|
+| `sistema_estado` | sin sesión |
+| `sistema_crear_tecnico` | sin sesión |
+| `sistema_restaurar` | sin sesión |
+| `diagnostico_anotar` | sin sesión |
+| `app_reiniciar` | sin sesión |
+| `sesion_usuarios` | sin sesión |
+| `sesion_iniciar` | sin sesión |
+| `sesion_tecnico` | sin sesión |
+| `sesion_actual` | sin sesión |
+| `sesion_cerrar` | sin sesión |
+| `sesion_tocar` | sin sesión |
+| `sesion_estado` | sin sesión |
+| `sesion_permisos` | cualquier sesión |
+| `prueba_avanzar_reloj` | sin sesión |
+| `seguridad_autorizar` | cualquier sesión |
+| `avisos_dueno` | cualquier sesión |
+| `avisos_anulaciones_vistas` | cualquier sesión |
+| `seguridad_obtener` | `seguridad.editar` |
+| `seguridad_diferencias` | `seguridad.editar` |
+| `seguridad_plantilla` | `seguridad.editar` |
+| `seguridad_guardar` | `seguridad.editar` |
+| `seguridad_historial` | `seguridad.editar` |
+| `seguridad_version` | `seguridad.editar` |
+| `seguridad_volver` | `seguridad.editar` |
+| `seguridad_inactividad` | `seguridad.inactividad` |
+| `bd_leer` | cualquier sesión |
+| `bd_lote` | según argumento |
+| `impresora_ajustes` | cualquier sesión |
+| `usuarios_listar` | `usuarios.administrar` |
+| `usuarios_crear` | `usuarios.administrar` |
+| `usuarios_editar` | según argumento |
+| `usuarios_cambiar_pin` | según argumento |
+| `usuarios_codigo_recuperacion` | cualquier sesión |
+| `usuarios_eliminar` | según argumento |
+| `config_guardar` | según argumento |
+| `negocio_guardar` | según argumento |
+| `negocio_logo` | `negocio.legal` |
+| `bitacora_listar` | `bitacora.ver` |
+| `bitacora_verificar` | `bitacora.ver` |
+| `caja_estado` | `caja.ver` |
+| `caja_abrir` | `caja.abrir` |
+| `caja_queda` | `caja.cerrar` |
+| `caja_corregir_dia` | `caja.corregir_dia` |
+| `caja_movimiento` | según argumento |
+| `caja_detalle` | `caja.ver` |
+| `caja_necesita_nota` | `caja.cerrar` |
+| `caja_cerrar` | `caja.cerrar` |
+| `caja_reabrir` | `caja.reabrir` |
+| `caja_consecutivo` | `caja.consecutivo` |
+| `caja_revisada` | `caja.historial` |
+| `caja_z` | `caja.cerrar` |
+| `caja_z_imprimir` | `caja.cerrar` |
+| `caja_nota_cierre` | `caja.cerrar` |
+| `caja_corte` | `caja.corte` |
+| `caja_turnos` | `caja.ver` |
+| `gaveta_venta` | `venta.vender` |
+| `gaveta_abono` | `cuentas.abonar` |
+| `gaveta_no_venta` | `caja.no_venta` |
+| `gaveta_cierre` | `caja.cerrar` |
+| `gaveta_dueno` | `caja.gaveta_sin_venta` |
+| `gaveta_aperturas` | `caja.historial` |
+| `venta_esperas` | `venta.vender` |
+| `venta_espera_crear` | `venta.vender` |
+| `venta_espera_guardar` | `venta.vender` |
+| `venta_espera_descartar` | `venta.descartar_espera` |
+| `venta_autorizar_descuento` | `venta.descuento` |
+| `venta_faltantes` | `venta.vender` |
+| `venta_referencia_usada` | `venta.vender` |
+| `venta_cobrar` | `venta.vender` |
+| `venta_obtener` | `ventas.ver` |
+| `venta_listar_dia` | `ventas.ver` |
+| `venta_listar_turno` | `ventas.ver` |
+| `venta_imprimir` | `ventas.reimprimir` |
+| `venta_correcciones` | `ventas.ver` |
+| `venta_corregir_pago` | `ventas.cambiar_pago` |
+| `venta_anular` | `ventas.anular` |
+| `venta_pendientes_factura` | `facturas.ver` |
+| `venta_pedir_factura` | `facturas.ver` |
+| `venta_marcar_factura` | `facturas.marcar` |
+| `cliente_crear` | `clientes.crear` |
+| `cliente_buscar` | `clientes.crear` |
+| `cliente_basico` | `clientes.crear` |
+| `cliente_dato_factura` | `facturas.ver` |
+| `cliente_tiene_correo` | `facturas.ver` |
+| `cliente_listar` | `clientes.ver_todos` |
+| `cliente_obtener` | `clientes.ver_todos` |
+| `cliente_editar` | `clientes.editar` |
+| `cliente_cuentas_saldo` | `clientes.ver_todos` |
+| `cliente_exportar` | `clientes.exportar` |
+| `cliente_anonimizar` | `clientes.anonimizar` |
+| `cliente_retencion` | `clientes.ver_todos` |
+| `cuentas_reglas` | `cuentas.crear` |
+| `cuenta_crear_apartado` | `cuentas.crear` |
+| `cuenta_abonar` | `cuentas.abonar` |
+| `cuenta_entregar` | `cuentas.abonar` |
+| `cuenta_buscar` | `cuentas.crear` |
+| `cuenta_obtener` | `cuentas.crear` |
+| `cuenta_imprimir` | `cuentas.crear` |
+| `cuenta_listar` | `cuentas.ver_todas` |
+| `cuenta_vencidas` | `cuentas.ver_todas` |
+| `cuenta_cancelar` | `cuentas.cancelar` |
+| `cuenta_ajustar` | `cuentas.ajustar` |
+| `cuenta_condonar` | `cuentas.condonar` |
+| `cuenta_prorrogar` | `cuentas.prorrogar` |
+| `abono_anular` | `cuentas.anular_abono` |
+| `cliente_limite_credito` | `credito.limite` |
+| `cliente_limite_obtener` | `credito.limite` |
+| `cliente_estado_cuenta` | `cuentas.ver_todas` |
+| `credito_disponible` | `credito.vender` |
+| `credito_opciones` | `credito.limite` |
+| `credito_guardar_opciones` | `credito.limite` |
+| `proforma_guardar` | `proformas.crear` |
+| `proforma_buscar` | `proformas.crear` |
+| `proforma_obtener` | `proformas.crear` |
+| `proforma_imprimir` | `proformas.crear` |
+| `proforma_anular` | `proformas.anular` |
+| `proforma_abrir` | `proformas.convertir` |
+| `proforma_reporte` | `proformas.admin` |
+| `reporte_rangos` | `reportes.ver` |
+| `reporte_ventas` | `reportes.ver` |
+| `respaldo_crear` | `respaldo.crear` |
+| `respaldo_ultimo` | `respaldo.crear` |
+| `respaldo_auto_configurar` | `respaldo.crear` |
+| `respaldo_auto_estado` | `respaldo.crear` |
+| `respaldo_auto_ahora` | `respaldo.crear` |
+| `respaldo_usb_confirmado` | `respaldo.crear` |
+| `respaldo_restaurar` | `respaldo.restaurar` |
+| `guardar_descarga` | según argumento |
+| `diagnostico_exportar` | `sistema.preparar` |
+| `sistema_preparacion` | `sistema.preparar` |
+| `importacion_leer` | `productos.importar` |
+| `importacion_aplicar` | `productos.importar` |
+| `inventario_lista` | `inventario.ver` |
+| `inventario_estado` | `inventario.ver` |
+| `inventario_existencia` | `venta.ver_existencia` |
+| `inventario_alertas` | `inventario.ver` |
+| `inventario_producto` | `inventario.opciones` |
+| `inventario_kardex` | `inventario.ver` |
+| `inventario_entrada` | `inventario.entradas` |
+| `inventario_entrada_obtener` | `inventario.entradas` |
+| `inventario_ajustar` | `inventario.ajustes` |
+| `inventario_conteo_abierto` | `inventario.conteo` |
+| `inventario_conteo_guardar` | `inventario.conteo` |
+| `inventario_conteo_diferencias` | `inventario.conteo` |
+| `inventario_conteo_aplicar` | `inventario.conteo` |
+| `inventario_conteo_descartar` | `inventario.conteo` |
+| `inventario_inicial` | `inventario.conteo` |
+| `inventario_reporte_bajo_minimo` | `inventario.reportes` |
+| `inventario_reporte_valorizado` | `inventario.reportes` |
+| `inventario_reporte_movimientos` | `inventario.reportes` |
+| `proveedores_listar` | `inventario.entradas` |
+| `proveedor_guardar` | `inventario.entradas` |
+| `proveedor_eliminar` | `inventario.entradas` |
+| `impresoras_listar` | `impresoras.asignar` |
+| `impresoras_detectar` | `impresoras.configurar` |
+| `impresora_guardar` | `impresoras.configurar` |
+| `impresora_eliminar` | `impresoras.configurar` |
+| `impresora_asignar` | `impresoras.asignar` |
+| `impresora_probar` | `impresoras.asignar` |
+| `imprimir` | según argumento |
+| `list_printers` | `impresoras.configurar` |
+| `print_raw` | `impresoras.configurar` |
+
+<!-- tablas:fin -->
+
+#### Tabla por módulo (0.9.2, sigue igual con la Normal)
+
 
 | Comando | Cajero | Dueño | Técnico |
 |---|:---:|:---:|:---:|
@@ -317,6 +631,7 @@ Notas: cajero y técnico no administran al dueño (con un usuario real responden
 3. **Respaldo semanal** (Administración → Respaldo). Copie el archivo `.posbak` a una memoria USB que se guarde **fuera del local**. Anote la contraseña en un lugar separado.
 4. **Si cambia de computadora o de usuario de Windows**: haga primero un respaldo. La base nueva no abre sin la clave DPAPI del usuario anterior.
 5. **PIN**: cada persona tiene el suyo, sin compartirlo, y se cambia si alguien se va del negocio. El dueño usa 6 dígitos o más.
+5b. **Permisos**: revise la tabla con el técnico (Administración → Permisos), imprímala («PDF para firmar»), fírmela y guárdela. Si cambia algo, imprima la versión nueva. Revise el aviso de anulaciones sin PIN cada vez que entra.
 6. **Revise las diferencias de caja** cada día (Caja → Turnos, marca "Revisar"), y en Técnico → Sistema use "Verificar ahora" de la bitácora una vez al mes.
 7. **Actualice Windows** y no instale programas que no conoce en la computadora de la caja.
 8. Verifique el **SHA-256** del instalador antes de instalar (sección 6).
@@ -353,10 +668,23 @@ Notas: cajero y técnico no administran al dueño (con un usuario real responden
 | Reglas iguales en Rust y en la pantalla | `cuentas::tests::reglas_iguales_que_en_la_pantalla`, `tests/cuentas.test.ts` (mismos casos: `tests/casos/cuentas.json`) |
 | Reportes: suma = suma de los cierres Z; solo el dueño; un mes en < 2 s con 50.000 ventas | `reportes::tests::*` |
 | Flujo completo en la app real | `npm run e2e` (WebdriverIO + tauri-driver) |
+| Cada comando × cada rol igual que en la 0.9.2 (por IPC, con la plantilla Normal) | `tabla_comandos::tabla_comandos_igual_que_la_foto` (foto `tests/casos/permisos_antes.json`) |
+| Cada comando × cajero y técnico × cada política (no, sí, motivo, PIN), llamado directo | `permisos_tests::cada_comando_cada_rol_cada_politica`, `::la_autorizacion_solo_con_el_pin_de_un_dueno` |
+| Ningún comando sin acción; lo desconocido se niega | `permisos_tests::todo_comando_tiene_accion_y_lo_desconocido_se_niega` |
+| Excepciones por usuario ganan solo para esa acción | `politica::tests::efectiva_excepcion_gana_solo_para_su_accion`, `anulacion_tests::opciones_a_y_b_y_el_comprobante_opcional` |
+| Cambio de permisos con la sesión abierta aplica ya; PIN si da más; volver a una versión | `permisos_tests::cambio_aplica_de_inmediato_con_pin_si_da_mas_y_se_vuelve_a_una_version` |
+| Reglas fijas (sin dueño, técnico con clientes, cajero con permisos o bloqueo, bitácora, bloqueo apagado) | `politica::tests::reglas_fijas_no_se_rompen`, `permisos_tests::reglas_fijas_por_ipc`, `::nunca_sin_un_dueno_activo_con_pin`, `usuarios::tests::siempre_queda_un_dueno_activo` |
+| Cadena de versiones alterada o JSON fuera del esquema: se usa la última válida y queda en la bitácora | `politica::tests::cadena_alterada_o_json_invalido_usa_la_ultima_valida_y_queda_en_bitacora` |
+| Anulación A/B/C: cada límite, reglas fijas, comprobante, Z, aviso, bitácora | `anulacion_tests::*` |
+| Precio libre y quitar líneas según la política | `anulacion_tests::precio_libre_y_quitar_lineas_segun_la_politica` |
+| Bloqueo por inactividad con el reloj inyectable; no a la mitad de un comando; el cambio aplica ya | `sesion::tests::*`, `politica::tests::inactividad_rango_y_tecnico` |
+| Bloqueada, ningún comando corre; al volver, el trabajo a medias sigue; otro usuario no ve lo anterior | `permisos_tests::bloqueada_no_corre_ningun_comando_y_al_volver_sigue_todo` |
+| Espejo Rust/TS (tope de descuento, minutos de bloqueo, acciones que nombra la pantalla) | `permisos_tests::casos_espejo_con_la_pantalla`, `tests/permisos.test.ts` (casos `tests/casos/permisos.json`) |
+| Opción C, PIN al pasar, Z, aviso; bloqueo y venta en espera intacta (app real) | `npm run e2e` (`tests/e2e/permisos.e2e.mjs`) |
 
 Cómo correrlas:
-- Rust: `cd src-tauri && cargo test --lib` (157 pruebas + 1 ignorada que genera el fixture, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
-- TypeScript: `npm test` (202 pruebas).
+- Rust: `cd src-tauri && cargo test --lib` (190 pruebas + 1 ignorada que genera el fixture, con SQLCipher; las impresoras se simulan). Antes ponga Strawberry Perl en el PATH; ver la sección 6.
+- TypeScript: `npm test` (226 pruebas).
 - Punta a punta: `npm run e2e` (ver CONTEXTO.md, sección 2).
 
 ## 6. Compilar y verificar una entrega

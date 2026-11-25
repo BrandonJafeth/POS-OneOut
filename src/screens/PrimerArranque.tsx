@@ -42,10 +42,10 @@ export default function PrimerArranque({ onListo }: { onListo(u: Usuario, minuto
           un lugar seguro: no se muestra en la pantalla de entrada.
         </p>
         <Field label="PIN técnico" ayuda="De 6 a 12 números, que no sean todos iguales.">
-          <input className="pin" type="password" inputMode="numeric" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+          <input className="pin" type="password" inputMode="numeric" autoComplete="off" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         </Field>
         <Field label="Repita el PIN">
-          <input className="pin" type="password" inputMode="numeric" value={pin2} onChange={(e) => setPin2(e.target.value.replace(/\D/g, ""))} />
+          <input className="pin" type="password" inputMode="numeric" autoComplete="off" value={pin2} onChange={(e) => setPin2(e.target.value.replace(/\D/g, ""))} />
         </Field>
         {error && <Alert tono="error">{error}</Alert>}
         <Button type="submit" variante="primario" tamano="lg" icono={ShieldCheck} ancho disabled={ocupado}>

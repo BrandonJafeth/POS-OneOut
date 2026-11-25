@@ -33,7 +33,7 @@ export default function Inventario() {
   const [alertas, setAlertas] = useState(0);
   const [filtro, setFiltro] = useState<FiltroInventario>("con_control");
   useEffect(() => void alertasInventario().then(setAlertas, () => setAlertas(0)), [tab]);
-  const tabs = TABS.filter(([id]) => id !== "reportes" || puede("reportes"));
+  const tabs = TABS.filter(([id]) => id !== "reportes" || puede("inventario.reportes"));
   return (
     <div className="screen">
       <h1>Inventario</h1>
@@ -80,14 +80,9 @@ function Opciones() {
   }
   return (
     <section className="card">
-      <label className="row">
-        <input type="checkbox" checked={config.permitir_vender_sin_existencia} onChange={(e) => guardar("permitir_vender_sin_existencia", e.target.checked)} />
-        Vender aunque no haya existencia (queda negativa y se marca para revisión). Si se apaga, hace falta el PIN del dueño.
-      </label>
-      <label className="row">
-        <input type="checkbox" checked={config.venta_mostrar_existencia} onChange={(e) => guardar("venta_mostrar_existencia", e.target.checked)} />
-        Mostrar la existencia en las tarjetas de la venta (el cajero la ve, nunca el costo)
-      </label>
+      <p className="muted">
+        «Vender sin existencia» y «Ver existencias al vender» ahora son permisos: Administración → Permisos (área Venta).
+      </p>
       <Field label="Motivos de ajuste (uno por línea)" ayuda="«Otro» pide escribir el motivo.">
         <textarea rows={6} value={motivos} onChange={(e) => setMotivos(e.target.value)} />
       </Field>

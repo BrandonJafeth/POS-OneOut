@@ -46,7 +46,7 @@ export default function Proformas() {
     ["convertidas", "Convertidas"],
     ["anuladas", "Anuladas"],
     ["", "Todas"],
-    ...(puede("proformas.admin") ? ([["opciones", "Opciones"]] as [FiltroProformas | "opciones", string][]) : []),
+    ...(puede("proformas.opciones") ? ([["opciones", "Opciones"]] as [FiltroProformas | "opciones", string][]) : []),
   ];
   const cargar = () => (tab === "opciones" ? Promise.resolve() : buscarProformas(texto, tab).then(setLista, (e) => setError(textoError(e))));
   useEffect(() => {

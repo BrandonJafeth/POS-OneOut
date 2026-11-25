@@ -92,16 +92,16 @@ export function calcularTotales(e: EstadoEspera, paso: number): Totales {
   };
 }
 
-/** % máximo que puede dar `rol` sin autorización (config descuento_max_pct). */
-export function topeDescuento(rol: string, config: Record<string, number>): number {
-  return config[rol] ?? 0;
-}
-
 /** ¿Hace falta el PIN del dueño? Sí, si el descuento pasa el tope del rol y no hay autorización que lo cubra. */
 export function necesitaAutorizacion(e: EstadoEspera, pct: number, tope: number): boolean {
   const ε = 1e-9;
   if (pct <= tope + ε) return false;
   return !e.autorizacion || pct > e.autorizacion.pct + ε;
+}
+
+/** Lo que ata la autorización de descuento (igual que ventas::huella en Rust): si cambia, no vale. */
+export function huellaDescuento(e: EstadoEspera): string {
+  return JSON.stringify([e.lineas.map((l) => [l.id, l.productoId ?? "", l.precioUnitario, l.cantidad, l.descuento, l.descuentoCatalogo ?? 0]), e.descuentoTotal]);
 }
 
 export function estadoVacio(): EstadoEspera {

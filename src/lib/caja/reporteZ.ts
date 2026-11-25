@@ -335,6 +335,15 @@ export function lineasZ(n: Negocio, d: Detalle, cols: number, o: OpcionesZ): Lin
     }
   }
 
+  // Aparte de las demás anulaciones, siempre (aunque el Z sea resumido): el dueño tiene que verlas.
+  if (r.anulacionesSinPin?.length) {
+    titulo(l, "ANULACIONES POR CAJERO SIN PIN", cols);
+    for (const x of r.anulacionesSinPin) {
+      l.push({ t: lr(`${hora(x.fecha)} ${x.numero}`, monto(x.total), cols) });
+      wrap(`  ${x.usuario} · ${x.motivo}`, cols).forEach((y) => l.push({ t: y }));
+    }
+  }
+
   if (o.completo && r.cortes.length) {
     titulo(l, "CORTES", cols);
     for (const k of r.cortes) {
@@ -463,6 +472,30 @@ export function reporteCorte(n: Negocio, k: Corte, s: TicketSettings): Doc {
 // ─── Comprobante de movimiento ───
 
 /** Comprobante de una entrada/salida de efectivo (para firmar y guardar con el dinero). */
+/** Comprobante de anulación (opción C siempre): para guardarlo firmado con el cierre. */
+export function comprobanteAnulacion(n: Negocio, a: { numero: string; total: number; motivo: string; usuario: string; fecha: string; sinPin: boolean }, s: TicketSettings): Doc {
+  const c = columnas(s);
+  const l: LineaDoc[] = [{ t: sep2(c) }, { t: "ANULACION DE VENTA", b: true, centro: true }];
+  if (nombreSiHayLogo(n)) l.push({ t: lr("Negocio:", cortar(n.nombreComercial, c - 9), c) });
+  l.push({ t: lr("Tiquete:", a.numero, c) }, { t: lr("Fecha:", fechaHora(new Date(a.fecha)), c) }, { t: lr("Usuario:", cortar(a.usuario, c - 9), c) });
+  wrap("Motivo: " + a.motivo, c).forEach((x) => l.push({ t: x }));
+  l.push({ t: lr("MONTO", monto(a.total), c), b: true });
+  l.push({ t: a.sinPin ? "Sin PIN del dueno" : "Con PIN del dueno" });
+  l.push({ t: sep2(c) }, { t: "Guardar con el cierre de caja." }, { t: "" }, { t: "Firma del cajero:" }, { t: "" }, { t: "________________________" });
+  return aEscPos(n, l, s);
+}
+
+/** Código de recuperación de un dueño (D1): se imprime una vez y se guarda en un sobre cerrado. */
+export function comprobanteRecuperacion(n: Negocio, d: { nombre: string; codigo: string; fecha: string }, s: TicketSettings): Doc {
+  const c = columnas(s);
+  const l: LineaDoc[] = [{ t: sep2(c) }, { t: "CODIGO DE RECUPERACION", b: true, centro: true }];
+  if (nombreSiHayLogo(n)) l.push({ t: lr("Negocio:", cortar(n.nombreComercial, c - 9), c) });
+  l.push({ t: lr("Dueno:", cortar(d.nombre, c - 7), c) }, { t: lr("Fecha:", fechaHora(new Date(d.fecha)), c) }, { t: "" }, { t: d.codigo, b: true, centro: true }, { t: "" });
+  wrap("Sirve para restablecer el PIN de este dueno si lo olvida. Guardelo en un sobre cerrado, fuera de la caja. Al usarlo se genera otro.", c).forEach((x) => l.push({ t: x }));
+  l.push({ t: sep2(c) });
+  return aEscPos(n, l, s);
+}
+
 export function comprobanteMovimiento(n: Negocio, m: Movimiento, s: TicketSettings): Doc {
   const c = columnas(s);
   const l: LineaDoc[] = [{ t: sep2(c) }, { t: m.tipo === "salida" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO", b: true, centro: true }];

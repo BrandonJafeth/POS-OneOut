@@ -191,9 +191,9 @@ async fn ventas_en_espera_sobreviven_a_cerrar_la_app() {
     let dir = std::env::temp_dir().join(format!("pos-espera-{}", ulid()));
     let bd = crate::bd::Bd::abrir(&dir, None).await.unwrap();
     let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-    let tec = crate::sesion::Actor { id: t.id, rol: crate::permisos::Rol::Tecnico, nombre: "T".into() };
+    let tec = crate::sesion::Actor::nuevo(t.id, crate::permisos::Rol::Tecnico, "T");
     let c = crate::usuarios::crear(&bd.pool, &tec, "Luis", crate::permisos::Rol::Cajero, "2580").await.unwrap();
-    let luis = crate::sesion::Actor { id: c.id, rol: crate::permisos::Rol::Cajero, nombre: "Luis".into() };
+    let luis = crate::sesion::Actor::nuevo(c.id, crate::permisos::Rol::Cajero, "Luis");
     let mut e = Estado::default();
     e.lineas.push(linea(1500, 2, 0));
     let esp = crear_espera(&bd.pool, &luis, CAJA_1, &e).await.unwrap();
@@ -245,8 +245,8 @@ async fn existencia_igual_al_kardex_en_una_base_grande() {
     drop(c);
     // Y unas ventas y anulaciones por el camino normal.
     abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
-    for i in 0..30 {
-        let e = est(&ids[i], 500, 1 + r.n(3));
+    for (i, id) in ids.iter().take(30).enumerate() {
+        let e = est(id, 500, 1 + r.n(3));
         let esp = crear_espera(p, &cajero, CAJA_1, &e).await.unwrap();
         let v = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &[pago(EF, e.lineas[0].cantidad * 500)]).await.unwrap();
         if i % 4 == 0 {
@@ -327,9 +327,9 @@ async fn corte_de_luz_a_mitad_de_un_cobro() {
     let dir = std::env::temp_dir().join(format!("pos-corte-{}", ulid()));
     let bd = crate::bd::Bd::abrir(&dir, None).await.unwrap();
     let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-    let tec = crate::sesion::Actor { id: t.id, rol: crate::permisos::Rol::Tecnico, nombre: "T".into() };
+    let tec = crate::sesion::Actor::nuevo(t.id, crate::permisos::Rol::Tecnico, "T");
     let c = crate::usuarios::crear(&bd.pool, &tec, "Luis", crate::permisos::Rol::Cajero, "2580").await.unwrap();
-    let luis = crate::sesion::Actor { id: c.id, rol: crate::permisos::Rol::Cajero, nombre: "Luis".into() };
+    let luis = crate::sesion::Actor::nuevo(c.id, crate::permisos::Rol::Cajero, "Luis");
     let pid = producto(&bd.pool, 1000).await;
     abrir(&bd.pool, &luis, CAJA_1, &conteo(&[(1000, 1)])).await.unwrap();
     let antes: i64 = sqlx::query_scalar("SELECT consecutivo_siguiente FROM cajas WHERE id = ?").bind(CAJA_1).fetch_one(&bd.pool).await.unwrap();
@@ -457,7 +457,10 @@ async fn dueno_bloqueado_lo_recupera_el_tecnico() {
         let _ = iniciar_sesion(p, &dueno.id, "000000", ahora + i).await.unwrap();
     }
     assert!(matches!(iniciar_sesion(p, &dueno.id, PIN, ahora + 10).await.unwrap(), Login::Rechazado { .. }), "bloqueado");
-    cambiar_pin(p, &tec, &dueno.id, "802468").await.unwrap();
+    // D1: con el código de recuperación (impreso al crear al dueño), lo use quien lo use.
+    let codigo = crate::usuarios::codigo_recuperacion(p, &dueno, PIN).await.unwrap();
+    assert!(cambiar_pin(p, &tec, &dueno.id, "802468", None, None).await.is_err(), "sin el código, no");
+    cambiar_pin(p, &tec, &dueno.id, "802468", None, Some(&codigo)).await.unwrap();
     match iniciar_sesion(p, &dueno.id, "802468", ahora + 20).await.unwrap() {
         Login::Ok { usuario } => assert!(usuario.debe_cambiar_pin, "debe cambiarlo al entrar"),
         otro => panic!("no entró: {otro:?}"),

@@ -1,0 +1,1220 @@
+{
+  "abono_anular": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "bd_leer": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_leer (ventas)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (banco.guardar)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (bitacora.registrar)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (codigo.asociar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (codigo.mover)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (codigo.quitar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (codigo_interno.asegurar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (codigo_interno.tomar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (departamento.cambiar_codigo)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (departamento.color)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (departamento.crear)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (departamento.editar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (departamento.orden)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (forma_pago.guardar)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (producto.crear)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (producto.editar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (producto.eliminar)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bd_lote (producto.favorito)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bitacora_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "bitacora_verificar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "caja_abrir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_cerrar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_consecutivo": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "caja_corregir_dia": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_corte": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_detalle": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_estado": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_movimiento (entrada)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_movimiento (salida chica)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_movimiento (salida sobre el tope)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_necesita_nota": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_nota_cierre": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_queda": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_reabrir": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_revisada": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_turnos": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_z": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "caja_z_imprimir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_anonimizar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_basico": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_buscar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_crear": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_cuentas_saldo": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_dato_factura": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_editar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_estado_cuenta": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_exportar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_limite_credito": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_limite_obtener": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_obtener": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_retencion": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cliente_tiene_correo": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "config_guardar (abono_minimo_pct)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (apartado_plazo_dias)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (caja_no_venta_umbral)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (caja_quitar_linea_bitacora)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (caja_salida_max_sin_pin)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (caja_umbral_diferencia)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (color_fondo)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (credito_plazo_dias)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (departamentos_color)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (descuento_max_pct)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (importacion_codigos_internos)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (inventario_motivos_ajuste)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "config_guardar (permitir_vender_sin_existencia)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "config_guardar (pin_min_cajero)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (proforma_vigencia_dias)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (redondeo_total)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (respaldo_auto_cantidad)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "config_guardar (sesion_inactividad_min)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (tema)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (usa_credito)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "config_guardar (venta_mostrar_existencia)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "credito_disponible": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "credito_guardar_opciones": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "credito_opciones": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_abonar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_ajustar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_buscar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_cancelar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_condonar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_crear_apartado": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_entregar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_imprimir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_obtener": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_prorrogar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuenta_vencidas": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "cuentas_reglas": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "diagnostico_anotar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "gaveta_abono": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "gaveta_aperturas": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "gaveta_cierre": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "gaveta_dueno": {
+    "cajero": "pin",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "gaveta_no_venta": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "gaveta_venta": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "guardar_descarga (Cierres de caja)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "guardar_descarga (Clientes)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "guardar_descarga (Descargas)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "guardar_descarga (Inventario)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "guardar_descarga (Reportes)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "importacion_aplicar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "importacion_leer": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresora_ajustes": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresora_asignar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresora_eliminar": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresora_guardar": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresora_probar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresoras_detectar": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "impresoras_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "imprimir (cierre)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "imprimir (entrada)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "imprimir (estado_cuenta)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "imprimir (etiqueta)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "imprimir (movimiento)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "imprimir (tiquete)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "inventario_ajustar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_alertas": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_conteo_abierto": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_conteo_aplicar": {
+    "cajero": "no",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_conteo_descartar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_conteo_diferencias": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_conteo_guardar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_entrada": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_entrada_obtener": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_estado": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_existencia": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_inicial": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_kardex": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_lista": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_producto": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_reporte_bajo_minimo": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_reporte_movimientos": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "inventario_reporte_valorizado": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "list_printers": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "negocio_guardar (contacto)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "negocio_guardar (legal)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "negocio_logo": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "print_raw": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "proforma_abrir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_anular": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_buscar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_guardar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_imprimir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_obtener": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proforma_reporte": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proveedor_eliminar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proveedor_guardar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "proveedores_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "reporte_rangos": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "reporte_ventas": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_auto_configurar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_auto_estado": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_crear": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_restaurar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_ultimo": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "respaldo_usb_confirmado": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "sesion_actual": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sesion_cerrar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sesion_iniciar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sesion_tecnico": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sesion_tocar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "sesion_usuarios": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sistema_crear_tecnico": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sistema_estado": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "sistema_preparacion": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "sistema_restaurar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "si",
+    "tecnico": "si"
+  },
+  "usuarios_cambiar_pin (de cajero)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_cambiar_pin (de dueno)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_cambiar_pin (de tecnico)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_crear (cajero)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_crear (dueno)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_crear (tecnico)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "usuarios_editar (desactivar cajero)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_editar (desactivar dueno)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_editar (nombre de cajero)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_editar (nombre de dueno)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_editar (nombre de tecnico)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_eliminar (cajero)": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_eliminar (dueno)": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_eliminar (tecnico)": {
+    "cajero": "no",
+    "dueno": "no",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "usuarios_listar": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "si"
+  },
+  "venta_anular": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_autorizar_descuento": {
+    "cajero": "pin",
+    "dueno": "pin",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_cobrar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_correcciones": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_corregir_pago": {
+    "cajero": "no",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_espera_crear": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_espera_descartar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_espera_guardar": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_esperas": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_faltantes": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_imprimir": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_listar_dia": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_listar_turno": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_marcar_factura": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_obtener": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_pedir_factura": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_pendientes_factura": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  },
+  "venta_referencia_usada": {
+    "cajero": "si",
+    "dueno": "si",
+    "sin_sesion": "sesion",
+    "tecnico": "no"
+  }
+}

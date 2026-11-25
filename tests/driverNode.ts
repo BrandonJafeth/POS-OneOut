@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { usarDriver, type Driver, type Valor } from "../src/db/conexion";
-import { puede, type Permiso } from "../src/lib/permisos";
+import type { Permiso } from "../src/lib/permisos";
+import { comoRol, normalPuede } from "./permisosNormal";
 import { ulid } from "../src/lib/ulid";
 import type { EntradaBitacora, Rol } from "../src/tipos";
 
@@ -47,6 +48,8 @@ let ultima: DatabaseSync | null = null;
 export function baseDePrueba(opc: { rol?: Rol; usuarioId?: string } = {}): { driver: Driver; sqlite: DatabaseSync } {
   const rol: Rol = opc.rol ?? "dueno";
   const usuarioId = opc.usuarioId ?? "U-PRUEBA";
+  // La pantalla muestra según lo que diga Rust para ese rol (plantilla Normal).
+  comoRol(rol);
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
   for (const f of readdirSync(DIR).filter((n) => n.endsWith(".sql")).sort()) {
@@ -78,7 +81,7 @@ export function baseDePrueba(opc: { rol?: Rol; usuarioId?: string } = {}): { dri
           if (o.id === "bitacora.registrar") return registrarBitacora(params);
           const st = REGISTRO[o.id];
           if (!st || o.id.startsWith("_")) throw new Error(`Operación desconocida: ${o.id}`);
-          if (!puede(rol, st.permiso)) throw new Error("No tiene permiso para hacer este cambio");
+          if (!normalPuede(rol, st.permiso)) throw new Error("No tiene permiso para hacer este cambio");
           const q = sqlite.prepare(st.sql);
           return st.devuelve ? q.all(...params.map(p)) : Number(q.run(...params.map(p)).changes);
         });

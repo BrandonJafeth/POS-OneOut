@@ -1,6 +1,7 @@
 // Cobro. Lo común en un toque: elegir la forma y Enter. El pago mixto se abre con "Dividir pago".
 // El monto viene ESCRITO con el total (no como texto gris de ejemplo): se ve que hay un valor,
 // y como queda seleccionado, escribir otro número lo reemplaza.
+import { pantallaBloqueada } from "../../ui/teclado";
 import { AlertTriangle, Banknote, CheckCircle2, CreditCard, Landmark, Plus, Smartphone, Trash2, Wallet, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
@@ -84,6 +85,7 @@ export default function Cobro(p: {
   // F1–F4: forma de pago por tipo. En cualquier campo del cobro; con el pago dividido no aplica.
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
+      if (pantallaBloqueada()) return;
       const tipo = (Object.keys(TECLA_FORMA) as TipoFormaPago[]).find((t) => TECLA_FORMA[t] === e.key);
       // Solo con el foco en el cobro: otra ventana encima (PIN del dueño) no cambia la forma de abajo.
       if (!tipo || !formRef.current?.contains(document.activeElement)) return;

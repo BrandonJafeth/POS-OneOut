@@ -192,7 +192,7 @@ fn a_fila(f: &sqlx::sqlite::SqliteRow, hoy: NaiveDate) -> ProformaFila {
 /// Guarda la venta de la pestaña como proforma. Con `reemplaza` (una proforma vigente), crea su versión
 /// siguiente con el mismo número y la anterior queda "reemplazada". No necesita la caja abierta.
 pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &str, est: &Estado, reemplaza: Option<&str>) -> Res<ProformaDetalle> {
-    a.exigir("proformas", "crear proformas")?;
+    a.exigir("proformas.crear", "crear proformas")?;
     if est.lineas.is_empty() {
         return Err("La venta no tiene productos".into());
     }
@@ -203,8 +203,8 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &st
         Some(n) => Some(texto(n, 80, "el nombre", false)?).filter(|s| !s.is_empty()),
         None => None,
     };
-    let tope = ventas::tope_descuento(pool, a.rol).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    ventas::revisar_cambios(&mut tx, a, espera_id, est).await?;
     if let Some(cl) = &est.cliente {
         cuentas::cliente_con_consentimiento(&mut tx, &cl.id).await?;
     }
@@ -212,7 +212,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &st
     let e2 = Estado { lineas, ..est.clone() };
     // La proforma dice el precio exacto (el redondeo es del efectivo al cobrar).
     let tot = calculo::totales(&e2, 1);
-    let autorizado_por = ventas::revisar_tope(&tot, &catalogo, tope, est, espera_id)?;
+    let autorizado_por = ventas::revisar_tope(a, &tot, &catalogo, est, espera_id)?;
     if tot.total <= 0 {
         return Err("Una proforma de ¢0 no tiene sentido".into());
     }
@@ -305,7 +305,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, espera_id: &st
 /// Búsqueda por número (P-0012, 12), nombre del cliente o producto. `filtro`: "", vigentes, vencidas,
 /// convertidas, anuladas.
 pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str, filtro: &str) -> Res<Vec<ProformaFila>> {
-    a.exigir("proformas", "buscar proformas")?;
+    a.exigir("proformas.crear", "buscar proformas")?;
     let mut c = pool.acquire().await.map_err(e)?;
     limpiar_nombres(&mut c).await?;
     let hoy = ahora().date_naive().to_string();
@@ -338,7 +338,7 @@ pub async fn buscar(pool: &SqlitePool, a: &Actor, q: &str, filtro: &str) -> Res<
 }
 
 pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<ProformaDetalle> {
-    a.exigir("proformas", "ver proformas")?;
+    a.exigir("proformas.crear", "ver proformas")?;
     let mut c = pool.acquire().await.map_err(e)?;
     limpiar_nombres(&mut c).await?;
     let f = sqlx::query(&format!("{} WHERE p.id = ?", fila_sql())).bind(id).fetch_optional(&mut *c).await.map_err(e)?.ok_or("Proforma no encontrada")?;
@@ -363,7 +363,7 @@ pub async fn obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<ProformaDeta
 
 /// Imprime la proforma (impresora de tiquetes). La reimpresión lleva COPIA, se cuenta y queda en la bitácora.
 pub async fn imprimir(pool: &SqlitePool, a: &Actor, id: &str, datos: &[u8]) -> Res<bool> {
-    a.exigir("proformas", "imprimir proformas")?;
+    a.exigir("proformas.crear", "imprimir proformas")?;
     crate::escpos::validar(datos)?;
     let copia = crate::escpos::tiene_marca_copia(datos);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -417,7 +417,7 @@ async fn usa_precio_proforma(c: &mut SqliteConnection, vence: &str) -> bool {
 /// Arma la venta nueva de una proforma: sus líneas con el precio que toca y un aviso por línea que cambió
 /// o que ya no se vende. Queda ligada a la proforma; se convierte recién al cobrar o apartar.
 pub async fn abrir_en_venta(pool: &SqlitePool, a: &Actor, id: &str) -> Res<AbrirProforma> {
-    a.exigir("proformas", "pasar proformas a venta")?;
+    a.exigir("proformas.convertir", "pasar proformas a venta")?;
     let d = obtener(pool, a, id).await?;
     let p = &d.proforma;
     if !matches!(p.estado.as_str(), "vigente" | "vencida") {

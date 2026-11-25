@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { comoRol } from "./permisosNormal";
 import { db } from "../src/db/conexion";
 import { crearDepartamento, editarDepartamento, listarDepartamentos } from "../src/db/departamentos";
 import { guardarBanco, guardarFormaPago } from "../src/db/formasPago";
@@ -91,7 +92,10 @@ describe("productos", () => {
 
   it("valida precio entero y permisos", async () => {
     await expect(crearProducto(DUENO, { nombre: "X", departamentoId: OFICINA, precio: 10.5 })).rejects.toThrow("entero");
+    // La pantalla de un cajero (Rust le manda su política) no deja; Rust tampoco.
+    comoRol("cajero");
     await expect(crearProducto(CAJERO, { nombre: "X", departamentoId: OFICINA, precio: 10 })).rejects.toThrow("permiso");
+    comoRol("dueno");
   });
 });
 
@@ -157,6 +161,8 @@ describe("favoritos en bloque", () => {
     const b = (await listarBitacora()).filter((e) => (e.detalle as { favoritos?: string }).favoritos);
     expect(b).toHaveLength(1);
     expect(b[0].detalle).toMatchObject({ favoritos: "marcar", cantidad: 3 });
+    comoRol("cajero");
     await expect(marcarFavoritos(CAJERO, ids, false)).rejects.toThrow("permiso");
+    comoRol("dueno");
   });
 });

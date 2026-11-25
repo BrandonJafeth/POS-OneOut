@@ -1,6 +1,6 @@
 # Contexto del proyecto: Punto de Venta (POS) para Librería y Bazar Chagui
 
-_Actualizado: 2026-11-20._
+_Actualizado: 2026-11-24._
 
 ## 1. Qué es
 
@@ -17,10 +17,10 @@ App de escritorio para Windows, local y sin internet, para cobrar en negocios ch
 - **Tauri v2** (Rust) + **React + TypeScript** (Vite) + **SQLite cifrado con SQLCipher**.
 - Rust decide todo lo sensible: dinero, permisos, PIN, caja, impresión, inventario. La pantalla (React) solo muestra y pide.
 - Todo el SQL está en `src/db` y en Rust. Las escrituras de catálogo pasan por `bd_lote` (operaciones con nombre) en una sola transacción. La lectura con SQL desde la pantalla (`bd_leer`) solo alcanza catálogo y configuración pública (lista blanca); todo lo demás va por comandos tipados.
-- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0024**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
+- Migraciones numeradas en `src/db/migraciones` (van de la **0001 a la 0025**). Nunca se edita una migración ya instalada; agregar una = archivo nuevo + versión siguiente.
 - Configuración: tabla `config` (clave → JSON). Rust valida cada clave en `src-tauri/src/config.rs` (`validar`); los valores por defecto de la pantalla están en `CONFIG_DEFECTO` (`src/db/config.ts`). Una clave nueva no necesita migración: si no existe, se usa el valor por defecto.
-- Pruebas: `npm test` (vitest con node:sqlite, 217) y `cargo test` (Rust, 170 + 1 ignorada que genera el fixture). Correr desde `C:\Freelance\POS` (con `c:\` en minúscula vitest falla).
-  - **Punta a punta** (`npm run e2e`, requisitos en `tests/e2e/LEEME.md`; msedgedriver en `tools\msedgedriver\`, ignorado por git; sin esperas fijas, estable 10 de 10; `REVISION=1` + `CAPTURAS` saca capturas en tema claro y oscuro a 1024/1366/1920): WebdriverIO + tauri-driver sobre la app real (Rust, base cifrada, WebView2). Compila la app de desarrollo y recorre crear apartado → abonar → liquidar → cierre Z → reporte. Usa una carpeta de datos nueva (`POS_DATOS`), una semilla (`POS_E2E=1`) y el reloj fijo (`POS_RELOJ_PRUEBA`): las tres solo existen en la compilación de desarrollo. Requiere `cargo install tauri-driver` y `msedgedriver` de la misma versión que WebView2 (variable `MSEDGEDRIVER`). Se eligió tauri-driver (camino oficial de Tauri) y no Playwright por CDP, que obliga a dejar activa la depuración remota de WebView2 con una variable del sistema.
+- Pruebas: `npm test` (vitest con node:sqlite, 226) y `cargo test` (Rust, 190 + 1 ignorada que genera el fixture). Correr desde `C:\Freelance\POS` (con `c:\` en minúscula vitest falla).
+  - **Punta a punta** (`npm run e2e`, requisitos en `tests/e2e/LEEME.md`; msedgedriver en `tools\msedgedriver\`, ignorado por git; sin esperas fijas, estable 10 de 10; `REVISION=1` + `CAPTURAS` saca capturas en tema claro y oscuro a 1024/1366/1920): WebdriverIO + tauri-driver sobre la app real (Rust, base cifrada, WebView2). Compila la app de desarrollo y corre dos recorridos: crear apartado → abonar → liquidar → cierre Z → reporte (`apartado.e2e.mjs`); y permisos: la dueña activa la anulación C → el cajero anula una chica sin PIN y la grande pide PIN → Z con la sección → aviso a la dueña → bloqueo en 1 minuto (aviso, bloqueo y desbloqueo sin perder la venta en espera; el reloj de prueba se adelanta con `prueba_avanzar_reloj`, solo desarrollo + `POS_E2E`) (`permisos.e2e.mjs`). Usa una carpeta de datos nueva (`POS_DATOS`), una semilla (`POS_E2E=1`) y el reloj fijo (`POS_RELOJ_PRUEBA`): las tres solo existen en la compilación de desarrollo. Requiere `cargo install tauri-driver` y `msedgedriver` de la misma versión que WebView2 (variable `MSEDGEDRIVER`). Se eligió tauri-driver (camino oficial de Tauri) y no Playwright por CDP, que obliga a dejar activa la depuración remota de WebView2 con una variable del sistema.
   - **Pruebas espejo**: las reglas que se validan en Rust y en TS (abono mínimo, fecha límite, abono, crédito) leen los mismos casos de `tests/casos/cuentas.json`.
 - **Tipos de TS generados desde Rust** con `ts-rs` (solo en pruebas): `cargo test` escribe `src/generados/*.ts` para los comandos nuevos (apartados y reportes) y falla una vez si cambiaron. Se eligió ts-rs y no tauri-specta: no cambia el registro de los comandos existentes y no depende de una versión RC; los nombres de comando siguen en un solo lugar por módulo (`src/db/cuentas.ts`).
 - **WebView2 mínimo: versión 120** (`preparacion::WEBVIEW2_MINIMO`; «Preparar para el cliente» lo revisa). La app usa `<dialog>` nativo, `:has()`, popover e `Intl`; no usa invoker commands (`command`/`commandfor`, 135) ni `closedby` (134). La PC de desarrollo tiene la 157. El instalador usa el runtime evergreen (se actualiza con Windows Update).
@@ -48,7 +48,9 @@ Formularios que guardan: usan `useEnvio`, al guardar cierran y muestran un aviso
 | **Dueño** | Hace todo lo del cajero, más productos, precios, departamentos, usuarios, datos del negocio, clientes completos, reportes de ventas e historial de cierres, apartados (todos, cancelar, anular abonos, condonar, prorrogar, límite de crédito), respaldo, inventario (existencias, entradas, ajustes, conteos, costos, proveedores), bitácora, opciones de caja, anulaciones y reaperturas (con PIN). Ve las impresoras y las prueba, pero no las configura. |
 | **Técnico** | Configura la instalación (impresoras y gaveta, formas de pago, ajustes técnicos). **No ve datos de clientes, no vende, no toca la caja ni el inventario.** |
 
-Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio la primera vez y sesión con vencimiento. El técnico entra con **Ctrl+Alt+T** en el login.
+Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio la primera vez y **bloqueo por inactividad** (la pantalla queda tapada y se vuelve a poner el PIN; el mismo usuario sigue donde estaba). El técnico entra con **Ctrl+Alt+T** en el login.
+
+Desde la 0.9.3 lo de arriba es la plantilla **«Normal»** de los permisos: el dueño (o el técnico, con el PIN del dueño si da más permiso) puede cambiar qué hace el cajero y el técnico por acción, con límites, y dar excepciones a un cajero (Administración → Permisos; ver 4.12).
 
 ## 4. Funcionalidades terminadas
 
@@ -144,6 +146,13 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 - **Inventario y Lista de precios** dentro de Reportes: reutiliza los reportes de Inventario (los movimientos ahora se ven en tabla, hasta 300; el archivo lleva todos) y una lista de precios (código, producto, departamento, precio) ordenable y exportable.
 - "Ventas del día" (menú) y Reportes → Por día cubren las transacciones del día; no se duplicó otro reporte.
 
+### 4.12 Permisos y bloqueo (0.9.3, `acciones.rs`, `politica.rs`, `seguridad.rs`, migración 25)
+- **Administración → Permisos** (dueño y técnico): matriz por rol agrupada por área con buscador; cada celda dice en palabras qué significa («El cajero podrá anular una venta de hasta ¢10.000 sin PIN…»); excepciones por cajero («Como su rol» o una política propia); anulación A/B/C; bloqueo; historial y volver; plantillas; PDF para firmar. Guardar lo que da más permiso pide el PIN del dueño (el diálogo sale solo).
+- Rust decide todo: `politica::efectiva` (reglas fijas → excepción → rol → no). La pantalla pide su política con `sesion_permisos` y solo muestra; cambia sin cerrar sesión (evento `seguridad-cambiada`). Si una acción pide PIN o motivo y la pantalla no lo mandó, Rust responde `NECESITA_PIN:acción:por qué`; `lib/invocar` muestra el diálogo, llama `seguridad_autorizar` (un solo uso) y reintenta.
+- **Bloqueo**: Rust con el reloj inyectable; la pantalla informa teclado/lector/mouse/táctil (`sesion_tocar`) y pregunta cuánto falta (`sesion_estado`). Aviso 1 minuto antes; velo opaco (`<dialog>` encima de todo); el mismo usuario sigue donde estaba, otro empieza de cero. Configuración técnica → Bloqueo por inactividad (y en Permisos).
+- **Anular (cajero)**: en Ventas del día; con C elige el motivo de la lista y no pone PIN salvo que pase un límite. Comprobante por la impresora de tiquetes (documento `anulacion`).
+- «Preparar para el cliente» muestra la versión de los permisos y el tiempo de bloqueo por rol para revisarlos y firmar la tabla con el dueño.
+
 ### 4.9 Seguridad y datos
 - Base cifrada (SQLCipher) con la clave guardada en Windows DPAPI.
 - **Respaldo cifrado** AES-256-GCM con contraseña, en `%APPDATA%\PuntoDeVenta-Datos\respaldos`, y restauración. El respaldo lleva la versión y la migración (`POSBAK02`); al restaurar uno viejo se pone al día con las migraciones y se verifica (integridad y bitácora) antes de reemplazar nada. Un respaldo de una versión más nueva se rechaza. No se restaura ni se actualiza con la caja abierta. `tests/fixtures` guarda un respaldo de cada versión.
@@ -166,7 +175,15 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 | 5. Reportes | Ventas por día, departamento, producto y usuario; stock bajo; inventario valorizado; exportar PDF/CSV | ✅ Código hecho (2026-11-19); falta la prueba manual en la PC real (PRUEBAS-MANUALES U) |
 | 6. Entrega | Pruebas manuales en la PC real, instalador, respaldo configurado, capacitación, instalación final | ⏳ Incluido en el contrato |
 
-**Versión actual: 0.9.2 (versión de prueba en el negocio)**, migraciones 1 a 24. Ningún instalador repite número de versión: `build.rs` frena el build de release si ENTREGAS.md ya tiene el SHA-256 de esa versión. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
+**Versión actual: 0.9.3 (versión de prueba en el negocio)**, migraciones 1 a 25. Ningún instalador repite número de versión: `build.rs` frena el build de release si ENTREGAS.md ya tiene el SHA-256 de esa versión. Pasó la auditoría de salida: datos que sobreviven instalar/desinstalar/actualizar, invariantes con pruebas (dinero, consecutivo, efectivo esperado, kardex, Z), tabla de permisos comando × rol probada (SEGURIDAD.md), recuperación y respaldo automático. Para instalarla: PRUEBAS-MANUALES «Aceptación de la versión de prueba»; para pasar a 1.0.0: ACTUALIZAR.md; hashes de cada entrega: ENTREGAS.md.
+
+### 0.9.3 (2026-11-24): permisos configurables y bloqueo por inactividad (DISENO-PERMISOS.md)
+- **Permisos por rol y por cajero** (4.12): catálogo de 80 acciones (`acciones.rs`) y cada uno de los 161 comandos asignado a una; política no / sí / con motivo / con PIN del dueño, con límites; excepciones por cajero; plantillas Estricto / Normal / Flexible; historial con «volver a esta versión»; PDF para firmar. La versión 1 se crea sola al actualizar y es igual a la 0.9.2 (prueba por IPC de los 161 comandos contra una foto tomada antes del cambio).
+- **Anulación por el cajero** A/B/C (comprobante con firma, sección en el Z, aviso al dueño, día marcado en Cierres de caja).
+- **Bloqueo por inactividad** (1 a 60 min, técnico hasta 15, por rol): bloquea en vez de cerrar la sesión; no pierde nada.
+- Los topes que estaban en configuración (descuento del cajero, salida sin PIN, vender sin existencia, ver existencias, inactividad) ahora son permisos. El aviso de «no venta» del Z sigue en Caja y cierre.
+- Migración 25 (`seguridad_versiones` solo agregar con cadena de hashes; `ventas.anulada_actor/politica/version`). Respaldo de prueba `respaldo-v0.9.3-m25.posbak` (con una versión de permisos propia).
+- Errores encontrados: «opciones de crédito» quedaba con dos permisos distintos (pantalla y módulo); `confirmar_dueno` decidía por rol y no por acción; dueño que todavía no cambió su PIN contaba como «el dueño que queda»; la sesión medía el tiempo con un reloj que las pruebas no podían mover y cualquier comando la renovaba; con el velo puesto, el lector y los atajos de la venta seguían recibiendo teclas por `window` (el PIN escrito rápido se tomaba como un código de barras): ahora no escuchan mientras la pantalla está bloqueada (`ui/teclado::pantallaBloqueada`); faltaba un índice para las anulaciones por turno (el reporte de 50.000 ventas pasaba de 2 s).
 
 ### 0.9.2 (2026-11-23): crédito completo, huecos de cuentas y proformas
 - **Crédito** (sigue apagado en Chaguí): Apartados → Opciones → Crédito (dueño, PIN: límite general, plazo, días de trabajo o calendario, condiciones `credito_condiciones`); límite propio desde la ficha del cliente sin cuenta previa; **estado de cuenta** por cliente (créditos y apartados abiertos, abonos con hora real, total adeudado; térmica con el documento `estado_cuenta` y PDF; solo dueño); en el cobro «Crédito disponible: ¢X» (`credito_disponible`, el cajero no ve límite ni otras deudas); comprobante C-0001 además del tiquete (total, pagado, saldo, fecha límite, condiciones, firma; `lib/venta/trasCobro`); fecha límite con la regla del apartado; ajustar un crédito cambia total y saldo (lo condonado no queda negativo); «Preparar para el cliente» exige límite general > 0 y condiciones si hay crédito.
@@ -222,7 +239,7 @@ Acceso: PIN con Argon2id, bloqueo progresivo si falla, cambio de PIN obligatorio
 
 ### Deuda técnica o seguridad (de SEGURIDAD.md)
 4. Firmar el instalador (requiere certificado; mientras tanto, documentar el SHA-256 de cada entrega en ENTREGAS.md).
-5. Permisos por rol editables desde Configuración técnica.
+5. ~~Permisos por rol editables~~ hecho en la 0.9.3 (Administración → Permisos).
 
 ### Casos conocidos (aceptados)
 - Una caja del día que nunca se cerró sigue bloqueando la venta pasada la medianoche hasta cerrarla (no aplica al turno abierto tras el cierre, que ya cuenta para el día siguiente).

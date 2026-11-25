@@ -104,6 +104,6 @@ export async function ajustesPara(documento: Documento): Promise<TicketSettings 
 }
 
 /** Comprobantes de movimiento, etiquetas y cortes. Devuelve el nombre de la impresora. */
-export function imprimirDocumento(documento: Exclude<Documento, "tiquete">, bytes: Uint8Array): Promise<string> {
+export function imprimirDocumento(documento: Exclude<Documento, "tiquete"> | "anulacion" | "recuperacion", bytes: Uint8Array): Promise<string> {
   return invocar<string>("imprimir", { documento, data: Array.from(bytes) });
 }

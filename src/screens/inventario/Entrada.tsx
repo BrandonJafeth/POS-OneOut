@@ -2,13 +2,14 @@
 // búsqueda. Todo se guarda en una transacción en Rust; después se puede imprimir el comprobante
 // y las etiquetas de lo recibido.
 import { PackagePlus, Printer, Tag, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Mensaje, { textoError } from "../../components/Mensaje";
 import { listarProveedores, obtenerEntrada, registrarEntrada, type Comprobante, type Proveedor } from "../../db/inventario";
 import { buscarProductos, productoPorCodigo } from "../../db/productos";
 import { imprimirComprobanteEntrada, imprimirEtiquetasEntrada } from "../../lib/inventario";
 import { monto } from "../../lib/tickets";
+import { ulid } from "../../lib/ulid";
 import { useEscaner } from "../../lib/useEscaner";
 import type { ProductoLista } from "../../tipos";
 import Alert from "../../ui/Alert";
@@ -62,6 +63,10 @@ export default function EntradaMercaderia() {
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [hecha, setHecha] = useState<Comprobante | null>(null);
+  // Doble clic (A4): el candado corta el segundo envío y, si igual llega, Rust registra una sola
+  // entrada por operación (se renueva después de guardar).
+  const enCurso = useRef(false);
+  const operacion = useRef(ulid());
 
   useEffect(() => void listarProveedores().then(setProveedores, (e) => setError(textoError(e))), []);
   useEffect(() => {
@@ -114,9 +119,12 @@ export default function EntradaMercaderia() {
       });
       if (!ok) return;
     }
+    if (enCurso.current) return;
+    enCurso.current = true;
     setOcupado(true);
     try {
       const id = await registrarEntrada({
+        operacionId: operacion.current,
         proveedorId: proveedor || null,
         factura,
         fecha,
@@ -128,6 +136,7 @@ export default function EntradaMercaderia() {
           precioNuevo: l.precioNuevo.trim() === "" ? null : Number(l.precioNuevo),
         })),
       });
+      operacion.current = ulid();
       setHecha(await obtenerEntrada(id));
       setLineas([]);
       setFactura("");
@@ -135,6 +144,7 @@ export default function EntradaMercaderia() {
     } catch (e) {
       setError(textoError(e));
     } finally {
+      enCurso.current = false;
       setOcupado(false);
     }
   }

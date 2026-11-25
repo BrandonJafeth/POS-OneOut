@@ -1,7 +1,7 @@
 // Datos del negocio: el dueño edita contacto, aviso y pie; lo legal y el logo, solo el técnico.
 
 use crate::bitacora;
-use crate::permisos::{puede, sin_permiso};
+use crate::permisos::sin_permiso;
 use crate::sesion::Actor;
 use crate::util::{ahora_iso, e, texto, Res};
 use serde::Deserialize;
@@ -15,13 +15,13 @@ const CAMPOS: &[(&str, &str, &str, usize)] = &[
     ("cedula", "cedula", "negocio.legal", 30),
     ("direccion", "direccion", "negocio.legal", 200),
     ("regimen", "regimen", "negocio.legal", 120),
-    ("telefono", "telefono", "negocio", 40),
-    ("correo", "correo", "negocio", 120),
-    ("encabezadoExtra", "encabezado_extra", "negocio", 600),
-    ("pieTiquete", "pie_tiquete", "negocio", 600),
-    ("responsableTratamiento", "responsable_tratamiento", "negocio", 160),
-    ("avisoPrivacidadTexto", "aviso_privacidad_texto", "negocio", 3000),
-    ("avisoPrivacidadVersion", "aviso_privacidad_version", "negocio", 20),
+    ("telefono", "telefono", "negocio.contacto", 40),
+    ("correo", "correo", "negocio.contacto", 120),
+    ("encabezadoExtra", "encabezado_extra", "negocio.contacto", 600),
+    ("pieTiquete", "pie_tiquete", "negocio.contacto", 600),
+    ("responsableTratamiento", "responsable_tratamiento", "negocio.contacto", 160),
+    ("avisoPrivacidadTexto", "aviso_privacidad_texto", "negocio.contacto", 3000),
+    ("avisoPrivacidadVersion", "aviso_privacidad_version", "negocio.contacto", 20),
 ];
 
 pub async fn guardar(pool: &SqlitePool, a: &Actor, cambios: &Map<String, Value>) -> Res<()> {
@@ -36,7 +36,7 @@ pub async fn guardar(pool: &SqlitePool, a: &Actor, cambios: &Map<String, Value>)
         if nuevo == actual {
             continue;
         }
-        if !puede(a.rol, perm) {
+        if !a.puede(perm) {
             return Err(sin_permiso(&format!("cambiar «{k}»")));
         }
         antes.insert(k.clone(), json!(actual));
@@ -80,7 +80,7 @@ pub struct Logo {
 }
 
 pub async fn guardar_logo(pool: &SqlitePool, a: &Actor, logo: Option<Logo>) -> Res<()> {
-    if !puede(a.rol, "negocio.legal") {
+    if !a.puede("negocio.legal") {
         return Err(sin_permiso("cambiar el logo"));
     }
     if let Some(l) = &logo {

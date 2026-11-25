@@ -15,19 +15,27 @@ use std::path::Path;
 const ARCHIVO: &str = "errores.log";
 const MAX_BYTES: u64 = 512 * 1024;
 
-/// Texto seguro para el registro.
+/// Texto seguro para el registro: números de 6 o más dígitos (teléfonos, cédulas, tarjetas), aunque
+/// vengan separados por guiones, espacios o puntos («8765-4321», «1-0987-0654»), quedan como «#».
+/// Los nombres no se pueden distinguir de otro texto: los mensajes de error no los deben llevar.
 pub fn limpiar(s: &str) -> String {
-    let t: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).take(400).collect();
+    let t: Vec<char> = s.chars().map(|c| if c.is_control() { ' ' } else { c }).take(400).collect();
     let mut out = String::with_capacity(t.len());
-    let mut digitos = String::new();
-    for c in t.chars().chain(std::iter::once(' ')) {
-        if c.is_ascii_digit() {
-            digitos.push(c);
+    let mut i = 0;
+    while i < t.len() {
+        if !t[i].is_ascii_digit() {
+            out.push(t[i]);
+            i += 1;
             continue;
         }
-        out.push_str(if digitos.len() >= 6 { "#" } else { &digitos });
-        digitos.clear();
-        out.push(c);
+        // Tramo: dígitos unidos por un separador suelto entre dígitos.
+        let mut j = i;
+        while j < t.len() && (t[j].is_ascii_digit() || ("-. ".contains(t[j]) && t.get(j + 1).is_some_and(char::is_ascii_digit) && t[j - 1].is_ascii_digit())) {
+            j += 1;
+        }
+        let tramo: String = t[i..j].iter().collect();
+        out.push_str(if tramo.chars().filter(char::is_ascii_digit).count() >= 6 { "#" } else { &tramo });
+        i = j;
     }
     out.trim_end().to_string()
 }
@@ -56,7 +64,7 @@ pub fn anotar_cierres(dir: &Path) {
 
 /// Texto del diagnóstico (solo el técnico).
 pub async fn exportar(bd: Result<&Bd, &String>, dir: &Path, a: &Actor) -> Res<String> {
-    a.exigir("config.tecnica", "exportar el diagnóstico")?;
+    a.exigir("sistema.preparar", "exportar el diagnóstico")?;
     let mut t = String::new();
     let mut l = |k: &str, v: String| t.push_str(&format!("{k}: {v}\n"));
     l("Programa", format!("Punto de Venta {}", env!("CARGO_PKG_VERSION")));
@@ -114,6 +122,7 @@ mod tests {
     fn el_registro_no_guarda_numeros_largos_ni_controles() {
         assert_eq!(limpiar("UNIQUE constraint failed: tel 88881234\u{1b}[31m"), "UNIQUE constraint failed: tel # [31m");
         assert_eq!(limpiar("fila 12 de 345"), "fila 12 de 345");
+        assert_eq!(limpiar("tel 8765-4321, cédula 1-0987-0654 y 12 34"), "tel #, cédula # y 12 34");
         assert!(limpiar(&"x".repeat(1000)).len() <= 400);
     }
 
@@ -122,9 +131,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pos-diag-{}", crate::util::ulid()));
         let bd = Bd::abrir(&dir, None).await.unwrap();
         let t = crate::usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = crate::usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let dueno = Actor::nuevo(d.id, Rol::Dueno, "Ana");
         let datos: crate::clientes::Datos = serde_json::from_value(serde_json::json!({"nombre": "Marisol Quesada Pérez", "telefono": "8765-4321", "cedula": "1-0987-0654"})).unwrap();
         crate::clientes::crear(&bd.pool, &dueno, &datos, true, "1").await.unwrap();
         anotar(&dir, "venta_cobrar", "ERROR_TECNICO: database is locked (cliente 87654321)");

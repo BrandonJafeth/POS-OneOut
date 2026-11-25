@@ -211,11 +211,10 @@ pub fn pagos(total: i64, entradas: &[PagoEntrada], formas: &[Forma]) -> Resultad
         if p.referencia.as_deref().is_some_and(|r| r.chars().count() > 60 || r.chars().any(char::is_control)) {
             errores.push(format!("{}: referencia inválida", f.nombre));
         }
-        if let Some(u) = p.ultimos4.as_deref().filter(|u| !u.is_empty()) {
-            if !(f.pide_ultimos4 && u.len() == 4 && u.chars().all(|c| c.is_ascii_digit())) {
+        if let Some(u) = p.ultimos4.as_deref().filter(|u| !u.is_empty())
+            && !(f.pide_ultimos4 && u.len() == 4 && u.chars().all(|c| c.is_ascii_digit())) {
                 errores.push(format!("{}: los últimos 4 dígitos son 4 números", f.nombre));
             }
-        }
         if let Err(m) = validar_pagador(f.pide_pagador, p.pagador.as_deref()) {
             errores.push(format!("{}: {m}", f.nombre));
         }
@@ -271,6 +270,42 @@ mod tests {
     }
     fn p(f: &str, m: i64) -> PagoEntrada {
         PagoEntrada { forma_pago_id: f.into(), monto: m, banco_id: None, referencia: None, ultimos4: None, pagador: None }
+    }
+
+    /// Mutantes que sobrevivían (auditoría 0.9.4): importe, IVA incluido y cada borde de validar_linea.
+    #[test]
+    fn importe_iva_y_bordes_de_la_linea() {
+        assert_eq!(importe(&linea(1000, 3, 500)), 2500);
+        assert_eq!(iva_incluido(11_300, 13.0, false), 1300);
+        assert_eq!(iva_incluido(100, 13.0, false), 12); // 100 × 13 / 113 = 11,5 → 12
+        assert_eq!(iva_incluido(1000, 4.0, false), 38); // 1000 × 4 / 104 = 38,46
+        assert_eq!(iva_incluido(11_300, 13.0, true), 0);
+        assert_eq!(iva_incluido(11_300, 0.0, false), 0);
+        let ok = |l: Linea| validar_linea(&l).is_ok();
+        let con = |f: fn(&mut Linea)| {
+            let mut l = linea(1000, 2, 0);
+            f(&mut l);
+            l
+        };
+        assert!(ok(linea(1000, 2, 0)));
+        assert!(!ok(con(|l| l.descripcion = "  ".into())));
+        assert!(ok(con(|l| l.descripcion = "x".repeat(200))));
+        assert!(!ok(con(|l| l.descripcion = "x".repeat(201))));
+        assert!(!ok(con(|l| l.cantidad = 0)));
+        assert!(ok(con(|l| l.cantidad = 1)));
+        assert!(ok(con(|l| l.cantidad = 100_000)));
+        assert!(!ok(con(|l| l.cantidad = 100_001)));
+        assert!(!ok(con(|l| l.precio_unitario = -1)));
+        assert!(ok(con(|l| l.precio_unitario = 0)));
+        assert!(ok(con(|l| l.precio_unitario = 100_000_000)));
+        assert!(!ok(con(|l| l.precio_unitario = 100_000_001)));
+        assert!(!ok(con(|l| l.descuento = -1)));
+        assert!(ok(con(|l| l.descuento = 2000)));
+        assert!(!ok(con(|l| l.descuento = 2001)));
+        assert!(!ok(con(|l| l.tasa_iva = -0.5)));
+        assert!(ok(con(|l| l.tasa_iva = 0.0)));
+        assert!(ok(con(|l| l.tasa_iva = 100.0)));
+        assert!(!ok(con(|l| l.tasa_iva = 100.5)));
     }
 
     #[test]

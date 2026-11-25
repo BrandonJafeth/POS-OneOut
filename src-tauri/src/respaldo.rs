@@ -203,7 +203,7 @@ pub fn sin_lugar(carpeta: &Path, err: &std::io::Error) -> String {
 
 /// Crea el respaldo cifrado en la carpeta de la app. Devuelve la ruta.
 pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
-    a.exigir("respaldo", "hacer respaldos")?;
+    a.exigir("respaldo.crear", "hacer respaldos")?;
     validar_contrasena(contrasena)?;
     let datos = bytes_en_claro(bd).await?;
     let migracion: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&bd.pool).await.map_err(e)?;
@@ -229,9 +229,9 @@ pub async fn crear(bd: &Bd, a: &Actor, contrasena: &str) -> Res<String> {
 const SECRETO_AUTO: &str = "respaldo-automatico.clave";
 
 pub async fn configurar_automatico(bd: &Bd, a: &Actor, contrasena: &str, pin: &str) -> Res<()> {
-    a.exigir("respaldo", "configurar el respaldo automático")?;
+    a.exigir("respaldo.crear", "configurar el respaldo automático")?;
     validar_contrasena(contrasena)?;
-    usuarios::confirmar_dueno(&bd.pool, a, pin, "configurar respaldo automático").await?;
+    usuarios::confirmar_dueno(&bd.pool, a, "respaldo.crear", pin, "configurar respaldo automático").await?;
     let dir = bd.dir.as_ref().ok_or("Sin carpeta de datos")?;
     crate::clave::guardar_secreto(dir, SECRETO_AUTO, contrasena.as_bytes())?;
     let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -302,7 +302,7 @@ pub struct EstadoAutomatico {
 }
 
 pub async fn estado_automatico(bd: &Bd, a: &Actor) -> Res<EstadoAutomatico> {
-    a.exigir("respaldo", "ver los respaldos")?;
+    a.exigir("respaldo.crear", "ver los respaldos")?;
     estado_auto(bd).await
 }
 
@@ -330,7 +330,7 @@ pub async fn automatico_hecho_hoy(bd: &Bd) -> bool {
 }
 
 pub async fn usb_confirmado(bd: &Bd, a: &Actor) -> Res<()> {
-    a.exigir("respaldo", "confirmar la copia de respaldos")?;
+    a.exigir("respaldo.crear", "confirmar la copia de respaldos")?;
     let mut tx = bd.pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&a.id), "respaldo.usb_confirmado", "respaldo", None, &json!({})).await?;
     tx.commit().await.map_err(e)?;
@@ -339,7 +339,7 @@ pub async fn usb_confirmado(bd: &Bd, a: &Actor) -> Res<()> {
 
 /// Cuándo se hizo el último respaldo cifrado (None: nunca). Para avisar al dueño si pasa mucho tiempo.
 pub async fn ultimo(bd: &Bd, a: &Actor) -> Res<Option<String>> {
-    a.exigir("respaldo", "ver los respaldos")?;
+    a.exigir("respaldo.crear", "ver los respaldos")?;
     sqlx::query_scalar("SELECT MAX(fecha) FROM bitacora WHERE accion = 'respaldo.crear'").fetch_one(&bd.pool).await.map_err(e)
 }
 
@@ -399,7 +399,7 @@ async fn revisar(datos: &[u8], ancla: Option<&Path>) -> Res<SqlitePool> {
 /// Restaura: deja pos.db.nuevo (cifrado) listo; al reiniciar reemplaza la base actual.
 /// Solo el dueño, con su PIN en el momento.
 pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena: &str, clave: Option<&[u8; 32]>) -> Res<()> {
-    a.exigir("respaldo", "restaurar respaldos")?;
+    a.exigir("respaldo.restaurar", "restaurar respaldos")?;
     if crate::bd::hay_turno_abierto(&bd.pool).await {
         return Err("Cierre la caja antes de restaurar un respaldo.".into());
     }
@@ -410,7 +410,7 @@ pub async fn restaurar(bd: &Bd, a: &Actor, pin: &str, archivo: &[u8], contrasena
     if let Some(c) = cab.as_ref().filter(|c| c.migracion > crate::bd::ultima_migracion()) {
         return Err(mas_nuevo(Some(&c.app)));
     }
-    usuarios::confirmar_dueno(&bd.pool, a, pin, "restaurar respaldo").await?;
+    usuarios::confirmar_dueno(&bd.pool, a, "respaldo.restaurar", pin, "restaurar respaldo").await?;
     let datos = match descifrar(archivo, contrasena) {
         Ok(d) => d,
         Err(err) => return Err(anotar_fallo(bd, a, &err, cab.as_ref()).await),
@@ -764,6 +764,12 @@ pub mod tests {
     #[ignore]
     async fn generar_fixture() {
         let bd = base_de_prueba().await;
+        let normal = crate::politica::plantilla_normal();
+        let mut d = crate::politica::plantilla("flexible", &normal).unwrap();
+        d.inactividad.general = 5;
+        let mut tx = bd.pool.begin().await.unwrap();
+        crate::politica::agregar(&mut tx, None, None, Some("flexible"), concat!("Fixture ", env!("CARGO_PKG_VERSION")), &d).await.unwrap();
+        tx.commit().await.unwrap();
         let m: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations").fetch_one(&bd.pool).await.unwrap();
         let archivo = cifrar(&bytes_en_claro(&bd).await.unwrap(), CONTRASENA_FIXTURE, m).unwrap();
         let ruta = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../tests/fixtures/respaldo-v{}-m{m}.posbak", env!("CARGO_PKG_VERSION")));
@@ -796,10 +802,10 @@ mod tests_restaurar {
         let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
         let bd = Bd::abrir(&dir, None).await.unwrap();
         let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
         assert_eq!(cabecera(&archivo).unwrap().unwrap().migracion, crate::bd::ultima_migracion());
@@ -832,9 +838,9 @@ mod tests_restaurar {
         let dir = std::env::temp_dir().join(format!("pos-prueba-{}", crate::util::ulid()));
         let bd = Bd::abrir(&dir, None).await.unwrap();
         let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id, rol: Rol::Dueno, nombre: "Ana".into() };
+        let dueno = Actor::nuevo(d.id, Rol::Dueno, "Ana");
         // "respaldos" es un archivo: Windows no deja crear la carpeta (como sin permiso).
         std::fs::write(dir.join("respaldos"), b"x").unwrap();
         let err = crear(&bd, &dueno, "contrasena-larga").await.unwrap_err();
@@ -906,10 +912,10 @@ mod tests_disco {
 
         // 3. Respaldo y restauración: el archivo restaurado también queda cifrado.
         let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         let ruta = crear(&bd, &dueno, "contrasena-larga").await.unwrap();
         let archivo = std::fs::read(&ruta).unwrap();
         // Después del respaldo se siguieron emitiendo tiquetes (1000 más).
@@ -1033,10 +1039,10 @@ mod tests_automatico {
         let dir = std::env::temp_dir().join(format!("pos-auto-{}", crate::util::ulid()));
         let bd = Bd::abrir(&dir, None).await.unwrap();
         let t = usuarios::crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "T".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "T");
         let d = usuarios::crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
-        let dueno = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
-        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813").await.unwrap();
+        let dueno = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
+        usuarios::cambiar_pin(&bd.pool, &dueno, &d.id, "246813", None, None).await.unwrap();
         (dir, bd, dueno)
     }
 

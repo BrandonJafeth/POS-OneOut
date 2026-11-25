@@ -28,6 +28,12 @@ pub struct Usuario {
     /// false si fue porque otro usuario asigno el PIN. Solo valido justo tras iniciar_sesion.
     #[serde(default)]
     pub pin_corto: bool,
+    /// Código de recuperación del dueño: solo en la respuesta que lo crea (se muestra una vez).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codigo_recuperacion: Option<String>,
+    /// Le restablecieron el PIN (con el código): la pantalla se lo dice al entrar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin_restablecido_en: Option<String>,
 }
 
 fn a_usuario(f: &sqlx::sqlite::SqliteRow) -> Usuario {
@@ -38,7 +44,55 @@ fn a_usuario(f: &sqlx::sqlite::SqliteRow) -> Usuario {
         activo: f.get::<i64, _>("activo") == 1,
         debe_cambiar_pin: f.try_get::<i64, _>("debe_cambiar_pin").unwrap_or(0) == 1,
         pin_corto: false,
+        codigo_recuperacion: None,
+        pin_restablecido_en: f.try_get("pin_restablecido_en").ok().flatten(),
     }
+}
+
+// ─────────── Código de recuperación del dueño (D1) ───────────
+
+/// Sin 0/O, 1/I/L: se lee y se copia a mano sin confundir.
+const ALFABETO: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/// 4 grupos de 5 (≈ 99 bits). Se imprime y se guarda en un sobre; aquí queda solo su hash.
+pub fn codigo_nuevo() -> Res<String> {
+    let mut out = String::with_capacity(23);
+    let mut n = 0;
+    while n < 20 {
+        let mut b = [0u8; 32];
+        getrandom::getrandom(&mut b).map_err(|err| format!("Windows no dio números al azar: {err}"))?;
+        // Sin sesgo: solo bytes por debajo del múltiplo de 31 más alto.
+        for x in b.into_iter().filter(|x| (*x as usize) < 248) {
+            if n == 20 {
+                break;
+            }
+            if n > 0 && n % 5 == 0 {
+                out.push('-');
+            }
+            out.push(ALFABETO[x as usize % ALFABETO.len()] as char);
+            n += 1;
+        }
+    }
+    Ok(out)
+}
+
+/// Como se compara: mayúsculas, sin espacios ni guiones.
+fn normalizar_codigo(c: &str) -> String {
+    c.chars().filter(|x| x.is_ascii_alphanumeric()).map(|x| x.to_ascii_uppercase()).collect()
+}
+
+/// Pone un código nuevo al dueño (el anterior deja de servir) y lo devuelve para mostrarlo una vez.
+async fn poner_codigo(c: &mut sqlx::SqliteConnection, id: &str) -> Res<String> {
+    let codigo = codigo_nuevo()?;
+    let hash = pin::hash(&normalizar_codigo(&codigo))?;
+    sqlx::query("UPDATE usuarios SET recuperacion_hash = ? WHERE id = ?").bind(hash).bind(id).execute(c).await.map_err(e)?;
+    Ok(codigo)
+}
+
+/// ¿Hay algún dueño activo con su propio PIN? Si no, es la instalación: el técnico crea o restablece.
+async fn hay_dueno_con_pin(pool: &SqlitePool) -> Res<bool> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL").fetch_one(pool).await.map_err(e)?;
+    Ok(n > 0)
 }
 
 /// Espera tras `intentos` fallos seguidos: libres hasta 4; luego 30 s, 1 min, 2 min… hasta 15 min.
@@ -91,13 +145,15 @@ fn validar_nombre(nombre: &str) -> Res<String> {
 
 /// Primer arranque: el técnico se crea a sí mismo (solo si no existe).
 pub async fn crear_tecnico_inicial(pool: &SqlitePool, p: &str) -> Res<Usuario> {
-    if tecnico_id(pool).await?.is_some() {
-        return Err("El usuario técnico ya existe".into());
-    }
     validar_pin(pool, Rol::Tecnico, p).await?;
     let id = ulid();
     let hash = pin::hash(p)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    // Dentro de la transacción: dos llamadas a la vez no crean dos técnicos (B8).
+    let ya: Option<i64> = sqlx::query_scalar("SELECT 1 FROM usuarios WHERE rol = 'tecnico' AND eliminado_en IS NULL LIMIT 1").fetch_optional(&mut *tx).await.map_err(e)?;
+    if ya.is_some() {
+        return Err("El usuario técnico ya existe".into());
+    }
     sqlx::query("INSERT INTO usuarios (id, nombre, rol, pin_hash) VALUES (?, 'Técnico', 'tecnico', ?)").bind(&id).bind(&hash).execute(&mut *tx).await.map_err(e)?;
     bitacora::registrar(&mut tx, Some(&id), "usuario.crear", "usuario", Some(&id), &json!({"rol": "tecnico", "primerArranque": true})).await?;
     tx.commit().await.map_err(e)?;
@@ -105,12 +161,16 @@ pub async fn crear_tecnico_inicial(pool: &SqlitePool, p: &str) -> Res<Usuario> {
 }
 
 pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str) -> Res<Usuario> {
-    a.exigir("usuarios", "crear usuarios")?;
+    a.exigir("usuarios.administrar", "crear usuarios")?;
     if !administrables(a.rol).contains(&rol) {
         return Err(sin_permiso("crear ese tipo de usuario"));
     }
     let n = validar_nombre(nombre)?;
     validar_pin(pool, rol, p).await?;
+    // D1: el técnico crea un dueño solo en la instalación (ningún dueño tiene su PIN todavía).
+    if rol == Rol::Dueno && a.rol == Rol::Tecnico && hay_dueno_con_pin(pool).await? {
+        return Err(sin_permiso("crear otro dueño: ya hay uno con su PIN y es él quien lo crea en Usuarios"));
+    }
     let id = ulid();
     let hash = pin::hash(p)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -124,19 +184,24 @@ pub async fn crear(pool: &SqlitePool, a: &Actor, nombre: &str, rol: Rol, p: &str
         .execute(&mut *tx)
         .await
         .map_err(e)?;
+    let codigo = if rol == Rol::Dueno { Some(poner_codigo(&mut tx, &id).await?) } else { None };
     bitacora::registrar(&mut tx, Some(&a.id), "usuario.crear", "usuario", Some(&id), &json!({"nombre": n, "rol": rol})).await?;
     tx.commit().await.map_err(e)?;
-    Ok(obtener(pool, &id).await?.ok_or("Usuario no encontrado")?.0)
+    let mut u = obtener(pool, &id).await?.ok_or("Usuario no encontrado")?.0;
+    u.codigo_recuperacion = codigo;
+    Ok(u)
 }
 
-/// Sin un dueño activo nadie anula, autoriza descuentos, reabre la caja ni restaura respaldos.
+/// Sin un dueño activo con su propio PIN nadie anula, autoriza descuentos, reabre la caja, restaura
+/// respaldos ni confirma permisos. Un dueño con el cambio de PIN pendiente no autoriza nada todavía
+/// (autorizar_dueno lo excluye): no cuenta como el que queda.
 async fn no_quedar_sin_dueno(c: &mut sqlx::SqliteConnection, u: &Usuario) -> Res<()> {
     if u.rol != Rol::Dueno || !u.activo {
         return Ok(());
     }
-    let otros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND eliminado_en IS NULL AND id <> ?").bind(&u.id).fetch_one(c).await.map_err(e)?;
+    let otros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usuarios WHERE rol = 'dueno' AND activo = 1 AND debe_cambiar_pin = 0 AND eliminado_en IS NULL AND id <> ?").bind(&u.id).fetch_one(c).await.map_err(e)?;
     if otros == 0 {
-        return Err(format!("{} es el único dueño activo: cree otro dueño antes. Sin dueño nadie puede anular ventas, autorizar descuentos ni reabrir la caja.", u.nombre));
+        return Err(format!("{} es el único dueño activo que puede autorizar: cree otro dueño (y que entre una vez para cambiar su clave) antes. Sin dueño nadie puede anular ventas, autorizar descuentos ni reabrir la caja.", u.nombre));
     }
     Ok(())
 }
@@ -151,6 +216,10 @@ async fn administrable(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Usuario> {
 
 pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, nombre: Option<&str>, activo: Option<bool>) -> Res<()> {
     let u = administrable(pool, a, id).await?;
+    // El cajero no se cambia el nombre (saldría otro nombre en los cierres y reportes: B9).
+    if u.id == a.id && a.rol == Rol::Cajero && nombre.is_some_and(|n| n.trim() != u.nombre) {
+        return Err(sin_permiso("cambiarse el nombre"));
+    }
     if activo == Some(false) && u.id == a.id {
         return Err("No puede desactivarse a sí mismo".into());
     }
@@ -170,24 +239,69 @@ pub async fn editar(pool: &SqlitePool, a: &Actor, id: &str, nombre: Option<&str>
     Ok(())
 }
 
-pub async fn cambiar_pin(pool: &SqlitePool, a: &Actor, id: &str, p: &str) -> Res<()> {
-    let u = administrable(pool, a, id).await?;
+/// Cambiar un PIN. El propio pide el actual (D2), salvo el cambio obligatorio (primer ingreso o
+/// restablecido). El de otro dueño solo con su código de recuperación (D1), quien sea que lo use, o en
+/// la instalación (ningún dueño con su PIN todavía): queda en la bitácora, debe cambiarlo al entrar,
+/// el código usado deja de servir y se genera otro (se devuelve para mostrarlo una vez).
+pub async fn cambiar_pin(pool: &SqlitePool, a: &Actor, id: &str, p: &str, actual: Option<&str>, codigo: Option<&str>) -> Res<Option<String>> {
+    let (u, _, _, _) = obtener(pool, id).await?.ok_or("Usuario no encontrado")?;
+    let propio = u.id == a.id;
+    let dueno_ajeno = u.rol == Rol::Dueno && !propio;
+    if !propio && !administrables(a.rol).contains(&u.rol) {
+        return Err(sin_permiso("administrar ese usuario"));
+    }
+    if propio && !u.debe_cambiar_pin {
+        confirmar_propio(pool, a, actual.unwrap_or(""), "cambiar el PIN propio").await.map_err(|_| "El PIN actual no es correcto".to_string())?;
+    }
+    let con_codigo = match codigo.map(normalizar_codigo).filter(|c| !c.is_empty()) {
+        Some(c) if dueno_ajeno => {
+            let _turno = PIN_EN_CURSO.lock().await;
+            freno_autorizacion(pool, crate::util::ahora().with_timezone(&chrono::Utc)).await?;
+            let h: Option<String> = sqlx::query_scalar("SELECT recuperacion_hash FROM usuarios WHERE id = ?").bind(id).fetch_one(pool).await.map_err(e)?;
+            if !h.is_some_and(|h| pin::verificar(&c, &h)) {
+                let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+                bitacora::registrar(&mut tx, Some(&a.id), "autorizacion.fallida", "usuario", Some(id), &json!({"contexto": "código de recuperación"})).await?;
+                tx.commit().await.map_err(e)?;
+                return Err("El código de recuperación no es correcto".into());
+            }
+            true
+        }
+        _ => false,
+    };
+    if dueno_ajeno && !con_codigo && hay_dueno_con_pin(pool).await? {
+        return Err("Para restablecer el PIN de un dueño hace falta su código de recuperación.".into());
+    }
     validar_pin(pool, u.rol, p).await?;
     let hash = pin::hash(p)?;
-    // Si lo cambia otra persona, el dueño de la cuenta debe cambiarlo de nuevo al entrar.
-    let debe = (u.id != a.id) as i64;
+    let ahora = ahora_iso();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
-    sqlx::query("UPDATE usuarios SET pin_hash = ?, intentos_fallidos = 0, bloqueado_hasta = NULL, debe_cambiar_pin = ?, actualizado_en = ? WHERE id = ?")
+    // Si lo cambia otra persona, el dueño de la cuenta debe cambiarlo de nuevo al entrar.
+    sqlx::query("UPDATE usuarios SET pin_hash = ?, intentos_fallidos = 0, bloqueado_hasta = NULL, debe_cambiar_pin = ?, pin_restablecido_en = ?, actualizado_en = ? WHERE id = ?")
         .bind(&hash)
-        .bind(debe)
-        .bind(ahora_iso())
+        .bind(!propio as i64)
+        .bind(if dueno_ajeno { Some(&ahora) } else { None })
+        .bind(&ahora)
         .bind(id)
         .execute(&mut *tx)
         .await
         .map_err(e)?;
-    bitacora::registrar(&mut tx, Some(&a.id), "usuario.pin", "usuario", Some(id), &json!({})).await?;
+    let nuevo = if con_codigo { Some(poner_codigo(&mut tx, id).await?) } else { None };
+    bitacora::registrar(&mut tx, Some(&a.id), "usuario.pin", "usuario", Some(id), &json!({"conCodigo": con_codigo})).await?;
     tx.commit().await.map_err(e)?;
-    Ok(())
+    Ok(nuevo)
+}
+
+/// El dueño se hace un código de recuperación nuevo (el anterior deja de servir), con su PIN.
+pub async fn codigo_recuperacion(pool: &SqlitePool, a: &Actor, actual: &str) -> Res<String> {
+    if a.rol != Rol::Dueno {
+        return Err(sin_permiso("tener un código de recuperación"));
+    }
+    confirmar_propio(pool, a, actual, "código de recuperación").await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    let codigo = poner_codigo(&mut tx, &a.id).await?;
+    bitacora::registrar(&mut tx, Some(&a.id), "usuario.codigo_recuperacion", "usuario", Some(&a.id), &json!({})).await?;
+    tx.commit().await.map_err(e)?;
+    Ok(codigo)
 }
 
 pub async fn eliminar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
@@ -290,20 +404,19 @@ async fn freno_autorizacion(pool: &SqlitePool, ahora: chrono::DateTime<chrono::U
     Ok(())
 }
 
-/// Para acciones solo del dueño: además de ser dueño, confirma con su PIN cada vez.
-pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<String> {
-    if a.rol != Rol::Dueno {
-        return Err(sin_permiso(contexto));
-    }
+/// Acciones que SIEMPRE se confirman con el PIN de un dueño (reabrir, corte, anonimizar, ajustes…):
+/// quien tenga la acción (politica) y, además, el PIN de un dueño en el momento. Darle la acción a un
+/// cajero no le quita el PIN.
+pub async fn confirmar_dueno(pool: &SqlitePool, a: &Actor, accion: &str, p: &str, contexto: &str) -> Res<String> {
+    a.exigir(accion, contexto)?;
     autorizar_dueno(pool, p, contexto, &a.id).await
 }
 
 /// Para acciones grandes del dueño o el técnico (importar el catálogo): el usuario de la sesión
 /// vuelve a escribir SU PIN. Mismo freno que autorizar_dueno (freno_autorizacion).
 pub async fn confirmar_propio(pool: &SqlitePool, a: &Actor, p: &str, contexto: &str) -> Res<()> {
-    if a.rol == Rol::Cajero {
-        return Err(sin_permiso(contexto));
-    }
+    // Quién puede (importar el catálogo) ya lo revisó la política de la acción.
+    let _ = contexto;
     let _turno = PIN_EN_CURSO.lock().await;
     freno_autorizacion(pool, crate::util::ahora().with_timezone(&chrono::Utc)).await?;
     let hash: Option<String> = sqlx::query_scalar("SELECT pin_hash FROM usuarios WHERE id = ? AND activo = 1 AND eliminado_en IS NULL")
@@ -328,32 +441,35 @@ pub mod tests {
     pub async fn base_con_usuarios() -> (Bd, Actor, Actor, Actor) {
         let bd = Bd::memoria().await.unwrap();
         let t = crear_tecnico_inicial(&bd.pool, "735919").await.unwrap();
-        let tec = Actor { id: t.id, rol: Rol::Tecnico, nombre: "Técnico".into() };
+        let tec = Actor::nuevo(t.id, Rol::Tecnico, "Técnico");
         let d = crear(&bd.pool, &tec, "Ana", Rol::Dueno, "246813").await.unwrap();
         let c = crear(&bd.pool, &tec, "Luis", Rol::Cajero, "2580").await.unwrap();
         // Ana entra por primera vez y pone su propio PIN (si no, su PIN no autoriza nada).
-        let ana = Actor { id: d.id.clone(), rol: Rol::Dueno, nombre: "Ana".into() };
-        cambiar_pin(&bd.pool, &ana, &d.id, "246813").await.unwrap();
+        let ana = Actor::nuevo(d.id.clone(), Rol::Dueno, "Ana");
+        cambiar_pin(&bd.pool, &ana, &d.id, "246813", None, None).await.unwrap();
         (
             bd,
             tec,
             ana,
-            Actor { id: c.id, rol: Rol::Cajero, nombre: "Luis".into() },
+            Actor::nuevo(c.id, Rol::Cajero, "Luis"),
         )
     }
 
     #[tokio::test]
     async fn pin_minimo_y_cambio_obligatorio() {
-        let (bd, tec, _, _) = base_con_usuarios().await;
+        let (bd, tec, ana, _) = base_con_usuarios().await;
         // Dueño y técnico: mínimo 6. Repetidos no.
         assert!(crear(&bd.pool, &tec, "Otro", Rol::Dueno, "1234").await.unwrap_err().contains("6"));
         assert!(crear(&bd.pool, &tec, "Otro", Rol::Dueno, "111111").await.unwrap_err().contains("repetido"));
-        // Creado por otro → debe cambiar PIN; cambiándolo él mismo, ya no.
-        let o = crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        // Ya hay un dueño con su PIN: el técnico no crea otro (D1); lo crea un dueño.
+        assert!(crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.is_err());
+        // Creado por otro → debe cambiar PIN; cambiándolo él mismo, ya no. Trae su código de recuperación.
+        let o = crear(&bd.pool, &ana, "Otra", Rol::Dueno, "864209").await.unwrap();
+        assert_eq!(o.codigo_recuperacion.as_deref().map(str::len), Some(23));
         let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "864209", 0).await.unwrap() else { panic!() };
         assert!(usuario.debe_cambiar_pin);
-        let otra = Actor { id: o.id.clone(), rol: Rol::Dueno, nombre: "Otra".into() };
-        cambiar_pin(&bd.pool, &otra, &o.id, "975318").await.unwrap();
+        let otra = Actor::nuevo(o.id.clone(), Rol::Dueno, "Otra");
+        cambiar_pin(&bd.pool, &otra, &o.id, "975318", None, None).await.unwrap();
         let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &o.id, "975318", 0).await.unwrap() else { panic!() };
         assert!(!usuario.debe_cambiar_pin);
     }
@@ -362,11 +478,19 @@ pub mod tests {
     async fn pin_puesto_por_el_tecnico_no_autoriza() {
         let (bd, tec, dueno, cajero) = base_con_usuarios().await;
         assert_eq!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.unwrap(), dueno.id);
-        // El técnico resetea el PIN de Ana: ni el viejo ni el nuevo autorizan hasta que Ana lo cambie.
-        cambiar_pin(&bd.pool, &tec, &dueno.id, "802468").await.unwrap();
+        // Sin el código de recuperación, el técnico no le cambia el PIN a la dueña (D1).
+        assert!(cambiar_pin(&bd.pool, &tec, &dueno.id, "802468", None, None).await.is_err());
+        assert!(cambiar_pin(&bd.pool, &tec, &dueno.id, "802468", None, Some("AAAAA-AAAAA-AAAAA-AAAAA")).await.is_err());
+        // Con el código: ni el viejo ni el nuevo autorizan hasta que Ana lo cambie; el código usado ya no sirve.
+        let codigo = codigo_recuperacion(&bd.pool, &dueno, "246813").await.unwrap();
+        let nuevo = cambiar_pin(&bd.pool, &tec, &dueno.id, "802468", None, Some(&codigo.to_lowercase())).await.unwrap();
+        assert!(nuevo.is_some_and(|n| n != codigo));
+        assert!(cambiar_pin(&bd.pool, &tec, &dueno.id, "802469", None, Some(&codigo)).await.is_err());
+        let Login::Ok { usuario } = iniciar_sesion(&bd.pool, &dueno.id, "802468", 0).await.unwrap() else { panic!() };
+        assert!(usuario.debe_cambiar_pin && usuario.pin_restablecido_en.is_some());
         assert!(autorizar_dueno(&bd.pool, "802468", "prueba", &cajero.id).await.is_err());
         assert!(autorizar_dueno(&bd.pool, "246813", "prueba", &cajero.id).await.is_err());
-        cambiar_pin(&bd.pool, &dueno, &dueno.id, "913579").await.unwrap();
+        cambiar_pin(&bd.pool, &dueno, &dueno.id, "913579", None, None).await.unwrap();
         assert_eq!(autorizar_dueno(&bd.pool, "913579", "prueba", &cajero.id).await.unwrap(), dueno.id);
     }
 
@@ -422,8 +546,10 @@ pub mod tests {
         let (bd, tec, ana, _) = base_con_usuarios().await;
         assert!(editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap_err().contains("único dueño"));
         assert!(eliminar(&bd.pool, &tec, &ana.id).await.unwrap_err().contains("único dueño"));
-        // Con otro dueño activo, sí.
-        crear(&bd.pool, &tec, "Otra", Rol::Dueno, "864209").await.unwrap();
+        // Otro dueño que todavía no puso su PIN no cuenta (no autoriza nada); ya con su PIN, sí.
+        let otra = crear(&bd.pool, &ana, "Otra", Rol::Dueno, "864209").await.unwrap();
+        assert!(editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap_err().contains("único dueño"));
+        cambiar_pin(&bd.pool, &Actor::nuevo(otra.id.clone(), Rol::Dueno, "Otra"), &otra.id, "864209", None, None).await.unwrap();
         editar(&bd.pool, &tec, &ana.id, None, Some(false)).await.unwrap();
     }
 
@@ -432,6 +558,6 @@ pub mod tests {
         let (bd, _, dueno, cajero) = base_con_usuarios().await;
         assert!(crear(&bd.pool, &cajero, "X", Rol::Cajero, "8642").await.unwrap_err().contains("permiso"));
         assert!(eliminar(&bd.pool, &cajero, &dueno.id).await.unwrap_err().contains("permiso"));
-        assert!(confirmar_dueno(&bd.pool, &cajero, "246813", "reabrir").await.unwrap_err().contains("permiso"));
+        assert!(confirmar_dueno(&bd.pool, &cajero, "caja.reabrir", "246813", "reabrir").await.unwrap_err().contains("permiso"));
     }
 }

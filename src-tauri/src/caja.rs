@@ -21,7 +21,7 @@ use crate::desglose::{self, Desglose};
 use crate::escpos;
 use crate::estadisticas::{self, Estadisticas};
 use crate::impresoras;
-use crate::permisos::{puede, sin_permiso, Rol};
+use crate::permisos::{sin_permiso, Rol};
 use crate::sesion::Actor;
 use crate::usuarios;
 use crate::util::{ahora_iso, colones, dia_local, e, texto, ulid, Res};
@@ -71,7 +71,7 @@ pub struct Turno {
 impl Turno {
     /// Para el cajero: la apertura dice solo si cuadró, sin montos.
     pub fn para(mut self, a: &Actor) -> Turno {
-        if !puede(a.rol, "caja.admin") {
+        if !a.puede("caja.ver_totales") {
             self.apertura_esperada = None;
             self.diferencia_apertura = None;
         }
@@ -138,7 +138,7 @@ pub async fn compartido(c: &mut SqliteConnection) -> bool {
 
 /// ¿Puede este usuario operar (vender, mover efectivo, abrir la gaveta sin venta) en este turno?
 pub fn puede_operar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
-    if !puede(a.rol, "caja") {
+    if !a.puede("caja.ver") {
         return Err(sin_permiso("usar la caja"));
     }
     if t.usuario_apertura_id == a.id || compartido {
@@ -156,10 +156,11 @@ pub fn puede_operar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
 /// Turno por cajero: el turno de otro que quedó abierto desde un día anterior (caja tardía) lo puede
 /// cerrar el cajero que llega, con su conteo ciego, para abrir el suyo.
 pub fn puede_cerrar(a: &Actor, t: &Turno, compartido: bool) -> Res<()> {
-    if puede(a.rol, "caja.admin") {
+    // El dueño cierra cualquier turno (su fila es fija).
+    if a.rol == Rol::Dueno {
         return Ok(());
     }
-    if puede(a.rol, "caja") && dia_de(&t.abierto_en) < dia_local() {
+    if a.puede("caja.cerrar_otro") && dia_de(&t.abierto_en) < dia_local() {
         return Ok(());
     }
     puede_operar(a, t, compartido).map_err(|_| format!("Esta caja la abrió {}: la cierra {} con su conteo, o el dueño.", t.usuario_apertura, t.usuario_apertura))
@@ -182,9 +183,15 @@ pub async fn turno_para_vender(c: &mut SqliteConnection, caja_id: &str, a: &Acto
     }
 }
 
+/// Hasta cuánto puede sacar sin el PIN del dueño (política «caja.salida»). Con «PIN»: nada.
+pub fn salida_max_sin_pin(a: &Actor) -> i64 {
+    let p = a.politica("caja.salida");
+    if p.nivel == crate::acciones::Nivel::Si { p.limites.monto_max.unwrap_or(100_000_000) } else { 0 }
+}
+
 /// ¿Ve este usuario los totales de ventas de este turno? El cajero, solo cuando ya cerró.
 pub fn ve_totales(a: &Actor, t: &Turno) -> bool {
-    a.rol != Rol::Cajero || t.estado == "cerrado"
+    a.puede("caja.ver_totales") || t.estado == "cerrado"
 }
 
 // ─────────── Conteo por denominaciones ───────────
@@ -210,14 +217,13 @@ pub async fn denominaciones(pool: &SqlitePool) -> Vec<i64> {
 
 /// Total del conteo, validado contra las denominaciones configuradas. Devuelve (total, JSON limpio).
 pub fn total_conteo(c: &Conteo, validas: &[i64]) -> Res<(i64, Value)> {
-    if c.cantidades.values().all(|n| *n == 0) {
-        if let Some(t) = c.total {
+    if c.cantidades.values().all(|n| *n == 0)
+        && let Some(t) = c.total {
             if !(0..=100_000_000).contains(&t) {
                 return Err("El total contado no es válido".into());
             }
             return Ok((t, json!({ "total": t })));
         }
-    }
     let mut total = 0i64;
     let mut limpio = serde_json::Map::new();
     for (k, n) in &c.cantidades {
@@ -279,7 +285,7 @@ pub async fn motivos_no_venta(pool: &SqlitePool) -> Vec<String> {
 }
 
 pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCaja> {
-    a.exigir("caja", "usar la caja")?;
+    a.exigir("caja.ver", "usar la caja")?;
     let (t, comp, no_ventas, apertura, siguiente) = {
         let mut c = pool.acquire().await.map_err(e)?;
         let t = turno_abierto(&mut c, caja_id).await?;
@@ -304,7 +310,7 @@ pub async fn estado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<EstadoCa
         compartido: comp,
         denominaciones: denominaciones(pool).await,
         motivos: config::valor(pool, "caja_motivos").await.unwrap_or(json!({"salida": [], "entrada": []})),
-        salida_max_sin_pin: config::entero(pool, "caja_salida_max_sin_pin", 20000).await,
+        salida_max_sin_pin: salida_max_sin_pin(a),
         umbral_diferencia: config::entero(pool, "caja_umbral_diferencia", 1000).await,
         no_venta_motivos: motivos_no_venta(pool).await,
         no_venta_umbral: config::entero(pool, "caja_no_venta_umbral", 5).await,
@@ -473,7 +479,7 @@ pub async fn abrir(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo)
 
 /// Abre la caja. `eleccion` ("hoy" | "manana") solo cuenta cuando la fecha está en duda (ver `CasoApertura`).
 pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo, eleccion: Option<&str>) -> Res<Turno> {
-    a.exigir("caja", "abrir la caja")?;
+    a.exigir("caja.abrir", "abrir la caja")?;
     let (fondo, detalle) = total_conteo(conteo, &denominaciones(pool).await)?;
     let id = ulid();
     let ahora = ahora_iso();
@@ -544,13 +550,13 @@ pub async fn abrir_eligiendo(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo
 /// Al cerrar, después del conteo: cuánto se deja en la gaveta para la próxima caja (una sola vez).
 /// Lo contado menos esto es el retiro de cierre.
 pub async fn queda_en_gaveta(pool: &SqlitePool, a: &Actor, turno_id: &str, monto: i64) -> Res<()> {
-    a.exigir("caja", "cerrar la caja")?;
+    a.exigir("caja.cerrar", "cerrar la caja")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
     if t.estado != "cerrado" || t.queda_en_gaveta.is_some() {
         return Err("Lo que queda en la gaveta ya se anotó.".into());
     }
-    if t.usuario_cierre_id.as_deref() != Some(a.id.as_str()) && !puede(a.rol, "caja.admin") {
+    if t.usuario_cierre_id.as_deref() != Some(a.id.as_str()) && !a.puede("caja.historial") {
         return Err(sin_permiso("anotar el cierre de otra persona"));
     }
     let contado = t.contado.unwrap_or(0);
@@ -570,7 +576,7 @@ pub async fn corregir_dia(pool: &SqlitePool, a: &Actor, turno_id: &str, dia: &st
     if motivo.chars().count() < 5 {
         return Err("Escriba el motivo (al menos 5 letras)".into());
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "corregir el día de la caja").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "caja.corregir_dia", pin, "corregir el día de la caja").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
     let ap = apertura_en(crate::util::ahora(), None, &horario_con(&mut tx).await);
@@ -654,7 +660,7 @@ fn motivo_permitido(motivos: &Value, tipo: &str, categoria: &str) -> bool {
 }
 
 pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMovimiento, pin_dueno: Option<&str>) -> Res<String> {
-    a.exigir("caja", "registrar entradas o salidas")?;
+    a.exigir(if m.tipo == "salida" { "caja.salida" } else { "caja.entrada" }, "registrar entradas o salidas")?;
     if m.tipo != "entrada" && m.tipo != "salida" {
         return Err("Tipo de movimiento inválido".into());
     }
@@ -667,11 +673,21 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
     if !motivo_permitido(&motivos, &m.tipo, &categoria) {
         return Err("Elija un motivo de la lista".into());
     }
-    let tope = config::entero(pool, "caja_salida_max_sin_pin", 20000).await;
-    // Salida grande: PIN del dueño en el momento (también si el que la hace es el dueño).
-    let autorizado = if m.tipo == "salida" && m.monto > tope {
-        let p = pin_dueno.filter(|p| !p.is_empty()).ok_or("Esta salida pasa el tope: necesita el PIN del dueño")?;
-        Some(usuarios::autorizar_dueno(pool, p, "salida de caja", &a.id).await?)
+    // Salidas: política «caja.salida» con todos sus niveles (PIN del dueño en el momento o como
+    // autorización; el detalle escrito cuenta como motivo). También el dueño sigue el tope (es del
+    // negocio), con su PIN siempre puede (A6). Las entradas no piden nada más.
+    let autorizado = if m.tipo == "salida" {
+        let pin_de = match pin_dueno.filter(|p| !p.is_empty()) {
+            Some(p) => Some(usuarios::autorizar_dueno(pool, p, "salida de caja", &a.id).await?),
+            None => None,
+        };
+        let ctx = crate::politica::Contexto { monto: Some(m.monto), motivo: (!nota.is_empty()).then(|| nota.clone()), pin_de, ..Default::default() };
+        match crate::politica::aplicar(a, "caja.salida", &ctx) {
+            Ok(ap) => ap.autorizo,
+            Err(x) if x.starts_with(crate::politica::NECESITA_PIN) && a.politica("caja.salida").nivel == crate::acciones::Nivel::Si => return Err("Esta salida pasa el tope: necesita el PIN del dueño".into()),
+            Err(x) if x.starts_with("No se puede") => return Err(format!("Esta salida pasa el tope de ¢{}: no se puede hacer", salida_max_sin_pin(a))),
+            Err(x) => return Err(x),
+        }
     } else {
         None
     };
@@ -687,7 +703,7 @@ pub async fn movimiento(pool: &SqlitePool, a: &Actor, caja_id: &str, m: &NuevoMo
         if m.monto > r.efectivo_esperado {
             drop(tx);
             // El cajero no ve lo esperado: el rechazo queda en la bitácora para que el dueño lo vea.
-            if a.rol == Rol::Cajero {
+            if !a.puede("caja.ver_totales") {
                 let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
                 bitacora::registrar(&mut tx, Some(&a.id), "caja.salida_rechazada", "caja_turno", Some(&t.id), &json!({"monto": m.monto, "categoria": categoria})).await?;
                 tx.commit().await.map_err(e)?;
@@ -752,6 +768,16 @@ pub struct PagoElectronico {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase", default)]
+pub struct AnulacionSinPin {
+    pub fecha: String,
+    pub numero: String,
+    pub total: i64,
+    pub motivo: String,
+    pub usuario: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct NoVenta {
     pub fecha: String,
     pub usuario: String,
@@ -805,6 +831,8 @@ pub struct Resumen {
     /// Aperturas de gaveta sin venta (con motivo) y órdenes del dueño.
     pub no_ventas: Vec<NoVenta>,
     pub no_venta_umbral: i64,
+    /// Anulaciones que hizo un cajero sin el PIN del dueño (opción C), aparte de las demás.
+    pub anulaciones_sin_pin: Vec<AnulacionSinPin>,
     pub cortes: Vec<CorteResumen>,
     /// Ventas por departamento y producto (reparto exacto).
     pub desglose: Desglose,
@@ -1065,6 +1093,18 @@ pub async fn resumen(c: &mut SqliteConnection, t: &Turno) -> Res<Resumen> {
         .iter()
         .map(|f| NoVenta { fecha: f.get("fecha"), usuario: f.get("usuario"), causa: f.get("causa"), motivo: f.get("motivo"), nota: f.get("nota"), autorizado_por: f.get("autorizado") })
         .collect();
+    let asp = sqlx::query(
+        "SELECT v.anulada_en, v.numero, v.total, v.anulada_motivo, u.nombre AS usuario FROM ventas v JOIN usuarios u ON u.id = v.anulada_actor
+         WHERE v.anulada_turno_id = ? AND v.anulada_politica = 'C' AND v.anulada_por = v.anulada_actor ORDER BY v.anulada_en, v.id",
+    )
+    .bind(&t.id)
+    .fetch_all(&mut *c)
+    .await
+    .map_err(e)?;
+    r.anulaciones_sin_pin = asp
+        .iter()
+        .map(|f| AnulacionSinPin { fecha: f.get::<Option<String>, _>("anulada_en").unwrap_or_default(), numero: f.get("numero"), total: f.get("total"), motivo: f.get::<Option<String>, _>("anulada_motivo").unwrap_or_default(), usuario: f.get("usuario") })
+        .collect();
     let cs = sqlx::query(
         "SELECT k.id, k.fecha, u.nombre AS usuario, k.ventas, k.total, k.efectivo_esperado, k.retiro FROM caja_cortes k JOIN usuarios u ON u.id = k.usuario_id
          WHERE k.turno_id = ? ORDER BY k.fecha, k.id",
@@ -1219,10 +1259,10 @@ pub struct Detalle {
 /// ¿Puede ver este turno? El dueño, todos. El cajero: el abierto que puede usar, y los cerrados en
 /// los que participó (lo abrió, lo cerró, vendió o movió efectivo).
 async fn puede_ver(c: &mut SqliteConnection, a: &Actor, t: &Turno) -> Res<()> {
-    if puede(a.rol, "caja.admin") {
+    if a.puede("caja.historial") {
         return Ok(());
     }
-    if !puede(a.rol, "caja") {
+    if !a.puede("caja.ver") {
         return Err(sin_permiso("ver este turno"));
     }
     if t.estado == "abierto" {
@@ -1249,7 +1289,7 @@ async fn puede_ver(c: &mut SqliteConnection, a: &Actor, t: &Turno) -> Res<()> {
 
 /// Detalle de un turno. Abierto: se calcula en vivo. Cerrado: lo congelado al cerrar.
 pub async fn detalle(pool: &SqlitePool, a: &Actor, turno_id: &str) -> Res<Detalle> {
-    a.exigir("caja", "ver la caja")?;
+    a.exigir("caja.ver", "ver la caja")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let t = turno(&mut c, turno_id).await?.ok_or("Turno no encontrado")?;
     puede_ver(&mut c, a, &t).await?;
@@ -1290,14 +1330,14 @@ pub struct ResultadoCierre {
 /// Paso previo al cierre del dueño: con este conteo, ¿hace falta nota? Al cajero nunca se le
 /// pregunta antes (su conteo es ciego): puede agregar la nota después de ver el resultado.
 pub async fn necesita_nota(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo) -> Res<bool> {
-    a.exigir("caja", "cerrar la caja")?;
+    a.exigir("caja.cerrar", "cerrar la caja")?;
     let (contado, _) = total_conteo(conteo, &denominaciones(pool).await)?;
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
     let mut c = pool.acquire().await.map_err(e)?;
     let t = turno_abierto(&mut c, caja_id).await?.ok_or("La caja no está abierta")?;
     let comp = compartido(&mut c).await;
     puede_cerrar(a, &t, comp)?;
-    if a.rol == Rol::Cajero {
+    if !a.puede("caja.ver_totales") {
         return Ok(false);
     }
     let r = resumen(&mut c, &t).await?;
@@ -1305,11 +1345,11 @@ pub async fn necesita_nota(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: 
 }
 
 pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo, nota: &str) -> Res<ResultadoCierre> {
-    a.exigir("caja", "cerrar la caja")?;
+    a.exigir("caja.cerrar", "cerrar la caja")?;
     let (contado, detalle_conteo) = total_conteo(conteo, &denominaciones(pool).await)?;
     let nota = texto(nota, 500, "nota", false)?;
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
-    let ciego = a.rol == Rol::Cajero;
+    let ciego = !a.puede("caja.ver_totales");
     // La bitácora se verifica en cada cierre: si alguien la alteró, queda dicho en el reporte.
     let ver = bitacora::verificar(pool).await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -1373,7 +1413,7 @@ pub async fn cerrar(pool: &SqlitePool, a: &Actor, caja_id: &str, conteo: &Conteo
 /// Nota del cierre escrita DESPUÉS de cerrar (el cajero contó a ciegas y ve el faltante al final).
 /// Solo una vez, solo quien cerró (o el dueño) y solo si no tenía nota. No toca el conteo.
 pub async fn nota_cierre(pool: &SqlitePool, a: &Actor, turno_id: &str, nota: &str) -> Res<()> {
-    a.exigir("caja", "anotar el cierre")?;
+    a.exigir("caja.cerrar", "anotar el cierre")?;
     let nota = texto(nota, 500, "nota", true)?;
     if nota.chars().count() < 5 {
         return Err("Escriba qué pasó (al menos 5 letras)".into());
@@ -1383,7 +1423,7 @@ pub async fn nota_cierre(pool: &SqlitePool, a: &Actor, turno_id: &str, nota: &st
     if t.estado != "cerrado" || t.nota_cierre.is_some() {
         return Err("Ese cierre ya tiene nota".into());
     }
-    if t.usuario_cierre_id.as_deref() != Some(a.id.as_str()) && !puede(a.rol, "caja.admin") {
+    if t.usuario_cierre_id.as_deref() != Some(a.id.as_str()) && !a.puede("caja.historial") {
         return Err(sin_permiso("anotar el cierre de otra persona"));
     }
     sqlx::query("UPDATE caja_turnos SET nota_cierre = ?, actualizado_en = ? WHERE id = ? AND nota_cierre IS NULL").bind(&nota).bind(ahora_iso()).bind(turno_id).execute(&mut *tx).await.map_err(e)?;
@@ -1398,7 +1438,7 @@ pub async fn reabrir(pool: &SqlitePool, a: &Actor, turno_id: &str, pin: &str, mo
     if motivo.chars().count() < 5 {
         return Err("Escriba el motivo para reabrir".into());
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "reabrir caja").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "caja.reabrir", pin, "reabrir caja").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let t = turno(&mut tx, turno_id).await?.ok_or("Turno no encontrado")?;
     if t.estado != "cerrado" {
@@ -1436,7 +1476,7 @@ pub async fn reabrir(pool: &SqlitePool, a: &Actor, turno_id: &str, pin: &str, mo
 }
 
 pub async fn marcar_revisada(pool: &SqlitePool, a: &Actor, turno_id: &str) -> Res<()> {
-    a.exigir("caja.admin", "revisar diferencias")?;
+    a.exigir("caja.historial", "revisar diferencias")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let n = sqlx::query("UPDATE caja_turnos SET diferencia_revisada_por = ?, actualizado_en = ? WHERE id = ? AND estado = 'cerrado' AND diferencia_revisada_por IS NULL")
         .bind(&a.id)
@@ -1531,7 +1571,7 @@ pub struct Corte {
 /// Corte: el dueño ve (e imprime) el acumulado del turno por forma de pago sin cerrarlo. Si quiere,
 /// retira efectivo (salida con motivo y su PIN). Queda en la bitácora y en el Z final.
 pub async fn corte(pool: &SqlitePool, a: &Actor, caja_id: &str, retiro: Option<&Retiro>, pin: Option<&str>) -> Res<Corte> {
-    a.exigir("caja.admin", "hacer cortes de caja")?;
+    a.exigir("caja.corte", "hacer cortes de caja")?;
     let mut ret: Option<(Retiro, String)> = None;
     if let Some(r) = retiro.filter(|r| r.monto != 0) {
         if !(1..=100_000_000).contains(&r.monto) {
@@ -1543,7 +1583,7 @@ pub async fn corte(pool: &SqlitePool, a: &Actor, caja_id: &str, retiro: Option<&
         if !motivo_permitido(&motivos, "salida", &categoria) {
             return Err("Elija un motivo de la lista".into());
         }
-        let dueno = usuarios::confirmar_dueno(pool, a, pin.unwrap_or(""), "retiro de efectivo en corte").await?;
+        let dueno = usuarios::confirmar_dueno(pool, a, "caja.corte", pin.unwrap_or(""), "retiro de efectivo en corte").await?;
         ret = Some((Retiro { monto: r.monto, categoria, nota }, dueno));
     }
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
@@ -1604,13 +1644,15 @@ pub struct TurnoFila {
     pub alerta_no_ventas: bool,
     /// Ventas hechas antes del día de negocio del turno (caja abierta después del cierre).
     pub ventas_despues_del_cierre: i64,
+    /// Anulaciones de un cajero sin PIN (opción C) en el turno: el día se marca si pasan el umbral.
+    pub anulaciones_sin_pin: i64,
 }
 
 /// Historial: el dueño ve todos; el cajero, el abierto que usa y los cerrados en que participó.
 /// Al cajero no le llegan las ventas ni el total del turno abierto.
 pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, hasta: &str) -> Res<Vec<TurnoFila>> {
-    a.exigir("caja", "ver turnos")?;
-    let admin = puede(a.rol, "caja.admin");
+    a.exigir("caja.ver", "ver turnos")?;
+    let admin = a.puede("caja.historial");
     let umbral = config::entero(pool, "caja_umbral_diferencia", 1000).await;
     let umbral_nv = config::entero(pool, "caja_no_venta_umbral", 5).await;
     let mut c = pool.acquire().await.map_err(e)?;
@@ -1659,6 +1701,11 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
         .fetch_one(&mut *c)
         .await
         .map_err(e)?;
+        let sin_pin: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ventas WHERE anulada_turno_id = ? AND anulada_politica = 'C' AND anulada_por = anulada_actor")
+            .bind(&t.id)
+            .fetch_one(&mut *c)
+            .await
+            .map_err(e)?;
         let pendiente = t.revisada_por.is_none() && t.diferencia.is_some_and(|d| fuera_de_umbral(d, umbral));
         let ve = ve_totales(a, &t);
         out.push(TurnoFila {
@@ -1669,6 +1716,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
             no_ventas: nv,
             alerta_no_ventas: umbral_nv > 0 && nv >= umbral_nv,
             ventas_despues_del_cierre: tardias,
+            anulaciones_sin_pin: sin_pin,
             turno: t.para(a),
         });
     }
@@ -1678,7 +1726,7 @@ pub async fn listar(pool: &SqlitePool, a: &Actor, caja_id: &str, desde: &str, ha
 /// Primer número de tiquete de la caja (para seguir después del último del sistema anterior).
 /// Solo dueño o técnico, solo antes de la primera venta de la caja, y queda en la bitácora.
 pub async fn fijar_consecutivo(pool: &SqlitePool, a: &Actor, caja_id: &str, numero: i64) -> Res<()> {
-    if !puede(a.rol, "caja.admin") && !puede(a.rol, "config.tecnica") {
+    if !a.puede("caja.consecutivo") {
         return Err(sin_permiso("cambiar el número de tiquete"));
     }
     if !(1..=999_999_999).contains(&numero) {
@@ -1820,7 +1868,7 @@ pub mod tests {
         let p = &bd.pool;
         config::guardar(p, &dueno, "caja_turno_compartido", &json!(false)).await.unwrap();
         let m = usuarios::crear(p, &tec, "María", Rol::Cajero, "1357").await.unwrap();
-        let maria = Actor { id: m.id, rol: Rol::Cajero, nombre: "María".into() };
+        let maria = Actor::nuevo(m.id, Rol::Cajero, "María");
         let t1 = abrir(p, &luis, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
         // María no abre encima, no mueve efectivo, no cierra ni ve el turno de Luis. El dueño tampoco opera en él.
         assert!(abrir(p, &maria, CAJA_1, &conteo(&[])).await.unwrap_err().contains("Luis"));

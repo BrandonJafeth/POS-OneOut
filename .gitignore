@@ -44,4 +44,5 @@ pos.clave
 manual/capturas/
 
 # Herramientas que se descargan aparte (ver tests/e2e/LEEME.md): msedgedriver
-tools/
+tools/*
+!tools/tablas-seguridad.ps1

@@ -259,7 +259,7 @@ function Anonimizar(p: {
           </label>
           <label className="campo">
             Su PIN de dueño
-            <input className="pin" type="password" inputMode="numeric" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+            <input className="pin" type="password" inputMode="numeric" autoComplete="off" autoFocus value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           </label>
           <Mensaje error={error} />
           <button className="peligro" disabled={!pin || !motivo || ocupado}>

@@ -1,4 +1,4 @@
-// F10 en la venta: buscar un apartado o crédito (número, nombre, teléfono o cédula), ver su saldo y
+// F10 en la venta: buscar un apartado o crédito (número, teléfono o 3 letras del nombre), ver su saldo y
 // abonar. Si el abono deja el saldo en 0, el apartado se liquida (sale el tiquete de la venta) y se
 // entrega. ↑/↓ y Enter recorren la lista (manejador de teclado de la venta).
 import { ArrowLeft, PackageCheck, Printer, Search } from "lucide-react";
@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSesion } from "../../app/sesion";
 import Modal from "../../components/Modal";
 import Mensaje, { textoError } from "../../components/Mensaje";
+import { busquedaValida } from "../../lib/cuentas/busqueda";
 import { buscarCuentas, entregarApartado, obtenerCuenta, type CuentaDetalle, type CuentaFila } from "../../db/cuentas";
 import { imprimirComprobante } from "../../lib/cuentas/imprimir";
 import { validarAbono } from "../../lib/cuentas";
@@ -48,7 +49,9 @@ export default function AbonarApartado(p: {
   const [intento, setIntento] = useState(false);
   const buscador = useRef<HTMLInputElement>(null);
 
+  // D3: número, teléfono o al menos 3 letras (lo mismo que exige Rust); sin eso no se lista nada.
   useEffect(() => {
+    if (!busquedaValida(texto)) return setLista([]);
     const t = setTimeout(() => buscarCuentas(texto).then(setLista, (e) => setError(textoError(e))), 150);
     return () => clearTimeout(t);
   }, [texto]);
@@ -189,7 +192,7 @@ export default function AbonarApartado(p: {
 
   return (
     <Modal titulo="Apartados" onCerrar={p.onCerrar} ancho={720}>
-      <Field label="Número, nombre, teléfono, cédula o detalle">
+      <Field label="Número, teléfono o al menos 3 letras del nombre">
         <div className="buscador-entrada">
           <Search size={20} aria-hidden />
           <input ref={buscador} autoFocus className="grande-venta" style={{ minHeight: 48, fontSize: 17 }} value={texto} onChange={(e) => setTexto(e.target.value)} />
@@ -223,9 +226,10 @@ export default function AbonarApartado(p: {
           </tbody>
         </table>
       ) : (
-        <p className="muted">{texto.trim() ? `No hay apartados con «${texto}».` : "No hay apartados abiertos."}</p>
+        <p className="muted">{busquedaValida(texto) ? `No hay apartados con «${texto}».` : "Escriba el número del apartado, el teléfono o al menos 3 letras del nombre del cliente."}</p>
       )}
       <Mensaje error={error} />
     </Modal>
   );
 }
+

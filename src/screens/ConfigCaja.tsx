@@ -143,7 +143,7 @@ export default function ConfigCaja() {
           <Field label="Motivos (uno por línea)" ayuda="Los que empiezan con «Otro» piden escribir el motivo." flex={1}>
             <textarea rows={4} value={motivos} onChange={(e) => setMotivos(e.target.value)} />
           </Field>
-          <Field label="Límite por turno" ayuda="Aperturas sin venta: al llegar, avisa en el cierre; pasado, el cajero necesita el PIN del dueño. 0 = sin límite.">
+          <Field label="Aviso en el cierre" ayuda="Aperturas sin venta en el turno: desde este número, el cierre lo marca. 0 = sin aviso. Cuántas puede hacer el cajero sin PIN se pone en Administración → Permisos (No venta).">
             <input className="small" inputMode="numeric" value={umbralNv} onChange={(e) => setUmbralNv(e.target.value.replace(/\D/g, ""))} />
           </Field>
         </div>

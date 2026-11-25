@@ -19,6 +19,10 @@ export interface Usuario {
   debeCambiarPin: boolean;
   /** true si debeCambiarPin fue por PIN demasiado corto (no porque otro lo asignó). */
   pinCorto?: boolean;
+  /** Solo al crear un dueño (o restablecer su PIN): su código de recuperación, una vez. */
+  codigoRecuperacion?: string;
+  /** Le restablecieron el PIN con el código: se le avisa al entrar. */
+  pinRestablecidoEn?: string;
 }
 
 export interface Departamento {
@@ -252,7 +256,7 @@ export interface EstadoEspera {
   requiereFactura: boolean;
   /** Dueño que autorizó un descuento por encima del tope, y hasta qué %. */
   /** Descuento sobre el tope autorizado por el dueño: token de un solo uso que emitió Rust. */
-  autorizacion: { duenoId: string; pct: number; token?: string } | null;
+  autorizacion: { duenoId: string; pct: number; monto?: number; token?: string } | null;
   /** Venta ligada a una proforma: al cobrar o apartar, la proforma pasa a "convertida". */
   proforma?: { id: string; numero: string } | null;
 }
@@ -337,6 +341,11 @@ export interface Venta {
   ivaTotal: number;
   estado: "completada" | "anulada";
   anuladaMotivo: string | null;
+  anuladaEn?: string | null;
+  /** A (dueño), B (cajero con PIN), C (cajero sin PIN); null en anulaciones de antes de la 0.9.3. */
+  anuladaPolitica?: "A" | "B" | "C" | null;
+  anuladaActor?: string | null;
+  anuladaSinPin?: boolean;
   requiereFactura: boolean;
   facturaEmitida: boolean;
   facturaReferencia: string | null;

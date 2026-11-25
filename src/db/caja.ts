@@ -213,6 +213,8 @@ export interface Resumen {
   porUsuario: { usuario: string; ventas: number; total: number }[];
   noVentas: NoVenta[];
   noVentaUmbral: number;
+  /** Anulaciones que hizo un cajero sin el PIN del dueño (opción C). No viene en cierres de antes de la 0.9.3. */
+  anulacionesSinPin?: { fecha: string; numero: string; total: number; motivo: string; usuario: string }[];
   cortes: CorteResumen[];
   desglose: Desglose;
   /** false en cierres de antes de la migración 9 (no traen desglose). */
@@ -321,6 +323,8 @@ export interface TurnoFila extends Turno {
   pendienteRevision: boolean;
   noVentas: number;
   alertaNoVentas: boolean;
+  /** Anulaciones de un cajero sin PIN (opción C) en el turno. */
+  anulacionesSinPin?: number;
   /** Ventas cobradas antes del día de negocio del turno (para revisarlas). */
   ventasDespuesDelCierre: number;
 }

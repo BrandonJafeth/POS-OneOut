@@ -18,7 +18,7 @@ pub fn colones(n: i64) -> String {
     let s = n.abs().to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push('.');
         }
         out.push(c);
@@ -32,6 +32,8 @@ const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 pub fn ulid() -> String {
     let ms = Utc::now().timestamp_millis().max(0) as u64;
     let mut azar = [0u8; 16];
+    // expect justificado (B2): sin azar del sistema Windows no puede ni arrancar; un id repetido
+    // sería peor que cerrar la app con el error en errores.log.
     getrandom::getrandom(&mut azar).expect("sin fuente de azar del sistema");
     let mut s = String::with_capacity(26);
     for i in (0..10).rev() {
@@ -52,6 +54,15 @@ thread_local! {
     static RELOJ: std::cell::Cell<Option<(DateTime<FixedOffset>, i64)>> = const { std::cell::Cell::new(None) };
 }
 
+/// Segundos que la prueba de punta a punta adelantó el reloj (solo desarrollo con POS_RELOJ_PRUEBA).
+#[cfg(debug_assertions)]
+static ADELANTO_SEG: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+#[cfg(debug_assertions)]
+pub fn avanzar_reloj_prueba(segundos: i64) {
+    ADELANTO_SEG.fetch_add(segundos.clamp(0, 24 * 3600), std::sync::atomic::Ordering::SeqCst);
+}
+
 pub fn ahora() -> DateTime<FixedOffset> {
     if let Some((f, n)) = RELOJ.with(|r| r.get()) {
         RELOJ.with(|r| r.set(Some((f, n + 1))));
@@ -69,7 +80,8 @@ pub fn ahora() -> DateTime<FixedOffset> {
     if let Some(f) = std::env::var("POS_RELOJ_PRUEBA").ok().and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
         static INICIO: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         let pasado = INICIO.get_or_init(std::time::Instant::now).elapsed();
-        return f + chrono::Duration::from_std(pasado).unwrap_or_default();
+        let extra = chrono::Duration::seconds(ADELANTO_SEG.load(std::sync::atomic::Ordering::SeqCst));
+        return f + chrono::Duration::from_std(pasado).unwrap_or_default() + extra;
     }
     Local::now().fixed_offset()
 }
@@ -192,14 +204,20 @@ pub fn guardar_en(dir: &std::path::Path, nombre: &str, datos: &[u8]) -> Res<Stri
         return Err("El archivo es demasiado grande".into());
     }
     std::fs::create_dir_all(dir).map_err(e)?;
-    let mut ruta = dir.join(nombre);
-    let mut n = 1;
-    while ruta.exists() {
-        ruta = dir.join(format!("{base} ({n}).{ext}"));
-        n += 1;
+    // create_new: nunca pisa un archivo, ni uno que aparezca entre revisar y escribir (B10).
+    for n in 0..1000 {
+        let ruta = if n == 0 { dir.join(nombre) } else { dir.join(format!("{base} ({n}).{ext}")) };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&ruta) {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(datos).map_err(|err| format!("No se pudo guardar {}: {err}", ruta.display()))?;
+                return Ok(ruta.to_string_lossy().to_string());
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("No se pudo guardar {}: {err}", ruta.display())),
+        }
     }
-    std::fs::write(&ruta, datos).map_err(|err| format!("No se pudo guardar {}: {err}", ruta.display()))?;
-    Ok(ruta.to_string_lossy().to_string())
+    Err(format!("Ya hay demasiados archivos llamados {nombre} en {}", dir.display()))
 }
 
 #[cfg(test)]

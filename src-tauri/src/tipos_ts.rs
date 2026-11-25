@@ -56,5 +56,15 @@ fn tipos_de_typescript_al_dia() {
     escribir::<r::Utilidad>(&dir, &mut c);
     escribir::<r::EnCurso>(&dir, &mut c);
     escribir::<r::Reporte>(&dir, &mut c);
+    {
+        use crate::acciones as ac;
+        use crate::politica as po;
+        escribir::<ac::Nivel>(&dir, &mut c);
+        escribir::<ac::AlPasar>(&dir, &mut c);
+        escribir::<ac::Limites>(&dir, &mut c);
+        escribir::<ac::Politica>(&dir, &mut c);
+        escribir::<po::Inactividad>(&dir, &mut c);
+        escribir::<po::Datos>(&dir, &mut c);
+    }
     assert!(c.is_empty(), "Tipos de TS actualizados (revise y suba src/generados): {c:?}");
 }

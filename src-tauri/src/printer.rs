@@ -105,10 +105,11 @@ mod imp {
                 tam *= 4;
                 continue;
             }
-            let mut out: Vec<String> = buf[..n]
+            // Sin cortar texto por bytes: un nombre de dispositivo no ASCII cerraba la app (B1).
+            let mut out: Vec<String> = buf[..n.min(buf.len())]
                 .split(|c| *c == 0)
                 .map(String::from_utf16_lossy)
-                .filter(|s| s.len() > 3 && s[..3].eq_ignore_ascii_case("COM") && s[3..].chars().all(|c| c.is_ascii_digit()))
+                .filter(|s| s.len() > 3 && s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("COM")) && s.get(3..).is_some_and(|r| r.chars().all(|c| c.is_ascii_digit())))
                 .map(|s| s.to_uppercase())
                 .collect();
             out.sort_by_key(|s| s[3..].parse::<u32>().unwrap_or(0));
@@ -121,7 +122,7 @@ mod imp {
         let mut buf = vec![0u8; 1024];
         let mut req = 0u32;
         unsafe { SetupDiGetDeviceRegistryPropertyW(info, dato, prop, None, Some(&mut buf), Some(&mut req)).ok()? };
-        let w: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
+        let w: Vec<u16> = buf.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
         let s = String::from_utf16_lossy(&w).trim().to_string();
         (!s.is_empty()).then_some(s)
     }
@@ -387,5 +388,4 @@ pub mod simulada {
 #[cfg(not(test))]
 pub use imp::{detectar, enviar, list_printers, print_raw};
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 pub use simulada::{detectar, enviar, list_printers, print_raw};

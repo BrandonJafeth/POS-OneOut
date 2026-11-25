@@ -106,7 +106,7 @@ pub fn leer(bytes: &[u8]) -> Res<Tabla> {
             continue;
         }
         // + 1 por el encabezado.
-        if filas.len() >= MAX_FILAS + 1 {
+        if filas.len() > MAX_FILAS {
             return Err("El archivo tiene más de 20.000 filas y no se lee. Divídalo en partes.".into());
         }
         filas.push(FilaTabla { linea: reg.position().map(|p| p.line()).unwrap_or(0), celdas });
@@ -299,7 +299,8 @@ struct Defectos {
 }
 
 /// Escribe un item ya validado. Devuelve el código interno asignado, si hubo.
-async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defectos, ahora: &str) -> Result<Option<String>, String> {
+/// `precios`: puede cambiar el precio de un producto que ya existe (acción «productos.precio»).
+async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defectos, ahora: &str, precios: bool) -> Result<Option<String>, String> {
     let slug = (!it.slug.is_empty()).then_some(it.slug.as_str());
     let cats = (!it.categorias_origen.is_empty()).then_some(it.categorias_origen.as_str());
     let producto_id = if it.accion == "crear" {
@@ -346,6 +347,12 @@ async fn escribir(c: &mut SqliteConnection, it: &Item, pisar: Pisar, d: &Defecto
             .await
             .map_err(e)?;
         let id = id.ok_or("El producto ya no existe o se eliminó en el POS")?;
+        if !precios {
+            let antes: i64 = sqlx::query_scalar("SELECT precio FROM productos WHERE id = ?").bind(&id).fetch_one(&mut *c).await.map_err(e)?;
+            if antes != it.precio {
+                return Err(crate::permisos::sin_permiso("cambiar precios de venta"));
+            }
+        }
         sqlx::query(
             "UPDATE productos SET web_id = ?, nombre = ?, nombre_busqueda = ?, precio = ?, activo = ?, web_slug = ?, categorias_origen = ?, actualizado_en = ?,
                departamento_id = CASE WHEN ? THEN ? ELSE departamento_id END,
@@ -408,6 +415,7 @@ fn amigable(m: &str) -> String {
 
 pub async fn aplicar(pool: &SqlitePool, a: &Actor, pin: &str, p: &Pedido) -> Res<Resultado> {
     a.exigir("productos.importar", "importar productos")?;
+    let precios = a.puede("productos.precio");
     if p.modo != "todo" && p.modo != "validas" {
         return Err("Modo de importación desconocido".into());
     }
@@ -450,14 +458,14 @@ pub async fn aplicar(pool: &SqlitePool, a: &Actor, pin: &str, p: &Pedido) -> Res
     for it in &validos {
         let r = if p.modo == "validas" {
             sqlx::query("SAVEPOINT fila").execute(&mut *tx).await.map_err(e)?;
-            let r = escribir(&mut tx, it, p.pisar, &d, &ahora).await;
+            let r = escribir(&mut tx, it, p.pisar, &d, &ahora, precios).await;
             if r.is_err() {
                 sqlx::query("ROLLBACK TO fila").execute(&mut *tx).await.map_err(e)?;
             }
             sqlx::query("RELEASE fila").execute(&mut *tx).await.map_err(e)?;
             r
         } else {
-            escribir(&mut tx, it, p.pisar, &d, &ahora).await
+            escribir(&mut tx, it, p.pisar, &d, &ahora, precios).await
         };
         match r {
             Ok(codigo) => {

@@ -10,7 +10,6 @@
 
 use crate::bitacora;
 use crate::config;
-use crate::permisos::puede;
 use crate::sesion::Actor;
 use crate::usuarios;
 use crate::util::{ahora_iso, e, texto, ulid, Res};
@@ -25,13 +24,18 @@ const MAX_CANTIDAD: i64 = 1_000_000;
 const MAX_COSTO: i64 = 100_000_000;
 const MAX_LINEAS: usize = 2000;
 
-fn exigir(a: &Actor) -> Res<()> {
-    a.exigir("inventario", "manejar el inventario")
+fn exigir(a: &Actor, accion: &str) -> Res<()> {
+    a.exigir(accion, "manejar el inventario")
 }
 
 fn exigir_reportes(a: &Actor) -> Res<()> {
-    exigir(a)?;
-    a.exigir("reportes", "ver reportes de inventario")
+    a.exigir("inventario.reportes", "ver reportes de inventario")
+}
+
+/// Costos, valor del inventario y utilidad solo con «inventario.costos» (Etapa 2): sin ella, las
+/// respuestas (y lo que la pantalla exporte de ellas) van sin costo.
+pub fn ve_costos(a: &Actor) -> bool {
+    a.puede("inventario.costos")
 }
 
 pub async fn sucursal_de(c: &mut SqliteConnection, caja_id: &str) -> Res<String> {
@@ -209,6 +213,9 @@ pub struct Entrada {
     /// Guardar el costo de cada línea como último costo del producto.
     #[serde(default)]
     pub actualizar_costo: bool,
+    /// La pantalla genera uno por envío: el mismo dos veces (doble clic) registra una sola entrada.
+    #[serde(default)]
+    pub operacion_id: Option<String>,
 }
 
 fn fecha_valida(f: &str) -> Res<()> {
@@ -220,7 +227,7 @@ fn fecha_valida(f: &str) -> Res<()> {
 }
 
 pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) -> Res<String> {
-    exigir(a)?;
+    exigir(a, "inventario.entradas")?;
     if en.lineas.is_empty() {
         return Err("Agregue al menos un producto".into());
     }
@@ -229,7 +236,17 @@ pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) 
     }
     let factura = texto(&en.factura, 40, "número de factura", false)?;
     fecha_valida(&en.fecha)?;
+    let op = en.operacion_id.as_deref().filter(|s| !s.is_empty());
+    if op.is_some_and(|o| o.len() > 64) {
+        return Err("Operación inválida".into());
+    }
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
+    if let Some(o) = op {
+        let ya: Option<String> = sqlx::query_scalar("SELECT id FROM inventario_entradas WHERE operacion_id = ?").bind(o).fetch_optional(&mut *tx).await.map_err(e)?;
+        if let Some(id) = ya {
+            return Ok(id);
+        }
+    }
     let suc = sucursal_de(&mut tx, caja_id).await?;
     let proveedor = en.proveedor_id.as_deref().filter(|s| !s.is_empty());
     if let Some(p) = proveedor {
@@ -251,7 +268,7 @@ pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) 
     }
     let id = ulid();
     let fecha = ahora_iso();
-    sqlx::query("INSERT INTO inventario_entradas (id, sucursal_id, proveedor_id, factura, fecha, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO inventario_entradas (id, sucursal_id, proveedor_id, factura, fecha, usuario_id, creado_en, operacion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&id)
         .bind(&suc)
         .bind(proveedor)
@@ -259,6 +276,7 @@ pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) 
         .bind(&en.fecha)
         .bind(&a.id)
         .bind(&fecha)
+        .bind(op)
         .execute(&mut *tx)
         .await
         .map_err(e)?;
@@ -278,6 +296,8 @@ pub async fn entrada(pool: &SqlitePool, a: &Actor, caja_id: &str, en: &Entrada) 
             let p = rango(p, 1, MAX_COSTO, &format!("Línea {}: el precio de venta nuevo", i + 1))?;
             let antes: i64 = sqlx::query_scalar("SELECT precio FROM productos WHERE id = ?").bind(&l.producto_id).fetch_one(&mut *tx).await.map_err(e)?;
             if antes != p {
+                // Etapa 2: cambiar el precio de venta es su propia acción (por defecto, solo el dueño).
+                a.exigir("productos.precio", "cambiar precios de venta")?;
                 sqlx::query("UPDATE productos SET precio = ?, actualizado_en = ? WHERE id = ?").bind(p).bind(&fecha).bind(&l.producto_id).execute(&mut *tx).await.map_err(e)?;
                 precios.push(json!({"productoId": l.producto_id, "nombre": nombre, "antes": antes, "despues": p}));
             }
@@ -310,7 +330,7 @@ pub struct LineaComprobante {
 
 /// Encabezado y líneas de una entrada (comprobante y etiquetas).
 pub async fn entrada_obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Value> {
-    exigir(a)?;
+    exigir(a, "inventario.entradas")?;
     let h = sqlx::query("SELECT e.id, e.factura, e.fecha, e.creado_en, p.nombre AS proveedor, u.nombre AS usuario FROM inventario_entradas e LEFT JOIN proveedores p ON p.id = e.proveedor_id JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = ?")
         .bind(id)
         .fetch_optional(pool)
@@ -326,7 +346,7 @@ pub async fn entrada_obtener(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Valu
     .await
     .map_err(e)?
     .iter()
-    .map(|f| LineaComprobante { producto_id: f.get("producto_id"), nombre: f.get("nombre"), precio: f.get("precio"), codigo_barras: f.get("barras"), cantidad: f.get("cantidad"), costo_unitario: f.get("costo_unitario") })
+    .map(|f| LineaComprobante { producto_id: f.get("producto_id"), nombre: f.get("nombre"), precio: f.get("precio"), codigo_barras: f.get("barras"), cantidad: f.get("cantidad"), costo_unitario: f.get::<Option<i64>, _>("costo_unitario").filter(|_| ve_costos(a)) })
     .collect();
     Ok(json!({
         "id": h.get::<String, _>("id"), "factura": h.get::<String, _>("factura"), "fecha": h.get::<String, _>("fecha"),
@@ -366,7 +386,7 @@ async fn motivo_valido(c: &mut SqliteConnection, motivo: &str, detalle: &str) ->
 }
 
 pub async fn ajustar(pool: &SqlitePool, a: &Actor, caja_id: &str, aj: &Ajuste, pin: &str) -> Res<i64> {
-    exigir(a)?;
+    exigir(a, "inventario.ajustes")?;
     if aj.nueva.is_some() == aj.diferencia.is_some() {
         return Err("Indique la cantidad nueva o la diferencia".into());
     }
@@ -374,7 +394,7 @@ pub async fn ajustar(pool: &SqlitePool, a: &Actor, caja_id: &str, aj: &Ajuste, p
         let mut c = pool.acquire().await.map_err(e)?;
         motivo_valido(&mut c, &aj.motivo, &aj.detalle).await?;
     }
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "ajustar inventario").await?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "inventario.ajustes", pin, "ajustar inventario").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let motivo = motivo_valido(&mut tx, &aj.motivo, &aj.detalle).await?;
     let suc = sucursal_de(&mut tx, caja_id).await?;
@@ -414,7 +434,7 @@ pub struct Conteo {
 
 /// El conteo a medias, si hay uno.
 pub async fn conteo_abierto(pool: &SqlitePool, a: &Actor) -> Res<Option<Conteo>> {
-    exigir(a)?;
+    exigir(a, "inventario.conteo")?;
     let f = sqlx::query("SELECT id, departamento_id, datos, actualizado_en FROM inventario_conteos WHERE estado = 'abierto' ORDER BY creado_en DESC LIMIT 1").fetch_optional(pool).await.map_err(e)?;
     Ok(f.map(|f| Conteo {
         id: f.get("id"),
@@ -426,7 +446,7 @@ pub async fn conteo_abierto(pool: &SqlitePool, a: &Actor) -> Res<Option<Conteo>>
 
 /// Crea (sin id) o guarda el conteo a medias. Devuelve su id.
 pub async fn conteo_guardar(pool: &SqlitePool, a: &Actor, caja_id: &str, id: Option<&str>, departamento_id: Option<&str>, datos: &HashMap<String, i64>) -> Res<String> {
-    exigir(a)?;
+    exigir(a, "inventario.conteo")?;
     if datos.len() > 50_000 {
         return Err("Demasiados productos en un conteo".into());
     }
@@ -508,7 +528,7 @@ async fn movido_desde(c: &mut SqliteConnection, producto_id: &str, sucursal_id: 
 /// Productos del conteo (su departamento, o todos) con lo contado contra el sistema.
 /// "Sistema" es lo que había al contar cada producto: lo vendido después no cuenta como diferencia.
 pub async fn conteo_diferencias(pool: &SqlitePool, a: &Actor, id: &str) -> Res<Vec<FilaConteo>> {
-    exigir(a)?;
+    exigir(a, "inventario.conteo")?;
     let f = sqlx::query("SELECT sucursal_id, departamento_id, datos, contado_en FROM inventario_conteos WHERE id = ?").bind(id).fetch_optional(pool).await.map_err(e)?.ok_or("Conteo no encontrado")?;
     let suc: String = f.get("sucursal_id");
     let dep: Option<String> = f.get("departamento_id");
@@ -541,8 +561,8 @@ pub async fn conteo_diferencias(pool: &SqlitePool, a: &Actor, id: &str) -> Res<V
 
 /// Aplica todo lo contado como ajustes con motivo "Conteo". Devuelve cuántos productos cambiaron.
 pub async fn conteo_aplicar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str) -> Res<i64> {
-    exigir(a)?;
-    let dueno = usuarios::confirmar_dueno(pool, a, pin, "aplicar conteo de inventario").await?;
+    exigir(a, "inventario.conteo")?;
+    let dueno = usuarios::confirmar_dueno(pool, a, "inventario.conteo", pin, "aplicar conteo de inventario").await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let f = sqlx::query("SELECT sucursal_id, datos, contado_en FROM inventario_conteos WHERE id = ? AND estado = 'abierto'").bind(id).fetch_optional(&mut *tx).await.map_err(e)?.ok_or("Ese conteo ya se aplicó o se descartó")?;
     let suc: String = f.get("sucursal_id");
@@ -570,7 +590,7 @@ pub async fn conteo_aplicar(pool: &SqlitePool, a: &Actor, id: &str, pin: &str) -
 }
 
 pub async fn conteo_descartar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
-    exigir(a)?;
+    exigir(a, "inventario.conteo")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let n = sqlx::query("UPDATE inventario_conteos SET estado = 'descartado', actualizado_en = ? WHERE id = ? AND estado = 'abierto'").bind(ahora_iso()).bind(id).execute(&mut *tx).await.map_err(e)?.rows_affected();
     if n == 0 {
@@ -621,14 +641,14 @@ fn entero(s: &str) -> Option<i64> {
 
 /// Revisa (aplicar = false) o aplica (aplicar = true, con PIN, solo si no hay ningún error).
 pub async fn inicial(pool: &SqlitePool, a: &Actor, caja_id: &str, filas: &[FilaInicial], aplicar: bool, pin: Option<&str>) -> Res<Vec<PrevistaInicial>> {
-    exigir(a)?;
+    exigir(a, "inventario.conteo")?;
     if filas.is_empty() {
         return Err("El archivo no tiene filas con datos".into());
     }
     if filas.len() > 50_000 {
         return Err("El archivo tiene más de 50.000 filas: divídalo en varios".into());
     }
-    let dueno = if aplicar { Some(usuarios::confirmar_dueno(pool, a, pin.unwrap_or(""), "cargar inventario inicial").await?) } else { None };
+    let dueno = if aplicar { Some(usuarios::confirmar_dueno(pool, a, "inventario.conteo", pin.unwrap_or(""), "cargar inventario inicial").await?) } else { None };
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     let suc = sucursal_de(&mut tx, caja_id).await?;
     let mut vistos: HashMap<String, i64> = HashMap::new();
@@ -713,6 +733,13 @@ pub struct FilaInventario {
 const SELECT_INV: &str = "SELECT p.id, p.nombre, d.nombre AS departamento, p.controla_inventario, COALESCE(x.cantidad, 0) AS existencia, p.stock_minimo, k.costo,
        COALESCE((SELECT group_concat(c.codigo, ' ') FROM codigos c WHERE c.producto_id = p.id), '') AS codigos";
 
+fn sin_costo(a: &Actor, mut x: FilaInventario) -> FilaInventario {
+    if !ve_costos(a) {
+        x.costo = None;
+    }
+    x
+}
+
 fn a_fila(f: &sqlx::sqlite::SqliteRow) -> FilaInventario {
     FilaInventario {
         producto_id: f.get("id"),
@@ -742,7 +769,7 @@ pub struct Filtro {
 
 /// Lista de existencias con filtros (dueño). Devuelve (filas, total).
 pub async fn lista(pool: &SqlitePool, a: &Actor, caja_id: &str, f: &Filtro) -> Res<(Vec<FilaInventario>, i64)> {
-    exigir(a)?;
+    exigir(a, "inventario.ver")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let suc = sucursal_de(&mut c, caja_id).await?;
     let mut w = vec!["p.eliminado_en IS NULL".to_string(), "p.activo = 1".to_string()];
@@ -786,12 +813,12 @@ pub async fn lista(pool: &SqlitePool, a: &Actor, caja_id: &str, f: &Filtro) -> R
         q = q.bind(p);
     }
     let filas = q.bind(f.limite.unwrap_or(100).clamp(1, 1000)).bind(f.desplazamiento.unwrap_or(0).max(0)).fetch_all(&mut *c).await.map_err(e)?;
-    Ok((filas.iter().map(a_fila).collect(), total))
+    Ok((filas.iter().map(a_fila).map(|x| sin_costo(a, x)).collect(), total))
 }
 
 /// Estado de inventario de unos productos (columna de la lista de Productos, dueño).
 pub async fn estado_de(pool: &SqlitePool, a: &Actor, caja_id: &str, ids: &[String]) -> Res<Vec<FilaInventario>> {
-    exigir(a)?;
+    exigir(a, "inventario.ver")?;
     if ids.len() > 1000 {
         return Err(format!("{}Demasiados productos: {}", crate::util::TECNICO, ids.len()));
     }
@@ -808,7 +835,7 @@ pub async fn estado_de(pool: &SqlitePool, a: &Actor, caja_id: &str, ids: &[Strin
     for id in ids {
         q = q.bind(id);
     }
-    Ok(q.fetch_all(&mut *c).await.map_err(e)?.iter().map(a_fila).collect())
+    Ok(q.fetch_all(&mut *c).await.map_err(e)?.iter().map(a_fila).map(|x| sin_costo(a, x)).collect())
 }
 
 #[derive(Serialize, Debug)]
@@ -821,8 +848,7 @@ pub struct ExistenciaVenta {
 /// Lo único que el cajero puede ver del inventario: cuántas unidades hay (sin costo), y solo si la
 /// configuración lo permite (venta_mostrar_existencia). Productos sin control no aparecen.
 pub async fn existencia_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, ids: &[String]) -> Res<Vec<ExistenciaVenta>> {
-    let dueno = puede(a.rol, "inventario");
-    if !dueno && !(puede(a.rol, "venta") && config::booleano(pool, "venta_mostrar_existencia", false).await) {
+    if !a.puede("venta.ver_existencia") {
         return Err(crate::permisos::sin_permiso("ver existencias"));
     }
     if ids.is_empty() {
@@ -844,7 +870,7 @@ pub async fn existencia_venta(pool: &SqlitePool, a: &Actor, caja_id: &str, ids: 
 
 /// Aviso discreto al dueño: cuántos productos están en o bajo su mínimo (o negativos).
 pub async fn alertas(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<i64> {
-    exigir(a)?;
+    exigir(a, "inventario.ver")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let suc = sucursal_de(&mut c, caja_id).await?;
     sqlx::query_scalar(
@@ -859,8 +885,10 @@ pub async fn alertas(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<i64> {
 }
 
 /// Control, mínimo y último costo de un producto (ficha del producto, dueño).
+/// Control, mínimo y costo de un producto. Escribe: «opciones de inventario», no «ver» (M4). Sin
+/// «inventario.costos» el costo no se toca (la pantalla no lo ve y mandaría vacío).
 pub async fn producto_guardar(pool: &SqlitePool, a: &Actor, producto_id: &str, controla: bool, minimo: i64, costo: Option<i64>) -> Res<()> {
-    exigir(a)?;
+    exigir(a, "inventario.opciones")?;
     rango(minimo, 0, MAX_CANTIDAD, "Mínimo")?;
     if let Some(c) = costo {
         rango(c, 0, MAX_COSTO, "Costo")?;
@@ -870,6 +898,7 @@ pub async fn producto_guardar(pool: &SqlitePool, a: &Actor, producto_id: &str, c
     let fecha = ahora_iso();
     sqlx::query("UPDATE productos SET controla_inventario = ?, stock_minimo = ?, actualizado_en = ? WHERE id = ?").bind(controla as i64).bind(minimo).bind(&fecha).bind(producto_id).execute(&mut *tx).await.map_err(e)?;
     let antes_costo: Option<i64> = sqlx::query_scalar("SELECT costo FROM producto_costos WHERE producto_id = ?").bind(producto_id).fetch_optional(&mut *tx).await.map_err(e)?;
+    let costo = if ve_costos(a) { costo } else { antes_costo };
     match costo {
         Some(c) => guardar_costo(&mut tx, producto_id, c, &fecha).await?,
         None => {
@@ -917,7 +946,7 @@ fn a_kardex(f: &sqlx::sqlite::SqliteRow) -> FilaKardex {
 
 /// Kardex de un producto entre dos fechas ISO (desde incluida, hasta excluida).
 pub async fn kardex(pool: &SqlitePool, a: &Actor, producto_id: &str, desde: &str, hasta: &str) -> Res<Vec<FilaKardex>> {
-    exigir(a)?;
+    exigir(a, "inventario.ver")?;
     let filas = sqlx::query(&format!("{SELECT_KARDEX} WHERE m.producto_id = ? AND m.fecha >= ? AND m.fecha < ? ORDER BY m.rowid DESC LIMIT 5000"))
         .bind(producto_id)
         .bind(desde)
@@ -925,7 +954,12 @@ pub async fn kardex(pool: &SqlitePool, a: &Actor, producto_id: &str, desde: &str
         .fetch_all(pool)
         .await
         .map_err(e)?;
-    Ok(filas.iter().map(a_kardex).collect())
+    Ok(filas.iter().map(a_kardex).map(|mut k| {
+        if !ve_costos(a) {
+            k.costo_unitario = None;
+        }
+        k
+    }).collect())
 }
 
 // ─────────── Reportes (dueño con permiso de reportes) ───────────
@@ -974,6 +1008,7 @@ pub struct Valorizado {
 /// Existencia × último costo, por departamento. Lo negativo cuenta como 0.
 pub async fn reporte_valorizado(pool: &SqlitePool, a: &Actor, caja_id: &str) -> Res<Valorizado> {
     exigir_reportes(a)?;
+    a.exigir("inventario.costos", "ver el valor del inventario")?;
     let mut c = pool.acquire().await.map_err(e)?;
     let suc = sucursal_de(&mut c, caja_id).await?;
     let base = "FROM productos p JOIN departamentos d ON d.id = p.departamento_id JOIN existencias x ON x.producto_id = p.id AND x.sucursal_id = ?1 LEFT JOIN producto_costos k ON k.producto_id = p.id
@@ -1006,7 +1041,12 @@ pub async fn reporte_movimientos(pool: &SqlitePool, a: &Actor, desde: &str, hast
         .fetch_all(pool)
         .await
         .map_err(e)?;
-    Ok(filas.iter().map(a_kardex).collect())
+    Ok(filas.iter().map(a_kardex).map(|mut k| {
+        if !ve_costos(a) {
+            k.costo_unitario = None;
+        }
+        k
+    }).collect())
 }
 
 // ─────────── Proveedores ───────────
@@ -1024,13 +1064,13 @@ pub struct Proveedor {
 }
 
 pub async fn proveedores(pool: &SqlitePool, a: &Actor) -> Res<Vec<Proveedor>> {
-    exigir(a)?;
+    exigir(a, "inventario.entradas")?;
     let f: Vec<(String, String, String, String)> = sqlx::query_as("SELECT id, nombre, telefono, notas FROM proveedores WHERE eliminado_en IS NULL ORDER BY nombre").fetch_all(pool).await.map_err(e)?;
     Ok(f.into_iter().map(|(id, nombre, telefono, notas)| Proveedor { id, nombre, telefono, notas }).collect())
 }
 
 pub async fn proveedor_guardar(pool: &SqlitePool, a: &Actor, p: &Proveedor) -> Res<String> {
-    exigir(a)?;
+    exigir(a, "inventario.entradas")?;
     let nombre = texto(&p.nombre, 100, "el nombre", true)?;
     let telefono = texto(&p.telefono, 30, "teléfono", false)?;
     let notas = texto(&p.notas, 300, "notas", false)?;
@@ -1055,7 +1095,7 @@ pub async fn proveedor_guardar(pool: &SqlitePool, a: &Actor, p: &Proveedor) -> R
 }
 
 pub async fn proveedor_eliminar(pool: &SqlitePool, a: &Actor, id: &str) -> Res<()> {
-    exigir(a)?;
+    exigir(a, "inventario.entradas")?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(e)?;
     // Ley 8968: si es una persona, sus datos de contacto no se guardan más de lo necesario. El nombre
     // queda porque las entradas ya registradas (compras) lo necesitan como respaldo contable.
@@ -1163,7 +1203,11 @@ mod tests {
     async fn sin_existencia_bloquea_salvo_pin_del_dueno() {
         let (bd, _, dueno, cajero) = base_con_usuarios().await;
         let p = &bd.pool;
-        config::guardar(p, &dueno, "permitir_vender_sin_existencia", &json!(false)).await.unwrap();
+        // Vender sin existencia apagado (política del cajero; el dueño sigue el mismo tope).
+        let sin = |d: &mut crate::politica::Datos| {
+            d.cajero.insert("venta.sin_existencia".into(), crate::acciones::Politica::PIN);
+        };
+        let (dueno, cajero) = (crate::politica::con(&dueno, sin), crate::politica::con(&cajero, sin));
         let lapiz = prod(p, "Lápiz", true).await;
         abrir(p, &cajero, CAJA_1, &conteo(&[(1000, 5)])).await.unwrap();
         let mut c = p.acquire().await.unwrap();
@@ -1174,7 +1218,9 @@ mod tests {
         let err = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &efectivo(&e)).await.unwrap_err();
         // Sin la opción de ver existencias, el cajero no se entera de cuántas hay.
         assert!(err.starts_with(SIN_EXISTENCIA) && err.contains("Lápiz") && !err.contains("hay 1"), "{err}");
-        config::guardar(p, &dueno, "venta_mostrar_existencia", &json!(true)).await.unwrap();
+        let cajero = crate::politica::con(&cajero, |d| {
+            d.cajero.insert("venta.ver_existencia".into(), crate::acciones::Politica::SI);
+        });
         let err = cobrar(p, &cajero, CAJA_1, &esp.id, &e, &efectivo(&e)).await.unwrap_err();
         assert!(err.contains("Lápiz (hay 1)"), "{err}");
         // El aviso previo al cobro dice lo mismo; lo que alcanza no avisa.
@@ -1204,6 +1250,7 @@ mod tests {
         let regla = prod(p, "Regla", false).await;
         let prov = proveedor_guardar(p, &dueno, &Proveedor { id: String::new(), nombre: "Distribuidora X".into(), telefono: "2222-2222".into(), notas: String::new() }).await.unwrap();
         let en = |actualizar_costo: bool, precio: Option<i64>| Entrada {
+            operacion_id: None,
             proveedor_id: Some(prov.clone()),
             factura: "F-100".into(),
             fecha: "2026-11-08".into(),
@@ -1352,7 +1399,7 @@ mod tests {
         assert_eq!(n, 2);
         // Fecha de factura futura y cantidad negativa en un ajuste: rechazadas con mensaje claro.
         let a1 = prod(p, "Alfa", true).await;
-        let futura = Entrada { proveedor_id: None, factura: String::new(), fecha: "2999-01-01".into(), lineas: vec![LineaEntrada { producto_id: a1.clone(), cantidad: 1, costo_unitario: None, precio_nuevo: None }], actualizar_costo: false };
+        let futura = Entrada { operacion_id: None, proveedor_id: None, factura: String::new(), fecha: "2999-01-01".into(), lineas: vec![LineaEntrada { producto_id: a1.clone(), cantidad: 1, costo_unitario: None, precio_nuevo: None }], actualizar_costo: false };
         assert!(entrada(p, &dueno, CAJA_1, &futura).await.unwrap_err().contains("todavía no llega"));
         let neg = Ajuste { producto_id: a1.clone(), nueva: Some(-1), diferencia: None, motivo: "Daño".into(), detalle: String::new() };
         assert!(ajustar(p, &dueno, CAJA_1, &neg, PIN_DUENO).await.unwrap_err().contains("de 0 a 1.000.000"));
@@ -1409,7 +1456,9 @@ mod tests {
             assert!(existencia_venta(p, quien, CAJA_1, &ids).await.is_err());
         }
         // Con la configuración activa, el cajero ve cuántas hay. Nada más (el tipo no lleva costo).
-        config::guardar(p, &dueno, "venta_mostrar_existencia", &json!(true)).await.unwrap();
+        let cajero = crate::politica::con(&cajero, |d| {
+            d.cajero.insert("venta.ver_existencia".into(), crate::acciones::Politica::SI);
+        });
         let v = serde_json::to_value(existencia_venta(p, &cajero, CAJA_1, &ids).await.unwrap()).unwrap();
         assert_eq!(v, json!([{"productoId": a1, "existencia": 0}]));
         assert!(existencia_venta(p, &tec, CAJA_1, &ids).await.is_err());

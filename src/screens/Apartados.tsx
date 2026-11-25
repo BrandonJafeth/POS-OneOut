@@ -32,6 +32,7 @@ import { imprimirComprobante } from "../lib/cuentas/imprimir";
 import AyudaInfo from "../ui/AyudaInfo";
 import { conMiles, leerMontoEntero } from "../lib/texto";
 import { fechaHora, monto } from "../lib/tickets";
+import { politicaDe } from "../lib/permisos";
 import Button from "../ui/Button";
 import CampoMonto from "../ui/CampoMonto";
 import EmptyState from "../ui/EmptyState";
@@ -346,8 +347,12 @@ function DialogoAccion(p: { accion: Accion; d: CuentaDetalle; reglas: Reglas; on
   const [error, setError] = useState("");
   const n = leerMontoEntero(montoTxt) ?? 0;
   const ef = leerMontoEntero(efectivoTxt) ?? 0;
-  // Todas cambian lo prometido al cliente o el dinero: todas piden el PIN del dueño.
-  const conPin = true;
+  // Cambian lo prometido al cliente o el dinero: piden el PIN del dueño, salvo cancelar, condonar y
+  // anular un abono hasta el monto que la política le dé a este usuario (Etapa 2; Rust decide igual).
+  const accionMonto = a.tipo === "cancelar" ? "cuentas.cancelar" : a.tipo === "condonar" ? "cuentas.condonar" : a.tipo === "anular" ? "cuentas.anular_abono" : null;
+  const montoAccion = a.tipo === "cancelar" ? n : a.tipo === "condonar" ? k.saldo : a.tipo === "anular" ? Number(a.abono.monto) : 0;
+  const pol = accionMonto ? politicaDe(accionMonto) : undefined;
+  const conPin = !pol || pol.nivel === "pin" || pol.nivel === "no" || pol.limites.montoMax == null || montoAccion > pol.limites.montoMax;
   // Condonar un apartado registra una venta: sin caja abierta, se dice antes de pedir el PIN.
   const { caja } = useSesion();
   const sinCaja = a.tipo === "condonar" && k.tipo === "apartado" && !caja?.turno;

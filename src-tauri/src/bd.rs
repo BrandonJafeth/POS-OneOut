@@ -49,6 +49,8 @@ pub const MIGRACIONES: &[(i64, &str, &str)] = &[
     (22, "descripcion_apartado", include_str!("../../src/db/migraciones/0022_descripcion_apartado.sql")),
     (23, "code128_impresora", include_str!("../../src/db/migraciones/0023_code128_impresora.sql")),
     (24, "proformas", include_str!("../../src/db/migraciones/0024_proformas.sql")),
+    (25, "seguridad_versiones", include_str!("../../src/db/migraciones/0025_seguridad_versiones.sql")),
+    (26, "auditoria_094", include_str!("../../src/db/migraciones/0026_auditoria_094.sql")),
 ];
 
 /// El SQL de una migración sin CR. sqlx guarda una suma de cada migración aplicada y se niega a
@@ -101,6 +103,13 @@ pub struct Sentencia {
     pub devuelve: bool,
 }
 
+/// Tope de filas de bd_leer (las listas más grandes de la pantalla son de miles).
+const MAX_FILAS_LECTURA: usize = 200_000;
+
+/// Prefijos de acciones que la pantalla puede anotar en la bitácora por `bd_lote` (junto a sus cambios
+/// de catálogo). El resto lo escribe Rust.
+const BITACORA_PANTALLA: &[&str] = &["producto.", "codigo.", "departamento.", "forma_pago.", "banco."];
+
 pub struct Bd {
     pub pool: SqlitePool,
     pub lectura: SqlitePool,
@@ -109,6 +118,8 @@ pub struct Bd {
     registro: HashMap<String, Sentencia>,
 }
 
+/// expect justificado: sentencias.json va embebido al compilar (no lo cambia nadie en la PC del
+/// cliente) y la prueba todo_comando_tiene_accion lo lee entero: si estuviera mal, no se entrega.
 fn registro() -> HashMap<String, Sentencia> {
     let v: Map<String, Value> = serde_json::from_str(include_str!("../../src/db/sentencias.json")).expect("sentencias.json inválido");
     v.into_iter()
@@ -143,11 +154,10 @@ impl Bd {
         std::fs::create_dir_all(dir).map_err(e)?;
         let ruta = dir.join("pos.db");
         let destino = format!("sqlite:{}", ruta.to_string_lossy());
-        if let Some(k) = &clave {
-            if ruta.exists() && es_texto_plano(&ruta) {
+        if let Some(k) = &clave
+            && ruta.exists() && es_texto_plano(&ruta) {
                 cifrar_existente(&ruta, k).await?;
             }
-        }
         let opts = opciones(&destino, clave.as_ref())?;
         let pool = SqlitePoolOptions::new().max_connections(4).connect_with(opts.clone()).await.map_err(|err| {
             format!("No se pudo abrir la base de datos ({err}). Si cambió el usuario de Windows, restaure un respaldo.")
@@ -194,8 +204,16 @@ impl Bd {
         for p in params {
             q = bind(q, p);
         }
-        let filas = q.fetch_all(&self.lectura).await.map_err(e)?;
-        Ok(filas.iter().map(fila_json).collect())
+        // Con tope de filas (B4): una consulta que no termina (WITH RECURSIVE…) no agota la memoria.
+        let mut st = q.fetch(&self.lectura);
+        let mut out = Vec::new();
+        while let Some(f) = std::future::poll_fn(|cx| st.as_mut().poll_next(cx)).await {
+            out.push(fila_json(&f.map_err(e)?));
+            if out.len() > MAX_FILAS_LECTURA {
+                return Err(format!("{}La consulta devuelve más de {MAX_FILAS_LECTURA} filas", crate::util::TECNICO));
+            }
+        }
+        Ok(out)
     }
 
     /// Escrituras de catálogo por nombre, en una transacción. Devuelve filas afectadas (o filas, si la sentencia devuelve).
@@ -206,6 +224,12 @@ impl Bd {
             if op.id == "bitacora.registrar" {
                 // [usuario (ignorado: se usa el de la sesión), acción, entidad, entidadId, detalle JSON]
                 let s = |k: usize| op.params.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                // Solo lo que la pantalla anota junto a sus cambios de catálogo (M3): avisos, permisos,
+                // seguridad y lo demás los escribe Rust.
+                let accion = s(1).unwrap_or_default();
+                if !BITACORA_PANTALLA.iter().any(|p| accion.starts_with(p)) {
+                    return Err(crate::permisos::sin_permiso("anotar eso en la bitácora"));
+                }
                 let detalle: Value = s(4).and_then(|d| serde_json::from_str(&d).ok()).unwrap_or(Value::Null);
                 bitacora::registrar(&mut tx, Some(&actor.id), &s(1).unwrap_or_default(), &s(2).unwrap_or_default(), s(3).as_deref(), &detalle).await?;
                 out.push(Value::from(1));
@@ -213,6 +237,15 @@ impl Bd {
             }
             let st = self.registro.get(&op.id).ok_or_else(|| format!("{}Operación desconocida: {}", crate::util::TECNICO, op.id))?;
             actor.exigir(&st.permiso, "hacer este cambio")?;
+            // Cambiar el precio o el descuento fijo de un producto es su propia acción (Etapa 2).
+            if op.id == "producto.editar" {
+                let id = op.params.get(10).and_then(Value::as_str).unwrap_or_default();
+                let antes: Option<(i64, i64)> = sqlx::query_as("SELECT precio, descuento_pct FROM productos WHERE id = ?").bind(id).fetch_optional(&mut *tx).await.map_err(e)?;
+                let nuevo = (op.params.get(3).and_then(Value::as_i64), op.params.get(8).and_then(Value::as_i64));
+                if antes.is_some_and(|(p, d)| nuevo != (Some(p), Some(d))) {
+                    actor.exigir("productos.precio", "cambiar precios de venta")?;
+                }
+            }
             let mut q = sqlx::query(&st.sql);
             for p in &op.params {
                 q = bind(q, p);
@@ -297,8 +330,8 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
             env!("CARGO_PKG_VERSION")
         ));
     }
-    if let Some(d) = dir {
-        if aplicadas > 0 && aplicadas < ultima {
+    if let Some(d) = dir
+        && aplicadas > 0 && aplicadas < ultima {
             if hay_turno_abierto(pool).await {
                 return Err("Hay una caja abierta. Para actualizar: vuelva a instalar la versión anterior, cierre la caja y luego instale esta versión.".into());
             }
@@ -308,10 +341,11 @@ pub(crate) async fn migrar(pool: &SqlitePool, dir: Option<&Path>, ruta: &Path) -
             let marca = chrono::Local::now().format("%Y%m%d-%H%M%S");
             std::fs::copy(ruta, carpeta.join(format!("pos-antes-v{}-{marca}.db", aplicadas + 1))).map_err(e)?;
         }
-    }
     reparar_sumas(pool).await?;
     Migrator::new(Lista(MIGRACIONES.len())).await.map_err(e)?.run(pool).await.map_err(e)?;
     bitacora::encadenar_pendientes(pool).await?;
+    // Permisos: la versión 1 (igual a la 0.9.2) si la base todavía no tiene ninguna.
+    crate::politica::asegurar_inicial(pool).await?;
     Ok(())
 }
 
@@ -442,7 +476,7 @@ mod tests {
     use crate::permisos::Rol;
 
     fn actor(rol: Rol) -> Actor {
-        Actor { id: "U".into(), rol, nombre: "x".into() }
+        Actor::nuevo("U", rol, "x")
     }
 
     /// Una base migrada con los .sql en LF tiene que seguir abriendo con un build hecho desde un

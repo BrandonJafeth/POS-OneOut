@@ -1,6 +1,6 @@
 # cargo audit revisa Cargo.lock completo, también crates que NO se compilan para Windows
 # o que son opcionales de otras dependencias. Cada excepción está verificada con:
-#   cargo tree -i <crate> --target all     (debe decir "nothing to print")
+#   cargo tree -i <crate> --target x86_64-pc-windows-msvc     (debe decir "nothing to print")
 [advisories]
 ignore = [
     # rsa (Marvin): solo lo trae sqlx-mysql, driver opcional de sqlx que este programa no activa
@@ -10,4 +10,9 @@ ignore = [
     # El programa se compila y entrega solo para Windows.
     "RUSTSEC-2024-0370",
     "RUSTSEC-2024-0429",
+    # Estas dos SÍ se compilan: excepciones aceptadas con su análisis en SEGURIDAD.md («Dependencias»).
+    # SQLite de SQLCipher (libsqlite3-sys 0.30 fijado por sqlx 0.8.6; el arreglo pide sqlx 0.9).
+    "RUSTSEC-2026-0459",
+    # chrono sin mantenimiento (informativo). Pendiente migrar a time o jiff.
+    "RUSTSEC-2026-0543",
 ]

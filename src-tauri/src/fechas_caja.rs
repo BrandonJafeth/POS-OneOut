@@ -429,7 +429,7 @@ async fn otro_cajero_cierra_el_turno_tardio_y_abre_el_suyo() {
     let p = &bd.pool;
     modo(p, &dueno, false).await;
     let m = usuarios::crear(p, &tec, "Marta", Rol::Cajero, "3691").await.unwrap();
-    let marta = Actor { id: m.id, rol: Rol::Cajero, nombre: "Marta".into() };
+    let marta = Actor::nuevo(m.id, Rol::Cajero, "Marta");
     reloj("vie 08:00");
     abrir(p, &luis, CAJA_1, &un()).await.unwrap();
     reloj("vie 18:40");
@@ -476,7 +476,7 @@ async fn el_z_cuadra_en_cientos_de_turnos() {
     crate::impresoras::tests::dos_impresoras(p, &dueno, "ZFECHAS").await; // gaveta simulada para la "no venta"
     sqlx::query("INSERT INTO departamentos (id, codigo, nombre, orden) VALUES (?, '99', 'Regalos', 9)").bind(DEP2).execute(p).await.unwrap();
     let m = usuarios::crear(p, &tec, "Marta", Rol::Cajero, "3691").await.unwrap();
-    let marta = Actor { id: m.id, rol: Rol::Cajero, nombre: "Marta".into() };
+    let marta = Actor::nuevo(m.id, Rol::Cajero, "Marta");
     // Precios que no son múltiplos de 5 (redondeo) y uno con 10 % fijo de producto.
     let prods = [(producto(p, DEP, 1235, 0).await, DEP, 1235, 0), (producto(p, DEP2, 2500, 10).await, DEP2, 2500, 10), (producto(p, DEP2, 780, 0).await, DEP2, 780, 0)];
     let mut r = Azar(97);
@@ -538,13 +538,12 @@ async fn el_z_cuadra_en_cientos_de_turnos() {
             }
         }
         // Anulación de una venta de un turno anterior, con devolución en efectivo (sale como salida).
-        if r.n(4) == 0 {
-            if let Some((vid, ef)) = anteriores.pop() {
+        if r.n(4) == 0
+            && let Some((vid, ef)) = anteriores.pop() {
                 let dev = ef.min(esperado);
                 anular(p, &dueno, CAJA_1, &vid, PIN, "Devolución de otro día", dev).await.unwrap();
                 esperado -= dev;
             }
-        }
         match r.n(5) {
             0 => {
                 let m = 500 + 100 * r.n(30);
